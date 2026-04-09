@@ -22,6 +22,8 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
 - Release process: `RELEASE.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
+- Security disclosure policy: `SECURITY.md`
 
 ## Project Layout
 
@@ -115,6 +117,13 @@ python3 scripts/load/evaluate_threshold_reassessment.py
 - `.github/workflows/performance.yml` - performance benches, gating, reporting, optional publishing
 - `.github/workflows/benchmark-storage-sync.yml` - storage sync template for S3/GCS/Azure
 - `.github/workflows/release-version-check.yml` - enforces `VERSION` and latest `CHANGELOG.md` release heading stay in sync
+
+## GitHub community templates
+
+- `.github/ISSUE_TEMPLATE/bug_report.yml`
+- `.github/ISSUE_TEMPLATE/feature_request.yml`
+- `.github/ISSUE_TEMPLATE/config.yml`
+- `.github/pull_request_template.md`
 
 ## Status
 

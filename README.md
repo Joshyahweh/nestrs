@@ -14,6 +14,15 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - Production controls: backpressure, metrics, request tracing, security runbooks
 - Performance hardening workflows: benchmark gating, history tracking, dashboard artifacts
 
+## Ownership and release
+
+- Maintainer / code owner: @Joshyahweh
+- Current workspace version: `0.1.0` (from `VERSION` and workspace package settings)
+- Release notes template: `.github/release-template.md`
+- Changelog: `CHANGELOG.md`
+- Contribution guide: `CONTRIBUTING.md`
+- Release process: `RELEASE.md`
+
 ## Project Layout
 
 - `nestrs/` - main framework crate (public runtime API)

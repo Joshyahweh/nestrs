@@ -53,6 +53,13 @@ Use semantic versioning:
 
 Update crate versions consistently where required by workspace policy.
 
+Release metadata consistency is enforced in CI by:
+
+- `.github/workflows/release-version-check.yml`
+- `scripts/release/check_version_sync.py`
+
+Rule: `VERSION` must match the latest released heading in `CHANGELOG.md` (and `Unreleased` must exist).
+
 ## Changelog and notes
 
 Prepare release notes with:

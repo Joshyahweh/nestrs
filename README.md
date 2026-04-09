@@ -114,6 +114,7 @@ python3 scripts/load/evaluate_threshold_reassessment.py
 - `.github/workflows/security.yml` - security checks
 - `.github/workflows/performance.yml` - performance benches, gating, reporting, optional publishing
 - `.github/workflows/benchmark-storage-sync.yml` - storage sync template for S3/GCS/Azure
+- `.github/workflows/release-version-check.yml` - enforces `VERSION` and latest `CHANGELOG.md` release heading stay in sync
 
 ## Status
 

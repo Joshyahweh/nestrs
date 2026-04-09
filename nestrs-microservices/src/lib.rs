@@ -31,8 +31,16 @@ impl TransportError {
 
 #[async_trait]
 pub trait Transport: Send + Sync + 'static {
-    async fn send_json(&self, pattern: &str, payload: serde_json::Value) -> Result<serde_json::Value, TransportError>;
-    async fn emit_json(&self, pattern: &str, payload: serde_json::Value) -> Result<(), TransportError>;
+    async fn send_json(
+        &self,
+        pattern: &str,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, TransportError>;
+    async fn emit_json(
+        &self,
+        pattern: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), TransportError>;
 }
 
 /// Nest-like client proxy wrapper over a configured [`Transport`].

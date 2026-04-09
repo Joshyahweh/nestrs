@@ -37,13 +37,27 @@ fn generate_service_nest_style() {
     let out = unique_tmp_dir("service-nest");
     fs::create_dir_all(&out).expect("create temp output dir");
 
-    run_cli(&["g", "service", "learner-stats", "--style", "nest", "--path", out.to_str().expect("utf8 path")]);
+    run_cli(&[
+        "g",
+        "service",
+        "learner-stats",
+        "--style",
+        "nest",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
 
     let path = out.join("learner_stats.service.rs");
     assert_exists(&path);
     let src = fs::read_to_string(&path).expect("read service file");
-    assert!(src.contains("#[derive(Default)]"), "service needs Default for #[injectable]");
-    assert!(src.contains("#[injectable]"), "service should use #[injectable]");
+    assert!(
+        src.contains("#[derive(Default)]"),
+        "service needs Default for #[injectable]"
+    );
+    assert!(
+        src.contains("#[injectable]"),
+        "service should use #[injectable]"
+    );
 }
 
 #[test]
@@ -109,12 +123,23 @@ fn generate_dto_nest_style() {
     let out = unique_tmp_dir("dto-nest");
     fs::create_dir_all(&out).expect("create temp output dir");
 
-    run_cli(&["g", "dto", "invite-user", "--style", "nest", "--path", out.to_str().expect("utf8 path")]);
+    run_cli(&[
+        "g",
+        "dto",
+        "invite-user",
+        "--style",
+        "nest",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
 
     let dto_file = out.join("invite_user.dto.rs");
     assert_exists(&dto_file);
     let content = fs::read_to_string(dto_file).expect("read dto file");
-    assert!(content.contains("#[dto]"), "dto template should include #[dto]");
+    assert!(
+        content.contains("#[dto]"),
+        "dto template should include #[dto]"
+    );
 }
 
 #[test]
@@ -122,11 +147,51 @@ fn generate_cross_cutting_files_rust_style() {
     let out = unique_tmp_dir("cross-cutting-rust");
     fs::create_dir_all(&out).expect("create temp output dir");
 
-    run_cli(&["g", "guard", "auth", "--style", "rust", "--path", out.to_str().expect("utf8 path")]);
-    run_cli(&["g", "pipe", "validation", "--style", "rust", "--path", out.to_str().expect("utf8 path")]);
-    run_cli(&["g", "filter", "http_exception", "--style", "rust", "--path", out.to_str().expect("utf8 path")]);
-    run_cli(&["g", "interceptor", "logging", "--style", "rust", "--path", out.to_str().expect("utf8 path")]);
-    run_cli(&["g", "strategy", "jwt", "--style", "rust", "--path", out.to_str().expect("utf8 path")]);
+    run_cli(&[
+        "g",
+        "guard",
+        "auth",
+        "--style",
+        "rust",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
+    run_cli(&[
+        "g",
+        "pipe",
+        "validation",
+        "--style",
+        "rust",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
+    run_cli(&[
+        "g",
+        "filter",
+        "http_exception",
+        "--style",
+        "rust",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
+    run_cli(&[
+        "g",
+        "interceptor",
+        "logging",
+        "--style",
+        "rust",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
+    run_cli(&[
+        "g",
+        "strategy",
+        "jwt",
+        "--style",
+        "rust",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
 
     let auth_guard = out.join("auth_guard.rs");
     assert_exists(&auth_guard);
@@ -146,10 +211,42 @@ fn generate_phase4_like_files_nest_style() {
     let out = unique_tmp_dir("phase4-nest");
     fs::create_dir_all(&out).expect("create temp output dir");
 
-    run_cli(&["g", "resolver", "users", "--style", "nest", "--path", out.to_str().expect("utf8 path")]);
-    run_cli(&["g", "gateway", "chat", "--style", "nest", "--path", out.to_str().expect("utf8 path")]);
-    run_cli(&["g", "microservice", "billing", "--style", "nest", "--path", out.to_str().expect("utf8 path")]);
-    run_cli(&["g", "transport", "nats", "--style", "nest", "--path", out.to_str().expect("utf8 path")]);
+    run_cli(&[
+        "g",
+        "resolver",
+        "users",
+        "--style",
+        "nest",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
+    run_cli(&[
+        "g",
+        "gateway",
+        "chat",
+        "--style",
+        "nest",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
+    run_cli(&[
+        "g",
+        "microservice",
+        "billing",
+        "--style",
+        "nest",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
+    run_cli(&[
+        "g",
+        "transport",
+        "nats",
+        "--style",
+        "nest",
+        "--path",
+        out.to_str().expect("utf8 path"),
+    ]);
 
     assert_exists(&out.join("users.resolver.rs"));
     assert_exists(&out.join("chat.gateway.rs"));
@@ -222,7 +319,10 @@ fn force_overwrites_existing_file() {
         ])
         .status()
         .expect("run cli without force");
-    assert!(!status_without_force.success(), "expected failure when file exists without --force");
+    assert!(
+        !status_without_force.success(),
+        "expected failure when file exists without --force"
+    );
 
     run_cli(&[
         "g",
@@ -262,7 +362,10 @@ fn resource_wires_parent_lib_rs() {
     ]);
 
     let content = fs::read_to_string(lib_rs).expect("read updated lib.rs");
-    assert!(content.contains("pub mod billing;"), "expected module insertion");
+    assert!(
+        content.contains("pub mod billing;"),
+        "expected module insertion"
+    );
     assert!(
         content.contains("use crate::billing::BillingModule;"),
         "expected use insertion"
@@ -309,7 +412,10 @@ fn quiet_suppresses_non_error_output() {
 
     assert!(output.status.success(), "quiet command should succeed");
     let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
-    assert!(stdout.trim().is_empty(), "quiet mode should suppress stdout");
+    assert!(
+        stdout.trim().is_empty(),
+        "quiet mode should suppress stdout"
+    );
     assert_exists(&out.join("audit.service.rs"));
 }
 
@@ -319,11 +425,7 @@ fn new_project_scaffolds_files() {
     fs::create_dir_all(&parent).expect("create temp parent");
     let project_dir = parent.join("demo_app");
 
-    let output = run_cli_output(&[
-        "new",
-        project_dir.to_str().expect("utf8 path"),
-        "--no-git",
-    ]);
+    let output = run_cli_output(&["new", project_dir.to_str().expect("utf8 path"), "--no-git"]);
 
     assert!(output.status.success(), "new command should succeed");
     assert_exists(&project_dir.join("Cargo.toml"));

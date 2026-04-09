@@ -20,7 +20,11 @@ impl Transport for InMemoryTransport {
         }))
     }
 
-    async fn emit_json(&self, _pattern: &str, _payload: serde_json::Value) -> Result<(), TransportError> {
+    async fn emit_json(
+        &self,
+        _pattern: &str,
+        _payload: serde_json::Value,
+    ) -> Result<(), TransportError> {
         Ok(())
     }
 }

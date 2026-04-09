@@ -53,9 +53,9 @@ struct FeatureModule;
 
 #[tokio::test]
 async fn create_with_modules_merges_dynamic_feature_router() {
-    let router = NestFactory::create_with_modules::<RootModule, _>([
-        DynamicModule::from_module::<FeatureModule>(),
-    ])
+    let router = NestFactory::create_with_modules::<RootModule, _>([DynamicModule::from_module::<
+        FeatureModule,
+    >()])
     .into_router();
 
     let root = router
@@ -83,4 +83,3 @@ async fn create_with_modules_merges_dynamic_feature_router() {
         .expect("router should serve request");
     assert_eq!(feature.status(), StatusCode::OK);
 }
-

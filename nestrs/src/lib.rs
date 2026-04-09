@@ -1,11 +1,11 @@
 pub use async_trait::async_trait;
-pub use nestrs_macros::{
-    all, controller, delete, dto, get, head, http_code, injectable, module, options, patch, post, put, redirect, response_header,
-    event_pattern, message_pattern, on_event, roles, set_metadata, use_filters, use_guards, use_interceptors, use_pipes, version,
-    NestDto,
-};
 use axum::body::{to_bytes, Body};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+pub use nestrs_macros::{
+    all, controller, delete, dto, event_pattern, get, head, http_code, injectable, message_pattern,
+    module, on_event, options, patch, post, put, redirect, response_header, roles, set_metadata,
+    use_filters, use_guards, use_interceptors, use_pipes, version, NestDto,
+};
 use std::sync::OnceLock;
 use validator::Validate;
 
@@ -61,8 +61,7 @@ pub use request_context::{RequestContext, RequestContextMissing};
 macro_rules! interceptor_layer {
     ($I:ty) => {
         ::axum::middleware::from_fn(
-            |req: ::axum::extract::Request,
-             next: ::axum::middleware::Next| async move {
+            |req: ::axum::extract::Request, next: ::axum::middleware::Next| async move {
                 let i: $I = ::core::default::Default::default();
                 $crate::Interceptor::intercept(&i, req, next).await
             },
@@ -72,31 +71,36 @@ macro_rules! interceptor_layer {
 
 pub mod prelude {
     pub use crate::core::{
-        AuthError, AuthStrategy, CanActivate, Controller, DynamicModule, GuardError, Injectable, MetadataRegistry, Module,
-        PipeTransform, ProviderRegistry,
+        AuthError, AuthStrategy, CanActivate, Controller, DynamicModule, GuardError, Injectable,
+        MetadataRegistry, Module, PipeTransform, ProviderRegistry,
     };
-    pub use crate::{
-        all, controller, delete, dto, get, head, impl_routes, injectable, module, options, patch, post, put, roles, set_metadata,
-        use_filters, use_guards, use_interceptors, use_pipes, event_pattern, message_pattern, on_event, BadGatewayException,
-        BadRequestException, ConflictException, ExceptionFilter, ForbiddenException, GatewayTimeoutException, GoneException, HttpException,
-        InternalServerErrorException, MethodNotAllowedException, NotAcceptableException, NotImplementedException, PaymentRequiredException,
-        PayloadTooLargeException, RequestTimeoutException, UnsupportedMediaTypeException,
-        CorsOptions, HealthIndicator, HealthStatus, NestApplication, NestDto, NestFactory, NotFoundException, PathNormalization, RateLimitOptions,
-        ReadinessContext, RequestContext, RequestContextMissing, RequestTracingOptions, SecurityHeaders, ServiceUnavailableException, TooManyRequestsException, UnprocessableEntityException, UnauthorizedException,
-        Interceptor, LoggingInterceptor, ParseIntPipe, TracingConfig, TracingFormat, ValidatedBody, async_trait,
-        nestrs_default_not_found_handler, runtime_is_production, try_init_tracing,
-        http_code, redirect, response_header, version,
-    };
-    pub use axum::{extract::State, response::IntoResponse, Json};
-    pub use crate::interceptor_layer;
     #[cfg(feature = "graphql")]
     pub use crate::graphql;
+    pub use crate::interceptor_layer;
     #[cfg(feature = "microservices")]
     pub use crate::microservices;
     #[cfg(feature = "openapi")]
     pub use crate::openapi;
     #[cfg(feature = "ws")]
     pub use crate::ws;
+    pub use crate::{
+        all, async_trait, controller, delete, dto, event_pattern, get, head, http_code,
+        impl_routes, injectable, message_pattern, module, nestrs_default_not_found_handler,
+        on_event, options, patch, post, put, redirect, response_header, roles,
+        runtime_is_production, set_metadata, try_init_tracing, use_filters, use_guards,
+        use_interceptors, use_pipes, version, BadGatewayException, BadRequestException,
+        ConflictException, CorsOptions, ExceptionFilter, ForbiddenException,
+        GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus, HttpException,
+        Interceptor, InternalServerErrorException, LoggingInterceptor, MethodNotAllowedException,
+        NestApplication, NestDto, NestFactory, NotAcceptableException, NotFoundException,
+        NotImplementedException, ParseIntPipe, PathNormalization, PayloadTooLargeException,
+        PaymentRequiredException, RateLimitOptions, ReadinessContext, RequestContext,
+        RequestContextMissing, RequestTimeoutException, RequestTracingOptions, SecurityHeaders,
+        ServiceUnavailableException, TooManyRequestsException, TracingConfig, TracingFormat,
+        UnauthorizedException, UnprocessableEntityException, UnsupportedMediaTypeException,
+        ValidatedBody,
+    };
+    pub use axum::{extract::State, response::IntoResponse, Json};
 }
 
 /// Returns `true` when the process environment indicates a **production** deployment.
@@ -170,7 +174,11 @@ fn tracing_env_filter(config: &TracingConfig) -> tracing_subscriber::EnvFilter {
     let raw = std::env::var("NESTRS_LOG")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .or_else(|| std::env::var("RUST_LOG").ok().filter(|s| !s.trim().is_empty()));
+        .or_else(|| {
+            std::env::var("RUST_LOG")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        });
     if let Some(s) = raw {
         tracing_subscriber::EnvFilter::try_new(&s)
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.default_directive))
@@ -186,8 +194,12 @@ fn install_tracing_subscriber(config: TracingConfig) -> Result<(), String> {
     let registry = tracing_subscriber::registry().with(filter);
 
     let result = match config.format {
-        TracingFormat::Pretty => registry.with(tracing_subscriber::fmt::layer().pretty()).try_init(),
-        TracingFormat::Json => registry.with(tracing_subscriber::fmt::layer().json()).try_init(),
+        TracingFormat::Pretty => registry
+            .with(tracing_subscriber::fmt::layer().pretty())
+            .try_init(),
+        TracingFormat::Json => registry
+            .with(tracing_subscriber::fmt::layer().json())
+            .try_init(),
     };
 
     result.map_err(|e| e.to_string())
@@ -776,7 +788,8 @@ impl NestApplication {
     /// Installs the global `tracing` subscriber (see [`try_init_tracing`]). Call **once** near process startup,
     /// before [`Self::listen`], so log output and [`Self::use_request_tracing`] share the same pipeline.
     pub fn configure_tracing(self, config: TracingConfig) -> Self {
-        try_init_tracing(config).unwrap_or_else(|e| panic!("nestrs: configure_tracing failed: {e}"));
+        try_init_tracing(config)
+            .unwrap_or_else(|e| panic!("nestrs: configure_tracing failed: {e}"));
         self
     }
 
@@ -926,7 +939,10 @@ impl NestApplication {
         if let Some(max) = concurrency_limit {
             if load_shed {
                 let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(max));
-                router = router.layer(axum::middleware::from_fn_with_state(sem, load_shed_middleware));
+                router = router.layer(axum::middleware::from_fn_with_state(
+                    sem,
+                    load_shed_middleware,
+                ));
             } else {
                 router = router.layer(tower::limit::ConcurrencyLimitLayer::new(max));
             }
@@ -937,7 +953,9 @@ impl NestApplication {
         }
 
         if production_errors {
-            router = router.layer(axum::middleware::from_fn(production_error_sanitize_middleware));
+            router = router.layer(axum::middleware::from_fn(
+                production_error_sanitize_middleware,
+            ));
         }
 
         if request_context {
@@ -947,7 +965,9 @@ impl NestApplication {
         }
 
         if request_id {
-            use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+            use tower_http::request_id::{
+                MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer,
+            };
             // First `.layer` is innermost: Propagate wraps the router; Set wraps Propagate so the
             // request hits Set before Propagate (matches tower-http ServiceBuilder example order).
             router = router
@@ -1036,7 +1056,8 @@ impl NestApplication {
     /// [`Self::listen_with_shutdown`] with **Ctrl+C** on all platforms and **SIGTERM** on Unix
     /// (containers / process managers).
     pub async fn listen_graceful(self, port: u16) {
-        self.listen_with_shutdown(port, nestrs_shutdown_signal()).await;
+        self.listen_with_shutdown(port, nestrs_shutdown_signal())
+            .await;
     }
 }
 
@@ -1059,26 +1080,30 @@ async fn axum_serve(
             .await
             .unwrap_or_else(err),
         (Some(PathNormalization::TrimTrailingSlash), None) => {
-            let app = tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash().layer(router);
+            let app =
+                tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash().layer(router);
             axum::serve(listener, ServiceExt::<Request>::into_make_service(app))
                 .await
                 .unwrap_or_else(err)
         }
         (Some(PathNormalization::TrimTrailingSlash), Some(s)) => {
-            let app = tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash().layer(router);
+            let app =
+                tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash().layer(router);
             axum::serve(listener, ServiceExt::<Request>::into_make_service(app))
                 .with_graceful_shutdown(s)
                 .await
                 .unwrap_or_else(err)
         }
         (Some(PathNormalization::AppendTrailingSlash), None) => {
-            let app = tower_http::normalize_path::NormalizePathLayer::append_trailing_slash().layer(router);
+            let app = tower_http::normalize_path::NormalizePathLayer::append_trailing_slash()
+                .layer(router);
             axum::serve(listener, ServiceExt::<Request>::into_make_service(app))
                 .await
                 .unwrap_or_else(err)
         }
         (Some(PathNormalization::AppendTrailingSlash), Some(s)) => {
-            let app = tower_http::normalize_path::NormalizePathLayer::append_trailing_slash().layer(router);
+            let app = tower_http::normalize_path::NormalizePathLayer::append_trailing_slash()
+                .layer(router);
             axum::serve(listener, ServiceExt::<Request>::into_make_service(app))
                 .with_graceful_shutdown(s)
                 .await
@@ -1113,50 +1138,73 @@ async fn nestrs_shutdown_signal() {
 impl SecurityHeaders {
     fn apply(self, mut router: axum::Router) -> axum::Router {
         if let Some(v) = self.x_content_type_options {
-            router = router.layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
-                axum::http::header::HeaderName::from_static("x-content-type-options"),
-                axum::http::HeaderValue::from_str(&v).unwrap_or_else(|_| axum::http::HeaderValue::from_static("nosniff")),
-            ));
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::header::HeaderName::from_static("x-content-type-options"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("nosniff")),
+                ),
+            );
         }
         if let Some(v) = self.x_frame_options {
-            router = router.layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
-                axum::http::header::HeaderName::from_static("x-frame-options"),
-                axum::http::HeaderValue::from_str(&v).unwrap_or_else(|_| axum::http::HeaderValue::from_static("DENY")),
-            ));
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::header::HeaderName::from_static("x-frame-options"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("DENY")),
+                ),
+            );
         }
         if let Some(v) = self.referrer_policy {
-            router = router.layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
-                axum::http::header::HeaderName::from_static("referrer-policy"),
-                axum::http::HeaderValue::from_str(&v)
-                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("strict-origin-when-cross-origin")),
-            ));
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::header::HeaderName::from_static("referrer-policy"),
+                    axum::http::HeaderValue::from_str(&v).unwrap_or_else(|_| {
+                        axum::http::HeaderValue::from_static("strict-origin-when-cross-origin")
+                    }),
+                ),
+            );
         }
         if let Some(v) = self.x_xss_protection {
-            router = router.layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
-                axum::http::header::HeaderName::from_static("x-xss-protection"),
-                axum::http::HeaderValue::from_str(&v).unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
-            ));
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::header::HeaderName::from_static("x-xss-protection"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
+                ),
+            );
         }
         if let Some(v) = self.permissions_policy {
-            router = router.layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
-                axum::http::header::HeaderName::from_static("permissions-policy"),
-                axum::http::HeaderValue::from_str(&v)
-                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("geolocation=(), microphone=(), camera=()")),
-            ));
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::header::HeaderName::from_static("permissions-policy"),
+                    axum::http::HeaderValue::from_str(&v).unwrap_or_else(|_| {
+                        axum::http::HeaderValue::from_static(
+                            "geolocation=(), microphone=(), camera=()",
+                        )
+                    }),
+                ),
+            );
         }
         if let Some(v) = self.content_security_policy {
-            router = router.layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
-                axum::http::header::HeaderName::from_static("content-security-policy"),
-                axum::http::HeaderValue::from_str(&v)
-                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("default-src 'self'")),
-            ));
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::header::HeaderName::from_static("content-security-policy"),
+                    axum::http::HeaderValue::from_str(&v).unwrap_or_else(|_| {
+                        axum::http::HeaderValue::from_static("default-src 'self'")
+                    }),
+                ),
+            );
         }
         if let Some(v) = self.hsts {
-            router = router.layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
-                axum::http::header::HeaderName::from_static("strict-transport-security"),
-                axum::http::HeaderValue::from_str(&v)
-                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("max-age=31536000")),
-            ));
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::header::HeaderName::from_static("strict-transport-security"),
+                    axum::http::HeaderValue::from_str(&v).unwrap_or_else(|_| {
+                        axum::http::HeaderValue::from_static("max-age=31536000")
+                    }),
+                ),
+            );
         }
         router
     }
@@ -1192,7 +1240,8 @@ async fn http_metrics_middleware(
         "status" => status,
     )
     .increment(1);
-    metrics::histogram!("http_request_duration_seconds", "method" => method).record(started.elapsed().as_secs_f64());
+    metrics::histogram!("http_request_duration_seconds", "method" => method)
+        .record(started.elapsed().as_secs_f64());
 
     response
 }
@@ -1266,9 +1315,9 @@ async fn rate_limit_middleware(
             guard.count = 0;
         }
         if guard.count >= state.options.max_requests {
-            return axum::response::IntoResponse::into_response(
-                TooManyRequestsException::new("Rate limit exceeded"),
-            );
+            return axum::response::IntoResponse::into_response(TooManyRequestsException::new(
+                "Rate limit exceeded",
+            ));
         }
         guard.count += 1;
     }
@@ -1282,9 +1331,9 @@ async fn request_timeout_middleware(
 ) -> axum::response::Response {
     match tokio::time::timeout(duration, next.run(req)).await {
         Ok(response) => response,
-        Err(_) => axum::response::IntoResponse::into_response(
-            GatewayTimeoutException::new("Request timed out"),
-        ),
+        Err(_) => axum::response::IntoResponse::into_response(GatewayTimeoutException::new(
+            "Request timed out",
+        )),
     }
 }
 
@@ -1295,14 +1344,16 @@ async fn load_shed_middleware(
 ) -> axum::response::Response {
     match semaphore.clone().try_acquire_owned() {
         Ok(_permit) => next.run(req).await,
-        Err(_) => axum::response::IntoResponse::into_response(
-            ServiceUnavailableException::new("Server overloaded"),
-        ),
+        Err(_) => axum::response::IntoResponse::into_response(ServiceUnavailableException::new(
+            "Server overloaded",
+        )),
     }
 }
 
 /// JSON **404** for unmatched routes; used when [`NestApplication::enable_default_fallback`] is set.
-pub async fn nestrs_default_not_found_handler(req: axum::extract::Request) -> axum::response::Response {
+pub async fn nestrs_default_not_found_handler(
+    req: axum::extract::Request,
+) -> axum::response::Response {
     let method = req.method().as_str();
     let path = req.uri().path();
     axum::response::IntoResponse::into_response(NotFoundException::new(format!(
@@ -1325,7 +1376,10 @@ async fn readiness_handler(
     for ind in ctx.indicators() {
         match ind.check().await {
             HealthStatus::Up => {
-                info.insert(ind.name().to_string(), serde_json::json!({ "status": "up" }));
+                info.insert(
+                    ind.name().to_string(),
+                    serde_json::json!({ "status": "up" }),
+                );
             }
             HealthStatus::Down { message } => {
                 err.insert(
@@ -1424,7 +1478,11 @@ pub struct HttpException {
 }
 
 impl HttpException {
-    pub fn new(status: axum::http::StatusCode, message: impl Into<String>, error: impl Into<String>) -> Self {
+    pub fn new(
+        status: axum::http::StatusCode,
+        message: impl Into<String>,
+        error: impl Into<String>,
+    ) -> Self {
         Self {
             status,
             message: message.into(),
@@ -1458,10 +1516,26 @@ macro_rules! define_http_exception {
     };
 }
 
-define_http_exception!(UnauthorizedException, axum::http::StatusCode::UNAUTHORIZED, "Unauthorized");
-define_http_exception!(PaymentRequiredException, axum::http::StatusCode::PAYMENT_REQUIRED, "Payment Required");
-define_http_exception!(ForbiddenException, axum::http::StatusCode::FORBIDDEN, "Forbidden");
-define_http_exception!(NotFoundException, axum::http::StatusCode::NOT_FOUND, "Not Found");
+define_http_exception!(
+    UnauthorizedException,
+    axum::http::StatusCode::UNAUTHORIZED,
+    "Unauthorized"
+);
+define_http_exception!(
+    PaymentRequiredException,
+    axum::http::StatusCode::PAYMENT_REQUIRED,
+    "Payment Required"
+);
+define_http_exception!(
+    ForbiddenException,
+    axum::http::StatusCode::FORBIDDEN,
+    "Forbidden"
+);
+define_http_exception!(
+    NotFoundException,
+    axum::http::StatusCode::NOT_FOUND,
+    "Not Found"
+);
 define_http_exception!(
     MethodNotAllowedException,
     axum::http::StatusCode::METHOD_NOT_ALLOWED,
@@ -1477,7 +1551,11 @@ define_http_exception!(
     axum::http::StatusCode::REQUEST_TIMEOUT,
     "Request Timeout"
 );
-define_http_exception!(ConflictException, axum::http::StatusCode::CONFLICT, "Conflict");
+define_http_exception!(
+    ConflictException,
+    axum::http::StatusCode::CONFLICT,
+    "Conflict"
+);
 define_http_exception!(GoneException, axum::http::StatusCode::GONE, "Gone");
 define_http_exception!(
     PayloadTooLargeException,
@@ -1494,7 +1572,11 @@ define_http_exception!(
     axum::http::StatusCode::UNPROCESSABLE_ENTITY,
     "Unprocessable Entity"
 );
-define_http_exception!(TooManyRequestsException, axum::http::StatusCode::TOO_MANY_REQUESTS, "Too Many Requests");
+define_http_exception!(
+    TooManyRequestsException,
+    axum::http::StatusCode::TOO_MANY_REQUESTS,
+    "Too Many Requests"
+);
 define_http_exception!(
     InternalServerErrorException,
     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1505,13 +1587,21 @@ define_http_exception!(
     axum::http::StatusCode::NOT_IMPLEMENTED,
     "Not Implemented"
 );
-define_http_exception!(BadGatewayException, axum::http::StatusCode::BAD_GATEWAY, "Bad Gateway");
+define_http_exception!(
+    BadGatewayException,
+    axum::http::StatusCode::BAD_GATEWAY,
+    "Bad Gateway"
+);
 define_http_exception!(
     ServiceUnavailableException,
     axum::http::StatusCode::SERVICE_UNAVAILABLE,
     "Service Unavailable"
 );
-define_http_exception!(GatewayTimeoutException, axum::http::StatusCode::GATEWAY_TIMEOUT, "Gateway Timeout");
+define_http_exception!(
+    GatewayTimeoutException,
+    axum::http::StatusCode::GATEWAY_TIMEOUT,
+    "Gateway Timeout"
+);
 
 impl From<core::GuardError> for HttpException {
     fn from(value: core::GuardError) -> Self {
@@ -1560,9 +1650,10 @@ where
     type Rejection = HttpException;
 
     async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
-        let axum::Json(value) = <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(req, state)
-            .await
-            .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {}", e)))?;
+        let axum::Json(value) =
+            <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(req, state)
+                .await
+                .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {}", e)))?;
 
         value.validate().map_err(|e| {
             let mut errors = Vec::new();
@@ -1596,7 +1687,9 @@ where
 
 /// Used by [`impl_routes!`] for each guard type; not stable API.
 #[doc(hidden)]
-pub async fn __nestrs_run_guard<G>(parts: &::axum::http::request::Parts) -> Result<(), crate::core::GuardError>
+pub async fn __nestrs_run_guard<G>(
+    parts: &::axum::http::request::Parts,
+) -> Result<(), crate::core::GuardError>
 where
     G: crate::core::CanActivate + Default,
 {
@@ -1764,4 +1857,3 @@ macro_rules! impl_routes {
     (@method OPTIONS, $handler:path) => { axum::routing::options($handler) };
     (@method HEAD, $handler:path) => { axum::routing::head($handler) };
 }
-

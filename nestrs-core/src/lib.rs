@@ -43,9 +43,12 @@ impl ProviderRegistry {
             .unwrap_or_else(|| panic!("Provider `{}` not registered", std::any::type_name::<T>()))
             .clone();
 
-        value
-            .downcast::<T>()
-            .unwrap_or_else(|_| panic!("Provider downcast failed for `{}`", std::any::type_name::<T>()))
+        value.downcast::<T>().unwrap_or_else(|_| {
+            panic!(
+                "Provider downcast failed for `{}`",
+                std::any::type_name::<T>()
+            )
+        })
     }
 
     pub fn absorb(&mut self, other: ProviderRegistry) {
@@ -101,4 +104,3 @@ impl DynamicModule {
         Self { router }
     }
 }
-

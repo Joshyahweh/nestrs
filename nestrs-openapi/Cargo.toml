@@ -3,6 +3,13 @@ name = "nestrs-openapi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "OpenAPI extension crate for nestrs."
+keywords = ["openapi", "swagger", "nest", "axum", "api"]
+categories = ["web-programming", "api-bindings"]
 
 [dependencies]
 serde_json = "1"

@@ -51,7 +51,7 @@ python3 scripts/load/recommend_relative_thresholds.py
 python3 scripts/load/evaluate_threshold_reassessment.py
 ```
 
-Recommendation outputs:
+Recommendation outputs (written by scripts; gitignored, not shipped in the repo):
 
 - `benchmarks/recommended_relative_thresholds.json`
 - `benchmarks/recommended_relative_thresholds.md`
@@ -98,4 +98,4 @@ Threshold recommendation helper outputs:
 
 - `benchmarks/recommended_relative_thresholds.json`
 - `benchmarks/recommended_relative_thresholds.md`
-- Optional closeout summary: `PHASE5_OPTIONAL_CLOSEOUT.md`
+- Optional closeout summary (local maintainer doc, gitignored): `PHASE5_OPTIONAL_CLOSEOUT.md`

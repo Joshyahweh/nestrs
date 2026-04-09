@@ -113,7 +113,8 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
     );
     fs::write(root.join("src/main.rs"), main_rs).map_err(|e| e.to_string())?;
 
-    let env_example = "PORT=3000\nNESTRS_ENV=development\nRUST_LOG=info\nDATABASE_URL=file:./dev.db\n";
+    let env_example =
+        "PORT=3000\nNESTRS_ENV=development\nRUST_LOG=info\nDATABASE_URL=file:./dev.db\n";
     fs::write(root.join(".env.example"), env_example).map_err(|e| e.to_string())?;
     fs::write(root.join(".env"), env_example).map_err(|e| e.to_string())?;
     let readme = format!(
@@ -154,7 +155,9 @@ fn generate(args: &[String]) -> Result<(), String> {
         match args[i].as_str() {
             "--style" => {
                 i += 1;
-                let value = args.get(i).ok_or_else(|| "missing value for --style".to_string())?;
+                let value = args
+                    .get(i)
+                    .ok_or_else(|| "missing value for --style".to_string())?;
                 style = match value.as_str() {
                     "nest" => Style::Nest,
                     "rust" => Style::Rust,
@@ -163,7 +166,9 @@ fn generate(args: &[String]) -> Result<(), String> {
             }
             "--transport" => {
                 i += 1;
-                let value = args.get(i).ok_or_else(|| "missing value for --transport".to_string())?;
+                let value = args
+                    .get(i)
+                    .ok_or_else(|| "missing value for --transport".to_string())?;
                 transport = Some(match value.as_str() {
                     "rest" => Transport::Rest,
                     "graphql" => Transport::Graphql,
@@ -175,7 +180,9 @@ fn generate(args: &[String]) -> Result<(), String> {
             }
             "--path" => {
                 i += 1;
-                let value = args.get(i).ok_or_else(|| "missing value for --path".to_string())?;
+                let value = args
+                    .get(i)
+                    .ok_or_else(|| "missing value for --path".to_string())?;
                 base_path = PathBuf::from(value);
             }
             "--no-interactive" => {
@@ -228,7 +235,10 @@ fn generate(args: &[String]) -> Result<(), String> {
             };
             generate_resource(name, style, resolved_transport, &base_path, opts)
         }
-        other => Err(format!("unknown generator kind `{}`", if other.is_empty() { kind } else { other })),
+        other => Err(format!(
+            "unknown generator kind `{}`",
+            if other.is_empty() { kind } else { other }
+        )),
     }
 }
 
@@ -249,9 +259,10 @@ fn canonical_kind(kind: &str) -> &str {
         "ms" => "microservice",
         "tr" => "transport",
         // Full names
-        "resource" | "service" | "controller" | "module" | "dto" | "guard" | "pipe"
-        | "filter" | "interceptor" | "strategy" | "resolver" | "gateway"
-        | "microservice" | "transport" => kind,
+        "resource" | "service" | "controller" | "module" | "dto" | "guard" | "pipe" | "filter"
+        | "interceptor" | "strategy" | "resolver" | "gateway" | "microservice" | "transport" => {
+            kind
+        }
         _ => "",
     }
 }
@@ -267,7 +278,9 @@ fn prompt_transport() -> Result<Transport, String> {
     io::stdout().flush().map_err(|e| e.to_string())?;
 
     let mut input = String::new();
-    io::stdin().read_line(&mut input).map_err(|e| e.to_string())?;
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| e.to_string())?;
     let selection = input.trim();
     let value = if selection.is_empty() { "1" } else { selection };
 
@@ -333,8 +346,16 @@ fn generate_resource(
     let update_dto_path = feature_dir.join(file_name(&format!("update_{}", snake), "dto", style));
     let mod_rs_path = feature_dir.join("mod.rs");
 
-    write_if_absent(&service_path, &template_for("service", &snake, &pascal), opts)?;
-    write_if_absent(&module_path, &resource_module_template(&pascal, controller_kind), opts)?;
+    write_if_absent(
+        &service_path,
+        &template_for("service", &snake, &pascal),
+        opts,
+    )?;
+    write_if_absent(
+        &module_path,
+        &resource_module_template(&pascal, controller_kind),
+        opts,
+    )?;
     write_if_absent(
         &controller_path,
         &resource_entry_template(controller_kind, &pascal),
@@ -487,7 +508,11 @@ fn to_pascal(input: &str) -> String {
         .map(|part| {
             let mut chars = part.chars();
             match chars.next() {
-                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str().to_ascii_lowercase()),
+                Some(first) => format!(
+                    "{}{}",
+                    first.to_ascii_uppercase(),
+                    chars.as_str().to_ascii_lowercase()
+                ),
                 None => String::new(),
             }
         })

@@ -3,6 +3,13 @@ name = "nestrs-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "CLI generator and scaffolding tooling for nestrs."
+keywords = ["cli", "scaffold", "nest", "generator", "axum"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "nestrs"

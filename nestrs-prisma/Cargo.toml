@@ -3,9 +3,16 @@ name = "nestrs-prisma"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Prisma integration helpers and providers for nestrs."
+keywords = ["prisma", "database", "nest", "orm", "axum"]
+categories = ["database", "web-programming"]
 
 [dependencies]
-nestrs = { path = "../nestrs" }
+nestrs = { version = "0.1.0", path = "../nestrs" }
 axum.workspace = true
 
 [dev-dependencies]

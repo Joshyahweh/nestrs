@@ -3,6 +3,13 @@ name = "nestrs-graphql"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "GraphQL extension crate for nestrs."
+keywords = ["graphql", "nest", "axum", "async", "api"]
+categories = ["web-programming", "network-programming"]
 
 [dependencies]
 async-trait = "0.1"

@@ -3,6 +3,13 @@ name = "nestrs-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Runtime primitives and traits for the nestrs framework."
+keywords = ["nest", "axum", "context", "di", "tower"]
+categories = ["web-programming", "asynchronous"]
 
 [dependencies]
 axum.workspace = true

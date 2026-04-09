@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["1.78.0", stable, beta]
+        toolchain: ["1.85.0", stable, beta]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

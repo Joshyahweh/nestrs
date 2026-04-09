@@ -513,7 +513,7 @@ pub struct NestApplication {
     request_decompression: bool,
     /// Address for [`Self::listen`], [`Self::listen_with_shutdown`], [`Self::listen_graceful`]. `None` ⇒ `127.0.0.1`.
     listen_ip: Option<std::net::IpAddr>,
-    /// Applied in [`Self::listen`] / [`Self::listen_graceful`] only (Axum 0.7: not via [`Router::layer`]).
+    /// Applied in [`Self::listen`] / [`Self::listen_graceful`] only (Axum 0.7: not via [`axum::Router::layer`]).
     /// Cleared for [`Self::into_router`]; wrap the router yourself if you call [`Self::into_router`] and need normalization.
     path_normalization: Option<PathNormalization>,
 }
@@ -624,7 +624,7 @@ impl NestApplication {
     /// Normalizes request paths **before** route matching using [`tower_http::normalize_path`].
     ///
     /// Wired only in [`Self::listen`], [`Self::listen_with_shutdown`], and [`Self::listen_graceful`]
-    /// (Axum 0.7 requires wrapping the [`Router`] with [`tower::Layer::layer`], not [`Router::layer`]).
+    /// (Axum 0.7 requires wrapping the [`axum::Router`] with [`tower::Layer::layer`], not [`axum::Router::layer`]).
     /// [`Self::into_router`] **ignores** this setting; for a custom server use
     /// `NormalizePathLayer::trim_trailing_slash().layer(router)` (or append) and
     /// [`axum::ServiceExt::into_make_service`] as in the Axum guide.
@@ -1004,8 +1004,8 @@ impl NestApplication {
         router
     }
 
-    /// Builds the [`Router`] with all middleware except [`Self::use_path_normalization`], which is
-    /// cleared here so the returned value is always a plain [`Router`].
+    /// Builds the [`axum::Router`] with all middleware except [`Self::use_path_normalization`], which is
+    /// cleared here so the returned value is always a plain [`axum::Router`].
     pub fn into_router(self) -> axum::Router {
         let mut s = self;
         s.path_normalization = None;
@@ -1500,6 +1500,7 @@ impl HttpException {
 pub struct BadRequestException;
 
 impl BadRequestException {
+    #[allow(clippy::new_ret_no_self)] // Nest-style factory: returns HttpException, not Self
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(axum::http::StatusCode::BAD_REQUEST, message, "Bad Request")
     }
@@ -1509,6 +1510,7 @@ macro_rules! define_http_exception {
     ($name:ident, $status:expr, $label:literal) => {
         pub struct $name;
         impl $name {
+            #[allow(clippy::new_ret_no_self)] // Nest-style factory: returns HttpException, not Self
             pub fn new(message: impl Into<String>) -> HttpException {
                 HttpException::new($status, message, $label)
             }

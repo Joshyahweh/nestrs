@@ -68,6 +68,12 @@ impl ProviderRegistry {
     }
 }
 
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub trait Injectable: Send + Sync + 'static {
     fn construct(registry: &ProviderRegistry) -> Arc<Self>;
 }

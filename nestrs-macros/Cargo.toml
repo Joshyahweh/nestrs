@@ -3,6 +3,13 @@ name = "nestrs-macros"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Proc-macro support for nestrs module/controller/route ergonomics."
+keywords = ["nest", "macros", "proc-macro", "axum", "derive"]
+categories = ["development-tools::procedural-macro-helpers", "web-programming"]
 
 [lib]
 proc-macro = true

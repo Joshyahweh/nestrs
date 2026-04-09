@@ -17,6 +17,12 @@ resolver = "2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
+rust-version = "1.75"
+repository = "https://github.com/Joshyahweh/nestrs"
+homepage = "https://github.com/Joshyahweh/nestrs"
+documentation = "https://docs.rs/nestrs"
+readme = "README.md"
+description = "NestJS-like API framework for Rust built on Axum and Tower."
 
 [workspace.dependencies]
 axum = "0.7"

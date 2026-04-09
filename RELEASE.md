@@ -45,7 +45,7 @@ cargo publish -p nestrs-graphql --dry-run --locked
 cargo publish -p nestrs-openapi --dry-run --locked
 cargo publish -p nestrs --dry-run --locked
 cargo publish -p nestrs-prisma --dry-run --locked
-cargo publish -p nestrs-cli --dry-run --locked
+cargo publish -p nestrs-scaffold --dry-run --locked
 ```
 
 ### 5) Confirm docs are current
@@ -113,7 +113,7 @@ cargo publish -p nestrs
 sleep 30
 cargo publish -p nestrs-prisma
 sleep 30
-cargo publish -p nestrs-cli
+cargo publish -p nestrs-scaffold
 ```
 
 ### Trusted Publishing (OIDC, no long-lived token)

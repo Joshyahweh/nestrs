@@ -48,4 +48,4 @@ jobs:
           sleep 30
           cargo publish -p nestrs-prisma --locked
           sleep 30
-          cargo publish -p nestrs-cli --locked
+          cargo publish -p nestrs-scaffold --locked

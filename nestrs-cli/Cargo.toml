@@ -1,5 +1,6 @@
 [package]
-name = "nestrs-cli"
+# crates.io: `nestrs-cli` is taken by another owner; install with `cargo install nestrs-scaffold` (binary: `nestrs`).
+name = "nestrs-scaffold"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

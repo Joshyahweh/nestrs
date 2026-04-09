@@ -963,10 +963,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nestrs-cli"
-version = "0.1.0"
-
-[[package]]
 name = "nestrs-core"
 version = "0.1.0"
 dependencies = [
@@ -1017,6 +1013,10 @@ dependencies = [
  "tokio",
  "tower",
 ]
+
+[[package]]
+name = "nestrs-scaffold"
+version = "0.1.0"
 
 [[package]]
 name = "nestrs-ws"

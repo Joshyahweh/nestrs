@@ -2,6 +2,27 @@
 
 This document captures the current nestrs security baseline and production guidance.
 
+## Reporting vulnerabilities
+
+Please report security vulnerabilities privately.
+
+- Preferred: GitHub Security Advisories for this repository
+  - <https://github.com/Joshyahweh/nestrs/security/advisories/new>
+- Do **not** open public issues for active vulnerabilities.
+
+### What to include in a report
+
+- Affected component/crate and version
+- Reproduction details or proof-of-concept
+- Impact assessment (confidentiality/integrity/availability)
+- Suggested mitigation if known
+
+### Response expectations
+
+- Initial triage acknowledgement target: within 72 hours
+- Coordinated fix and disclosure timeline based on severity
+- Credit in release notes/changelog when appropriate
+
 ## Current platform controls
 
 - **CORS**: configurable through `NestApplication::enable_cors(CorsOptions::...)`.

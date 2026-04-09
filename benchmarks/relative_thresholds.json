@@ -1,0 +1,12 @@
+{
+  "router_get_v1_bench_ping": {
+    "max_regression_percent": 3.0,
+    "baseline_window": 3,
+    "min_baseline_runs": 2
+  },
+  "router_get_v1_bench_work_middleware_stack": {
+    "max_regression_percent": 3.0,
+    "baseline_window": 3,
+    "min_baseline_runs": 2
+  }
+}

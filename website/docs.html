@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>nestrs Documentation</title>
+    <meta name="description" content="Documentation hub for nestrs." />
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html">nestrs</a>
+      <nav class="top-nav">
+        <a href="./index.html">Home</a>
+        <a href="./docs.html" aria-current="page">Docs</a>
+      </nav>
+      <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
+        <span id="theme-label">Dark</span>
+      </button>
+    </header>
+
+    <main class="docs-main">
+      <section class="hero docs-hero">
+        <p class="eyebrow">Documentation</p>
+        <h1>Everything you need to build with nestrs</h1>
+        <p class="hero-copy">
+          Start with quick setup, then move into architecture, security, microservices, and
+          production hardening.
+        </p>
+        <div class="search-wrap">
+          <label for="docs-search" class="search-label">Search docs and guides</label>
+          <input
+            id="docs-search"
+            class="search-input"
+            type="search"
+            placeholder="Try: production, security, microservices, thresholds..."
+          />
+        </div>
+      </section>
+
+      <section class="docs-grid" id="docs-sections">
+        <article class="card searchable" data-search="start readme quick start roadmap plan">
+          <h2>Start here</h2>
+          <ul>
+            <li><a href="../README.md">README quick start</a></li>
+            <li><a href="../nestrs-plan-2.md">Full roadmap plan</a></li>
+          </ul>
+        </article>
+        <article class="card searchable" data-search="security microservices production runbook platform guides">
+          <h2>Platform guides</h2>
+          <ul>
+            <li><a href="../SECURITY.md">Security guide</a></li>
+            <li><a href="../MICROSERVICES.md">Microservices guide</a></li>
+            <li><a href="../PRODUCTION_RUNBOOK.md">Production runbook</a></li>
+          </ul>
+        </article>
+        <article
+          class="card searchable"
+          data-search="hardening benchmarks baseline performance threshold gates closeout"
+        >
+          <h2>Performance and hardening</h2>
+          <ul>
+            <li><a href="../HARDENING_STATUS.md">Hardening status checkpoint</a></li>
+            <li><a href="../benchmarks/BASELINE.md">Benchmark baseline guide</a></li>
+            <li><a href="../PHASE5_OPTIONAL_CLOSEOUT.md">Phase 5 optional closeout</a></li>
+          </ul>
+        </article>
+        <article
+          class="card searchable"
+          data-search="storage s3 gcs azure secrets checklist recommendations reassessment"
+        >
+          <h2>Storage and trend tracking</h2>
+          <ul>
+            <li><a href="../BENCHMARK_STORAGE_PLAYBOOK.md">Storage playbook</a></li>
+            <li>
+              <a href="../BENCHMARK_STORAGE_SECRETS_CHECKLIST.md"
+                >Storage provider bootstrap checklist</a
+              >
+            </li>
+            <li>
+              <a href="../benchmarks/recommended_relative_thresholds.md"
+                >Relative threshold recommendations</a
+              >
+            </li>
+            <li>
+              <a href="../benchmarks/threshold_reassessment_status.md"
+                >Threshold reassessment status</a
+              >
+            </li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="callout">
+        <h2>Frequently asked questions</h2>
+        <details>
+          <summary>Where should I start as a new user?</summary>
+          <p>Start with <a href="../README.md">README.md</a>, then open the production runbook.</p>
+        </details>
+        <details>
+          <summary>How do I operate benchmarks in CI?</summary>
+          <p>
+            Use <a href="../benchmarks/BASELINE.md">benchmark baseline docs</a> and the
+            performance workflow.
+          </p>
+        </details>
+        <details>
+          <summary>How do I publish trend reports to external storage?</summary>
+          <p>
+            Follow <a href="../BENCHMARK_STORAGE_PLAYBOOK.md">storage playbook</a> and
+            <a href="../BENCHMARK_STORAGE_SECRETS_CHECKLIST.md">provider bootstrap checklist</a>.
+          </p>
+        </details>
+      </section>
+
+      <section class="callout support-callout">
+        <h2>Need help or want to contribute?</h2>
+        <p>
+          Open an issue with your use case, runtime details, and benchmark snapshots so maintainers
+          can help quickly.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <small>Need a fast local preview? Run <code>python3 -m http.server 4173</code></small>
+    </footer>
+    <script src="./assets/app.js"></script>
+  </body>
+</html>

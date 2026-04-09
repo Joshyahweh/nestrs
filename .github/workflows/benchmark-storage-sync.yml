@@ -1,0 +1,99 @@
+name: benchmark-storage-sync-template
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Storage provider (s3 | gcs | azure)"
+        required: true
+        default: "s3"
+      bucket_or_container:
+        description: "Bucket/container name"
+        required: true
+      remote_prefix:
+        description: "Remote prefix/path (e.g. benchmarks/nestrs/main/reports)"
+        required: true
+        default: "benchmarks/nestrs/main/reports"
+      run_benchmarks:
+        description: "Run benchmark pipeline before sync (true/false)"
+        required: true
+        default: "true"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -C target-cpu=x86-64-v2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        if: inputs.run_benchmarks == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate benchmark reports
+        if: inputs.run_benchmarks == 'true'
+        run: |
+          chmod +x scripts/load/run_bench_ci.sh
+          scripts/load/run_bench_ci.sh
+          python3 scripts/load/export_benchmark_report.py
+          python3 scripts/load/maintain_benchmark_history.py
+          python3 scripts/load/build_benchmark_dashboard.py
+
+      - name: Validate reports directory exists
+        run: |
+          test -d benchmarks/reports
+          ls benchmarks/reports
+
+      - name: Configure AWS credentials (OIDC)
+        if: inputs.provider == 's3'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Sync reports to S3
+        if: inputs.provider == 's3'
+        run: |
+          aws s3 sync benchmarks/reports "s3://${{ inputs.bucket_or_container }}/${{ inputs.remote_prefix }}" --delete
+
+      - name: Authenticate to Google Cloud
+        if: inputs.provider == 'gcs'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud SDK
+        if: inputs.provider == 'gcs'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Sync reports to GCS
+        if: inputs.provider == 'gcs'
+        run: |
+          gcloud storage rsync --recursive --delete-unmatched-destination-objects \
+            benchmarks/reports \
+            "gs://${{ inputs.bucket_or_container }}/${{ inputs.remote_prefix }}"
+
+      - name: Azure login
+        if: inputs.provider == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sync reports to Azure Blob
+        if: inputs.provider == 'azure'
+        run: |
+          az storage blob sync \
+            --container "${{ inputs.bucket_or_container }}" \
+            --source benchmarks/reports \
+            --destination "${{ inputs.remote_prefix }}" \
+            --delete-destination true \
+            --auth-mode login

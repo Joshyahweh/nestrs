@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>nestrs - Nest-like framework in Rust</title>
+    <meta
+      name="description"
+      content="nestrs is a NestJS-inspired Rust framework on top of Axum/Tower with modules, DI, macros, DTO validation, and production hardening."
+    />
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html">nestrs</a>
+      <nav class="top-nav">
+        <a href="./docs.html">Docs</a>
+        <a href="../nestrs-plan-2.md">Roadmap</a>
+        <a href="../HARDENING_STATUS.md">Hardening</a>
+      </nav>
+      <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
+        <span id="theme-label">Dark</span>
+      </button>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">NestJS mental model, Rust runtime</p>
+        <h1>Build modular, production-ready Rust APIs with Nest-like ergonomics.</h1>
+        <p class="hero-copy">
+          nestrs brings module-oriented architecture, dependency injection, decorator-style macros,
+          DTO validation, and a hardened Axum/Tower runtime into one framework.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="./docs.html">Read the docs</a>
+          <a class="btn btn-secondary" href="../README.md">Quick start</a>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Modular architecture</h2>
+          <p>
+            Compose your app with modules, controllers, and providers using Nest-like macros and
+            explicit Rust typing.
+          </p>
+        </article>
+        <article class="card">
+          <h2>Cross-cutting done right</h2>
+          <p>
+            Guards, pipes, interceptors, exception filters, and strategies integrate cleanly into
+            the request pipeline.
+          </p>
+        </article>
+        <article class="card">
+          <h2>Production hardening</h2>
+          <p>
+            Built-in backpressure controls, benchmark gates, reporting, trend dashboards, and
+            deployment runbooks.
+          </p>
+        </article>
+      </section>
+
+      <section class="callout">
+        <h2>Everything in one place</h2>
+        <p>
+          Use the docs portal for architecture, security, microservices, production operations,
+          and performance workflows.
+        </p>
+        <a class="btn btn-primary" href="./docs.html">Open documentation hub</a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <small>nestrs - NestJS-like API framework for Rust</small>
+    </footer>
+
+    <script src="./assets/app.js"></script>
+  </body>
+</html>

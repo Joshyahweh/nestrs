@@ -1,0 +1,8 @@
+{
+  "router_get_v1_bench_ping": {
+    "max_point_estimate_ns": 150000
+  },
+  "router_get_v1_bench_work_middleware_stack": {
+    "max_point_estimate_ns": 300000
+  }
+}

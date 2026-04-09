@@ -1,0 +1,33 @@
+.cursor/
+.qodo/
+
+# Build artifacts
+target/
+**/target/
+
+# Benchmark and generated report artifacts
+benchmarks/reports/
+benchmarks/publish/
+benchmarks/threshold_reassessment_status.json
+benchmarks/threshold_reassessment_status.md
+benchmarks/recommended_relative_thresholds.json
+benchmarks/recommended_relative_thresholds.md
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+nestrs-plan-2.md

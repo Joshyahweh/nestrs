@@ -1,0 +1,32 @@
+[workspace]
+members = [
+  "nestrs",
+  "nestrs-core",
+  "nestrs-macros",
+  "nestrs-prisma",
+  "nestrs-microservices",
+  "nestrs-ws",
+  "nestrs-graphql",
+  "nestrs-openapi",
+  "nestrs-cli",
+  "examples/hello-app",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+
+[workspace.dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false

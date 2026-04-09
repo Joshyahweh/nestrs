@@ -1,0 +1,110 @@
+name: performance
+
+on:
+  pull_request:
+    paths:
+      - "nestrs/**"
+      - "scripts/**"
+      - "PRODUCTION_RUNBOOK.md"
+      - ".github/workflows/performance.yml"
+  workflow_dispatch:
+    inputs:
+      publish_dashboard:
+        description: "Publish benchmark dashboard to gh-pages"
+        required: false
+        default: "false"
+      publish_artifact_bundle:
+        description: "Upload publishable dashboard bundle artifact"
+        required: false
+        default: "true"
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -C target-cpu=x86-64-v2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compile benchmark targets
+        run: cargo check -p nestrs --benches
+
+      - name: Run stabilized benchmark suite + gate
+        run: |
+          chmod +x scripts/load/run_bench_ci.sh
+          scripts/load/run_bench_ci.sh
+
+      - name: Export benchmark report
+        run: python3 scripts/load/export_benchmark_report.py
+
+      - name: Check relative benchmark regression
+        run: python3 scripts/load/check_benchmark_relative_regression.py
+
+      - name: Maintain benchmark history index
+        run: python3 scripts/load/maintain_benchmark_history.py
+
+      - name: Build benchmark dashboard artifacts
+        run: python3 scripts/load/build_benchmark_dashboard.py
+
+      - name: Publish benchmark summary
+        run: |
+          if [ -f benchmarks/reports/latest.md ]; then
+            cat benchmarks/reports/latest.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f benchmarks/reports/INDEX.md ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            cat benchmarks/reports/INDEX.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload criterion artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-reports
+          path: target/criterion
+
+      - name: Upload benchmark reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-reports
+          path: benchmarks/reports
+
+      - name: Post PR benchmark comment
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/load/post_pr_benchmark_comment.py
+
+      - name: Prepare dashboard publish bundle
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p benchmarks/publish
+          cp benchmarks/reports/dashboard.html benchmarks/publish/index.html
+          cp benchmarks/reports/timeseries.json benchmarks/publish/timeseries.json
+          cp benchmarks/reports/timeseries.csv benchmarks/publish/timeseries.csv
+          cp benchmarks/reports/latest.md benchmarks/publish/latest.md
+          cp benchmarks/reports/INDEX.md benchmarks/publish/history.md
+
+      - name: Upload dashboard publish bundle artifact
+        if: github.event_name != 'pull_request' && (github.event.inputs.publish_artifact_bundle == 'true' || github.event_name == 'push')
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-dashboard-publish
+          path: benchmarks/publish
+
+      - name: Publish benchmark dashboard to GitHub Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.event.inputs.publish_dashboard == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ github.token }}
+          publish_dir: benchmarks/publish
+          destination_dir: perf

@@ -4,9 +4,9 @@ use axum::http::{header, HeaderName, HeaderValue, Request, StatusCode};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use nestrs::prelude::*;
-use std::io::Write;
 use nestrs::runtime_is_production;
 use serial_test::serial;
+use std::io::Write;
 use tower::util::ServiceExt;
 use tower_http::set_header::SetResponseHeaderLayer;
 
@@ -415,7 +415,9 @@ async fn cors_allowlist_allows_configured_origin() {
         Some(&HeaderValue::from_static("https://app.example.com"))
     );
     assert_eq!(
-        response.headers().get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS),
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS),
         Some(&HeaderValue::from_static("true"))
     );
 }
@@ -478,7 +480,9 @@ async fn security_headers_custom_values_are_applied() {
     );
     assert_eq!(
         response.headers().get("strict-transport-security"),
-        Some(&HeaderValue::from_static("max-age=31536000; includeSubDomains"))
+        Some(&HeaderValue::from_static(
+            "max-age=31536000; includeSubDomains"
+        ))
     );
 }
 
@@ -567,32 +571,30 @@ async fn concurrency_limit_without_load_shed_queues_second_request() {
 
     let svc1 = router.clone();
     let req1 = tokio::spawn(async move {
-        svc1
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/api/slow")
-                    .method("GET")
-                    .body(Body::empty())
-                    .expect("request should be valid"),
-            )
-            .await
-            .expect("router should serve request")
+        svc1.oneshot(
+            Request::builder()
+                .uri("/v1/api/slow")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request")
     });
 
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let svc2 = router.clone();
     let req2 = tokio::spawn(async move {
-        svc2
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/api")
-                    .method("GET")
-                    .body(Body::empty())
-                    .expect("request should be valid"),
-            )
-            .await
-            .expect("router should serve request")
+        svc2.oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request")
     });
 
     let r1 = req1.await.expect("task join");
@@ -610,32 +612,30 @@ async fn load_shed_with_concurrency_limit_rejects_when_overloaded() {
 
     let svc1 = router.clone();
     let req1 = tokio::spawn(async move {
-        svc1
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/api/slow")
-                    .method("GET")
-                    .body(Body::empty())
-                    .expect("request should be valid"),
-            )
-            .await
-            .expect("router should serve request")
+        svc1.oneshot(
+            Request::builder()
+                .uri("/v1/api/slow")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request")
     });
 
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let svc2 = router.clone();
     let req2 = tokio::spawn(async move {
-        svc2
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/api")
-                    .method("GET")
-                    .body(Body::empty())
-                    .expect("request should be valid"),
-            )
-            .await
-            .expect("router should serve request")
+        svc2.oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request")
     });
 
     let _ = req1.await.expect("task join");
@@ -713,7 +713,9 @@ async fn production_errors_from_env_sanitizes_when_nestrs_env_production() {
 #[tokio::test]
 async fn use_request_id_sets_response_header() {
     const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
-    let router = NestFactory::create::<AppModule>().use_request_id().into_router();
+    let router = NestFactory::create::<AppModule>()
+        .use_request_id()
+        .into_router();
 
     let response = router
         .oneshot(
@@ -727,7 +729,10 @@ async fn use_request_id_sets_response_header() {
         .expect("router should serve request");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let id = response.headers().get(X_REQUEST_ID).expect("x-request-id header");
+    let id = response
+        .headers()
+        .get(X_REQUEST_ID)
+        .expect("x-request-id header");
     let s = id.to_str().expect("header utf-8");
     assert!(!s.is_empty());
 }
@@ -735,24 +740,50 @@ async fn use_request_id_sets_response_header() {
 #[tokio::test]
 async fn additional_http_exceptions_emit_expected_status_and_error_label() {
     let cases = [
-        (PaymentRequiredException::new("pay"), StatusCode::PAYMENT_REQUIRED, "Payment Required"),
-        (MethodNotAllowedException::new("nope"), StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed"),
-        (NotAcceptableException::new("nope"), StatusCode::NOT_ACCEPTABLE, "Not Acceptable"),
-        (RequestTimeoutException::new("slow"), StatusCode::REQUEST_TIMEOUT, "Request Timeout"),
+        (
+            PaymentRequiredException::new("pay"),
+            StatusCode::PAYMENT_REQUIRED,
+            "Payment Required",
+        ),
+        (
+            MethodNotAllowedException::new("nope"),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "Method Not Allowed",
+        ),
+        (
+            NotAcceptableException::new("nope"),
+            StatusCode::NOT_ACCEPTABLE,
+            "Not Acceptable",
+        ),
+        (
+            RequestTimeoutException::new("slow"),
+            StatusCode::REQUEST_TIMEOUT,
+            "Request Timeout",
+        ),
         (GoneException::new("gone"), StatusCode::GONE, "Gone"),
-        (PayloadTooLargeException::new("big"), StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large"),
+        (
+            PayloadTooLargeException::new("big"),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Payload Too Large",
+        ),
         (
             UnsupportedMediaTypeException::new("bad-content-type"),
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "Unsupported Media Type",
         ),
-        (NotImplementedException::new("todo"), StatusCode::NOT_IMPLEMENTED, "Not Implemented"),
+        (
+            NotImplementedException::new("todo"),
+            StatusCode::NOT_IMPLEMENTED,
+            "Not Implemented",
+        ),
     ];
 
     for (ex, status, label) in cases {
         let res = ex.into_response();
         assert_eq!(res.status(), status);
-        let bytes = to_bytes(res.into_body(), 16 * 1024).await.expect("read body");
+        let bytes = to_bytes(res.into_body(), 16 * 1024)
+            .await
+            .expect("read body");
         let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
         assert_eq!(v["statusCode"], status.as_u16());
         assert_eq!(v["error"], label);
@@ -864,7 +895,9 @@ async fn use_request_decompression_rejects_unsupported_content_encoding() {
 
 #[tokio::test]
 async fn use_compression_sets_content_encoding_gzip_when_accepted() {
-    let router = NestFactory::create::<AppModule>().use_compression().into_router();
+    let router = NestFactory::create::<AppModule>()
+        .use_compression()
+        .into_router();
 
     let response = router
         .oneshot(
@@ -889,7 +922,9 @@ async fn use_compression_sets_content_encoding_gzip_when_accepted() {
 #[tokio::test]
 async fn use_request_id_preserves_incoming_header() {
     const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
-    let router = NestFactory::create::<AppModule>().use_request_id().into_router();
+    let router = NestFactory::create::<AppModule>()
+        .use_request_id()
+        .into_router();
 
     let response = router
         .oneshot(
@@ -1404,10 +1439,8 @@ async fn development_errors_keep_5xx_message() {
     let body = response.into_body();
     let bytes = to_bytes(body, 64 * 1024).await.expect("read body");
     let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
-    assert!(
-        v["message"]
-            .as_str()
-            .unwrap()
-            .contains("secret-internal-detail")
-    );
+    assert!(v["message"]
+        .as_str()
+        .unwrap()
+        .contains("secret-internal-detail"));
 }

@@ -3,6 +3,7 @@ name = "hello-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 nestrs = { path = "../../nestrs" }
@@ -10,4 +11,4 @@ nestrs-prisma = { path = "../../nestrs-prisma" }
 axum.workspace = true
 tokio.workspace = true
 serde = { version = "1", features = ["derive"] }
-validator = { version = "0.18", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }

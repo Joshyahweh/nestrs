@@ -66,12 +66,7 @@ mod tests {
             .layer(crate::interceptor_layer!(HeaderMarker));
 
         let res = app
-            .oneshot(
-                HttpRequest::builder()
-                    .uri("/")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(HttpRequest::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
 

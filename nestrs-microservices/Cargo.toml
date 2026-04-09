@@ -3,6 +3,13 @@ name = "nestrs-microservices"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Microservice transport and client primitives for nestrs."
+keywords = ["microservices", "events", "nest", "transport", "async"]
+categories = ["network-programming", "asynchronous"]
 
 [dependencies]
 async-trait = "0.1"

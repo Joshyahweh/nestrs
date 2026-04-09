@@ -4,6 +4,13 @@ NestJS-like API framework for Rust built on Axum and Tower.
 
 `nestrs` gives you a familiar module/controller/provider mental model with Rust performance and explicit typing.
 
+[![Security](https://github.com/Joshyahweh/nestrs/actions/workflows/security.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/security.yml)
+[![CI](https://github.com/Joshyahweh/nestrs/actions/workflows/ci.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/ci.yml)
+[![Performance](https://github.com/Joshyahweh/nestrs/actions/workflows/performance.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/performance.yml)
+[![Release Version Check](https://github.com/Joshyahweh/nestrs/actions/workflows/release-version-check.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/release-version-check.yml)
+[![Publish Crates](https://github.com/Joshyahweh/nestrs/actions/workflows/publish-crates.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/publish-crates.yml)
+[![Benchmark Storage Sync Template](https://github.com/Joshyahweh/nestrs/actions/workflows/benchmark-storage-sync.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/benchmark-storage-sync.yml)
+
 ## Highlights
 
 - Module-oriented architecture (`module`, `controller`, `injectable` macros)
@@ -24,6 +31,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - Release process: `RELEASE.md`
 - Code of conduct: `CODE_OF_CONDUCT.md`
 - Security disclosure policy: `SECURITY.md`
+- Licenses: `LICENSE-MIT` and `LICENSE-APACHE`
 
 ## Project Layout
 
@@ -73,9 +81,7 @@ Then open:
 ### Core docs
 
 - `website/docs.html` - docs portal entrypoint
-- `nestrs-plan-2.md` - full framework roadmap and parity plan
-- `HARDENING_STATUS.md` - implementation checkpoint summary
-- `PHASE5_OPTIONAL_CLOSEOUT.md` - optional hardening closeout
+- `CHANGELOG.md` - release history
 
 ### Platform/operations
 
@@ -87,8 +93,6 @@ Then open:
 
 - `benchmarks/BASELINE.md` - how to run, compare, and track benchmarks
 - `benchmarks/relative_thresholds.json` - active relative regression gate config
-- `benchmarks/recommended_relative_thresholds.md` - helper recommendation output
-- `benchmarks/threshold_reassessment_status.md` - readiness/status for next threshold retune
 
 ### Storage + publishing
 
@@ -114,9 +118,11 @@ python3 scripts/load/evaluate_threshold_reassessment.py
 ## CI Workflows
 
 - `.github/workflows/security.yml` - security checks
+- `.github/workflows/ci.yml` - PR/push checks on MSRV + stable + beta, plus fmt/clippy/docs/audit
 - `.github/workflows/performance.yml` - performance benches, gating, reporting, optional publishing
 - `.github/workflows/benchmark-storage-sync.yml` - storage sync template for S3/GCS/Azure
 - `.github/workflows/release-version-check.yml` - enforces `VERSION` and latest `CHANGELOG.md` release heading stay in sync
+- `.github/workflows/publish-crates.yml` - tag-driven crates.io publish via trusted publishing (OIDC)
 
 ## GitHub community templates
 

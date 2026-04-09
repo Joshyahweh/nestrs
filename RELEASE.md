@@ -18,9 +18,10 @@ This guide describes how to prepare and publish a new `nestrs` release.
 ### 2) Run quality gates
 
 ```bash
-cargo fmt --all -- --check
+cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
+cargo test --workspace --all-features
+cargo doc --workspace --all-features --no-deps
 ```
 
 ### 3) Run benchmark gates
@@ -33,7 +34,21 @@ python3 scripts/load/evaluate_threshold_reassessment.py
 
 If thresholds require retuning, document rationale and update via reviewed recommendation outputs.
 
-### 4) Confirm docs are current
+### 4) Dry-run publish validation
+
+```bash
+cargo publish -p nestrs-macros --dry-run --locked
+cargo publish -p nestrs-core --dry-run --locked
+cargo publish -p nestrs-microservices --dry-run --locked
+cargo publish -p nestrs-ws --dry-run --locked
+cargo publish -p nestrs-graphql --dry-run --locked
+cargo publish -p nestrs-openapi --dry-run --locked
+cargo publish -p nestrs --dry-run --locked
+cargo publish -p nestrs-prisma --dry-run --locked
+cargo publish -p nestrs-cli --dry-run --locked
+```
+
+### 5) Confirm docs are current
 
 Review and update as needed:
 
@@ -41,7 +56,6 @@ Review and update as needed:
 - `PRODUCTION_RUNBOOK.md`
 - `SECURITY.md`
 - `MICROSERVICES.md`
-- `HARDENING_STATUS.md`
 
 ## Versioning
 
@@ -76,15 +90,41 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-If publishing crates:
+### First publish (manual, required once)
+
+The first release should be manual from a maintainer machine. crates.io versions are immutable.
+
+Recommended initial order for this workspace:
 
 ```bash
-cargo publish -p nestrs-core
 cargo publish -p nestrs-macros
+sleep 30
+cargo publish -p nestrs-core
+sleep 30
+cargo publish -p nestrs-microservices
+sleep 30
+cargo publish -p nestrs-ws
+sleep 30
+cargo publish -p nestrs-graphql
+sleep 30
+cargo publish -p nestrs-openapi
+sleep 30
 cargo publish -p nestrs
+sleep 30
+cargo publish -p nestrs-prisma
+sleep 30
+cargo publish -p nestrs-cli
 ```
 
-Publish order may vary by dependency graph; publish foundational crates first.
+### Trusted Publishing (OIDC, no long-lived token)
+
+After the first manual publish:
+
+1. On crates.io, open each crate settings page and add this GitHub repository as a trusted publisher.
+2. Keep `.github/workflows/publish-crates.yml` enabled.
+3. Push a semver tag (`vX.Y.Z`) and GitHub Actions will publish in dependency order.
+
+This setup removes the need for `CRATES_IO_TOKEN` repository secrets.
 
 ## Post-release checks
 
@@ -101,3 +141,5 @@ If critical regression is found:
 2. Reproduce and scope impact
 3. Ship patch release (`X.Y.(Z+1)`) with fix
 4. Document issue and mitigation in release notes
+
+If a release is broken but must remain in history, use `cargo yank --vers <version> <crate>` to stop new consumers from selecting it.

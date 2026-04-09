@@ -100,3 +100,11 @@ Please include:
 ## Need help?
 
 Open an issue with context, what you tried, and what you expected.
+
+## Release process (maintainers)
+
+1. Bump versions and update `CHANGELOG.md`.
+2. Run local release gates (`fmt`, `clippy -D warnings`, `test`, `doc`, benchmark checks, publish dry-runs).
+3. Create and push tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+4. Tag triggers `.github/workflows/publish-crates.yml` (trusted publishing via OIDC).
+5. If a bad release ships, use `cargo yank` and immediately cut a patch release.

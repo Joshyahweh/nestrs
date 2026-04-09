@@ -138,7 +138,7 @@ Object storage path (S3/GCS/Azure Blob):
 - Use `.github/workflows/benchmark-storage-sync.yml` as a manual-dispatch template to sync `benchmarks/reports` to S3/GCS/Azure.
 - Complete provider bootstrap first via `BENCHMARK_STORAGE_SECRETS_CHECKLIST.md` (OIDC + least-privilege setup).
 
-Optional threshold tuning artifacts:
+Optional threshold tuning artifacts (generated locally; paths are gitignored and not part of public clones):
 
 - Recommendation helper outputs:
   - `benchmarks/recommended_relative_thresholds.json`

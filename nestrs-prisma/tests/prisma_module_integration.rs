@@ -3,7 +3,9 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use nestrs::prelude::*;
-use nestrs_prisma::{prisma_generate_command, PrismaModule, PrismaOptions, PrismaService, DEFAULT_SCHEMA_PATH};
+use nestrs_prisma::{
+    prisma_generate_command, PrismaModule, PrismaOptions, PrismaService, DEFAULT_SCHEMA_PATH,
+};
 use tower::util::ServiceExt;
 
 pub struct AppService {

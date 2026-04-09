@@ -2,7 +2,10 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
-use syn::{parse_macro_input, DeriveInput, Field, Fields, Ident, ImplItemFn, Item, ItemStruct, LitInt, LitStr, Meta, Result, Token, Type};
+use syn::{
+    parse_macro_input, DeriveInput, Field, Fields, Ident, ImplItemFn, Item, ItemStruct, LitInt,
+    LitStr, Meta, Result, Token, Type,
+};
 
 struct ModuleArgs {
     imports: Vec<Type>,
@@ -448,9 +451,12 @@ pub fn dto(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fields = match item_struct.fields {
         Fields::Named(named) => named,
         _ => {
-            return syn::Error::new_spanned(ident, "dto currently supports named-field structs only")
-                .to_compile_error()
-                .into()
+            return syn::Error::new_spanned(
+                ident,
+                "dto currently supports named-field structs only",
+            )
+            .to_compile_error()
+            .into()
         }
     };
 
@@ -488,4 +494,3 @@ pub fn derive_nest_dto(item: TokenStream) -> TokenStream {
 
     expanded.into()
 }
-

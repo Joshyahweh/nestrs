@@ -3,6 +3,13 @@ name = "nestrs-ws"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "WebSocket extension crate for nestrs."
+keywords = ["websocket", "axum", "nest", "tower", "async"]
+categories = ["network-programming", "web-programming", "asynchronous"]
 
 [dependencies]
 async-trait = "0.1"

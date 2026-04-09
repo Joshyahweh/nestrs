@@ -150,4 +150,3 @@ impl PrismaModule {
         prisma_generate_command(schema_path)
     }
 }
-

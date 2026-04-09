@@ -1,0 +1,51 @@
+name: publish-crates
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Trusted Publishing (OIDC) token for crates.io.
+      # Configure this repository as a trusted publisher on crates.io first.
+      - name: Authenticate to crates.io
+        id: crates-auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Export crates.io token for cargo
+        run: echo "CARGO_REGISTRY_TOKEN=${{ steps.crates-auth.outputs.token }}" >> "$GITHUB_ENV"
+
+      - name: Publish crates in dependency order
+        run: |
+          set -euo pipefail
+          cargo publish -p nestrs-macros --locked
+          sleep 30
+          cargo publish -p nestrs-core --locked
+          sleep 30
+          cargo publish -p nestrs-microservices --locked
+          sleep 30
+          cargo publish -p nestrs-ws --locked
+          sleep 30
+          cargo publish -p nestrs-graphql --locked
+          sleep 30
+          cargo publish -p nestrs-openapi --locked
+          sleep 30
+          cargo publish -p nestrs --locked
+          sleep 30
+          cargo publish -p nestrs-prisma --locked
+          sleep 30
+          cargo publish -p nestrs-cli --locked

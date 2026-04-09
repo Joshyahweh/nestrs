@@ -41,7 +41,6 @@ Review and update as needed:
 - `PRODUCTION_RUNBOOK.md`
 - `SECURITY.md`
 - `MICROSERVICES.md`
-- `HARDENING_STATUS.md`
 
 ## Versioning
 

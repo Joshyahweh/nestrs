@@ -4,6 +4,11 @@ NestJS-like API framework for Rust built on Axum and Tower.
 
 `nestrs` gives you a familiar module/controller/provider mental model with Rust performance and explicit typing.
 
+[![Security](https://github.com/Joshyahweh/nestrs/actions/workflows/security.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/security.yml)
+[![Performance](https://github.com/Joshyahweh/nestrs/actions/workflows/performance.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/performance.yml)
+[![Release Version Check](https://github.com/Joshyahweh/nestrs/actions/workflows/release-version-check.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/release-version-check.yml)
+[![Benchmark Storage Sync Template](https://github.com/Joshyahweh/nestrs/actions/workflows/benchmark-storage-sync.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/benchmark-storage-sync.yml)
+
 ## Highlights
 
 - Module-oriented architecture (`module`, `controller`, `injectable` macros)
@@ -73,9 +78,7 @@ Then open:
 ### Core docs
 
 - `website/docs.html` - docs portal entrypoint
-- `nestrs-plan-2.md` - full framework roadmap and parity plan
-- `HARDENING_STATUS.md` - implementation checkpoint summary
-- `PHASE5_OPTIONAL_CLOSEOUT.md` - optional hardening closeout
+- `CHANGELOG.md` - release history
 
 ### Platform/operations
 
@@ -87,8 +90,6 @@ Then open:
 
 - `benchmarks/BASELINE.md` - how to run, compare, and track benchmarks
 - `benchmarks/relative_thresholds.json` - active relative regression gate config
-- `benchmarks/recommended_relative_thresholds.md` - helper recommendation output
-- `benchmarks/threshold_reassessment_status.md` - readiness/status for next threshold retune
 
 ### Storage + publishing
 

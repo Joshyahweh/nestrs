@@ -30,4 +30,7 @@ pnpm-debug.log*
 .idea/
 .vscode/
 
-nestrs-plan-2.md
+# Maintainer-only planning / status (omit from public clones)
+nestrs-plan*.md
+HARDENING_STATUS.md
+PHASE5_OPTIONAL_CLOSEOUT.md

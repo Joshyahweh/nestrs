@@ -83,3 +83,34 @@ async fn create_with_modules_merges_dynamic_feature_router() {
         .expect("router should serve request");
     assert_eq!(feature.status(), StatusCode::OK);
 }
+
+#[derive(Default)]
+#[injectable]
+struct FeatureService;
+
+#[module(
+    providers = [FeatureService],
+    exports = [FeatureService],
+)]
+struct FeatureProvidersModule;
+
+#[derive(Default)]
+#[injectable]
+struct RootState {
+    feature: std::sync::Arc<FeatureService>,
+}
+
+#[module(
+    imports = [DynamicModule::from_module::<FeatureProvidersModule>()],
+    providers = [RootState],
+)]
+struct RootProvidersModule;
+
+#[test]
+fn dynamic_module_imports_can_export_providers() {
+    let (registry, _) = <RootProvidersModule as Module>::build();
+
+    let state = registry.get::<RootState>();
+    let feature = registry.get::<FeatureService>();
+    assert!(std::sync::Arc::ptr_eq(&state.feature, &feature));
+}

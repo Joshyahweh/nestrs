@@ -1,0 +1,4 @@
+# nestrs
+
+{{#include ../../README.md}}
+

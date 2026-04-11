@@ -1,0 +1,13 @@
+// Example Prisma schema — edit models here; apply with `prisma db push` / migrations.
+// Rust row types can mirror these fields with `sqlx::FromRow` (see hello-app `UserRow`).
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id    Int    @id @default(autoincrement())
+  email String @unique
+  name  String
+}

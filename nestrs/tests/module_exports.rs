@@ -129,7 +129,8 @@ mod private_provider_visibility {
     #[test]
     fn non_exported_provider_is_not_visible() {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let _ = <AppModule as Module>::build();
+            let (registry, _) = <AppModule as Module>::build();
+            let _ = registry.get::<ConsumerService>();
         }));
         assert!(result.is_err());
     }

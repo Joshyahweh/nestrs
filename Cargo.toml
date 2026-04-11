@@ -3,8 +3,10 @@ members = [
   "nestrs",
   "nestrs-core",
   "nestrs-macros",
+  "nestrs-events",
   "nestrs-prisma",
   "nestrs-microservices",
+  "nestrs-cqrs",
   "nestrs-ws",
   "nestrs-graphql",
   "nestrs-openapi",
@@ -16,8 +18,8 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "0.1.0"
-rust-version = "1.86"
+version = "0.1.1"
+rust-version = "1.88"
 repository = "https://github.com/Joshyahweh/nestrs"
 homepage = "https://github.com/Joshyahweh/nestrs"
 documentation = "https://docs.rs/nestrs"

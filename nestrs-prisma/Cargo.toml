@@ -6,14 +6,21 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 description = "Prisma integration helpers and providers for nestrs."
 keywords = ["prisma", "database", "nest", "orm", "axum"]
 categories = ["database", "web-programming"]
 
+[features]
+default = []
+# Real DB connectivity via SQLx (Postgres, SQLite, etc.) using `DATABASE_URL` / `PrismaOptions`.
+sqlx = ["dep:sqlx", "dep:tokio"]
+
 [dependencies]
-nestrs = { version = "0.1.0", path = "../nestrs" }
+nestrs = { version = "0.1.1", path = "../nestrs" }
 axum.workspace = true
+tokio = { workspace = true, optional = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "sqlite", "postgres"], optional = true }
 
 [dev-dependencies]
 tokio.workspace = true

@@ -1,0 +1,4 @@
+# Security
+
+{{#include ../../SECURITY.md}}
+

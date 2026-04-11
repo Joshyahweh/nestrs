@@ -5,10 +5,53 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+#[cfg(feature = "grpc")]
+mod grpc;
+mod kafka;
+mod mqtt;
+#[cfg(feature = "nats")]
+mod nats;
+#[cfg(feature = "redis")]
+mod redis;
+mod tcp;
+mod wire;
+
+#[cfg(feature = "grpc")]
+pub use grpc::{
+    GrpcMicroserviceOptions, GrpcMicroserviceServer, GrpcTransport, GrpcTransportOptions,
+};
+pub use kafka::KafkaTransport;
+#[cfg(feature = "kafka")]
+pub use kafka::{
+    kafka_cluster_reachable, kafka_cluster_reachable_with, KafkaConnectionOptions,
+    KafkaMicroserviceOptions, KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions,
+    KafkaTransportOptions,
+};
+pub use mqtt::MqttTransport;
+#[cfg(feature = "mqtt")]
+pub use mqtt::{
+    MqttMicroserviceOptions, MqttMicroserviceServer, MqttSocketOptions, MqttTlsMode,
+    MqttTransportOptions,
+};
+#[cfg(feature = "nats")]
+pub use nats::{
+    NatsMicroserviceOptions, NatsMicroserviceServer, NatsTransport, NatsTransportOptions,
+};
+pub use nestrs_events::EventBus;
+#[cfg(feature = "redis")]
+pub use redis::{
+    RedisMicroserviceOptions, RedisMicroserviceServer, RedisTransport, RedisTransportOptions,
+};
+pub use tcp::{TcpMicroserviceOptions, TcpMicroserviceServer, TcpTransport, TcpTransportOptions};
+
+#[doc(hidden)]
+pub use linkme;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageEnvelope<T> {
@@ -16,16 +59,24 @@ pub struct MessageEnvelope<T> {
     pub payload: T,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransportError {
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl TransportError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            details: None,
         }
+    }
+
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
     }
 }
 
@@ -41,6 +92,46 @@ pub trait Transport: Send + Sync + 'static {
         pattern: &str,
         payload: serde_json::Value,
     ) -> Result<(), TransportError>;
+}
+
+/// A Nest-style microservice handler registry entrypoint (controller/service methods annotated with
+/// `#[message_pattern]` / `#[event_pattern]` via the `#[micro_routes]` impl macro).
+#[async_trait]
+pub trait MicroserviceHandler: Send + Sync + 'static {
+    /// Handle a request/reply message pattern. Return `None` when the handler doesn't match `pattern`.
+    async fn handle_message(
+        &self,
+        pattern: &str,
+        payload: serde_json::Value,
+    ) -> Option<Result<serde_json::Value, TransportError>>;
+
+    /// Handle a fire-and-forget event pattern. Return `true` when the handler matched `pattern`.
+    async fn handle_event(&self, pattern: &str, payload: serde_json::Value) -> bool;
+}
+
+pub type MicroserviceHandlerFactory =
+    fn(&nestrs_core::ProviderRegistry) -> Arc<dyn MicroserviceHandler>;
+
+pub type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+#[async_trait]
+pub trait MicroserviceServer: Send + Sync + 'static {
+    async fn listen_with_shutdown(
+        self: Box<Self>,
+        shutdown: ShutdownFuture,
+    ) -> Result<(), TransportError>;
+}
+
+/// Implemented by `#[module(microservices = [...])]` to declare which providers handle patterns.
+pub trait MicroserviceModule {
+    fn microservice_handlers() -> Vec<MicroserviceHandlerFactory>;
+}
+
+pub fn handler_factory<T>(registry: &nestrs_core::ProviderRegistry) -> Arc<dyn MicroserviceHandler>
+where
+    T: nestrs_core::Injectable + MicroserviceHandler,
+{
+    registry.get::<T>()
 }
 
 /// Nest-like client proxy wrapper over a configured [`Transport`].
@@ -80,37 +171,150 @@ impl ClientProxy {
     }
 }
 
-type EventHandler =
-    Arc<dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
-
-/// In-process async event bus for integration/domain events.
-#[derive(Default)]
-pub struct EventBus {
-    handlers: RwLock<HashMap<String, Vec<EventHandler>>>,
+#[async_trait]
+impl nestrs_core::Injectable for ClientProxy {
+    fn construct(_registry: &nestrs_core::ProviderRegistry) -> Arc<Self> {
+        panic!(
+            "ClientProxy must be provided by ClientsModule::register(...) or constructed manually"
+        );
+    }
 }
 
-impl EventBus {
-    pub fn new() -> Self {
-        Self::default()
+/// Auto-wiring registration entry for `#[event_routes]` + `#[on_event("...")]` handlers.
+pub struct OnEventRegistration {
+    pub register: fn(&nestrs_core::ProviderRegistry),
+}
+
+#[linkme::distributed_slice]
+pub static ON_EVENT_REGISTRATIONS: [OnEventRegistration] = [..];
+
+/// Subscribe all `#[on_event]` handlers registered via `#[event_routes]`.
+pub fn wire_on_event_handlers(registry: &nestrs_core::ProviderRegistry) {
+    for reg in ON_EVENT_REGISTRATIONS.iter() {
+        (reg.register)(registry);
+    }
+}
+
+#[derive(Clone)]
+pub struct ClientConfig {
+    pub name: &'static str,
+    pub transport: Arc<dyn Transport>,
+}
+
+impl ClientConfig {
+    pub fn new(name: &'static str, transport: Arc<dyn Transport>) -> Self {
+        Self { name, transport }
     }
 
-    pub fn subscribe<F, Fut>(&self, pattern: impl Into<String>, handler: F)
-    where
-        F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
-    {
-        let mut guard = self.handlers.write().expect("event bus lock poisoned");
-        let entry = guard.entry(pattern.into()).or_default();
-        entry.push(Arc::new(move |payload| Box::pin(handler(payload))));
+    pub fn tcp(name: &'static str, options: TcpTransportOptions) -> Self {
+        Self::new(name, Arc::new(TcpTransport::new(options)))
     }
 
-    pub async fn emit_json(&self, pattern: &str, payload: serde_json::Value) {
-        let handlers = {
-            let guard = self.handlers.read().expect("event bus lock poisoned");
-            guard.get(pattern).cloned().unwrap_or_default()
-        };
-        for handler in handlers {
-            handler(payload.clone()).await;
+    #[cfg(feature = "nats")]
+    pub fn nats(name: &'static str, options: NatsTransportOptions) -> Self {
+        Self::new(name, Arc::new(NatsTransport::new(options)))
+    }
+
+    #[cfg(feature = "redis")]
+    pub fn redis(name: &'static str, options: RedisTransportOptions) -> Self {
+        Self::new(name, Arc::new(RedisTransport::new(options)))
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn grpc(name: &'static str, options: GrpcTransportOptions) -> Self {
+        Self::new(name, Arc::new(GrpcTransport::new(options)))
+    }
+
+    #[cfg(feature = "kafka")]
+    pub fn kafka(name: &'static str, options: KafkaTransportOptions) -> Self {
+        Self::new(name, Arc::new(KafkaTransport::new(options)))
+    }
+
+    #[cfg(not(feature = "kafka"))]
+    pub fn kafka(name: &'static str) -> Self {
+        Self::new(name, Arc::new(KafkaTransport::new()))
+    }
+
+    #[cfg(feature = "mqtt")]
+    pub fn mqtt(name: &'static str, options: MqttTransportOptions) -> Self {
+        Self::new(name, Arc::new(MqttTransport::new(options)))
+    }
+
+    #[cfg(not(feature = "mqtt"))]
+    pub fn mqtt(name: &'static str) -> Self {
+        Self::new(name, Arc::new(MqttTransport::new()))
+    }
+}
+
+#[derive(Clone)]
+pub struct ClientsService {
+    clients: Arc<HashMap<&'static str, ClientProxy>>,
+}
+
+impl ClientsService {
+    pub fn get(&self, name: &str) -> Option<ClientProxy> {
+        self.clients.get(name).cloned()
+    }
+
+    pub fn expect(&self, name: &str) -> ClientProxy {
+        self.get(name).unwrap_or_else(|| {
+            let known = self.clients.keys().copied().collect::<Vec<_>>().join(", ");
+            panic!("ClientProxy `{name}` not registered. Known clients: [{known}]");
+        })
+    }
+}
+
+#[async_trait]
+impl nestrs_core::Injectable for ClientsService {
+    fn construct(_registry: &nestrs_core::ProviderRegistry) -> Arc<Self> {
+        panic!("ClientsService must be provided by ClientsModule::register(...)");
+    }
+}
+
+pub struct ClientsModule;
+
+impl ClientsModule {
+    /// Register named microservice clients into a runtime [`nestrs_core::DynamicModule`].
+    ///
+    /// Exports:
+    /// - [`ClientsService`]
+    /// - [`EventBus`]
+    /// - [`ClientProxy`] **only** when exactly one client config is provided (default client).
+    pub fn register(configs: &[ClientConfig]) -> nestrs_core::DynamicModule {
+        if configs.is_empty() {
+            panic!("ClientsModule::register requires at least one ClientConfig");
         }
+
+        let mut seen = std::collections::HashSet::<&'static str>::new();
+        let mut clients = HashMap::<&'static str, ClientProxy>::new();
+        for cfg in configs {
+            if !seen.insert(cfg.name) {
+                panic!(
+                    "ClientsModule::register: duplicate client name `{}`",
+                    cfg.name
+                );
+            }
+            clients.insert(cfg.name, ClientProxy::new(cfg.transport.clone()));
+        }
+
+        let mut registry = nestrs_core::ProviderRegistry::new();
+        registry.register::<EventBus>();
+
+        let clients_service = Arc::new(ClientsService {
+            clients: Arc::new(clients),
+        });
+        registry.override_provider::<ClientsService>(clients_service);
+
+        let mut exports = vec![TypeId::of::<ClientsService>(), TypeId::of::<EventBus>()];
+
+        if configs.len() == 1 {
+            let first = &configs[0];
+            registry.override_provider::<ClientProxy>(Arc::new(ClientProxy::new(
+                first.transport.clone(),
+            )));
+            exports.push(TypeId::of::<ClientProxy>());
+        }
+
+        nestrs_core::DynamicModule::from_parts(registry, axum::Router::new(), exports)
     }
 }

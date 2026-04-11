@@ -1172,7 +1172,7 @@ impl NestApplication {
         if trimmed.is_empty() {
             "/".to_string()
         } else {
-            format!("/{}", trimmed)
+            format!("/{trimmed}")
         }
     }
 
@@ -1185,7 +1185,7 @@ impl NestApplication {
         if inner.is_empty() {
             "/".to_string()
         } else {
-            format!("/{}", inner)
+            format!("/{inner}")
         }
     }
 
@@ -1552,7 +1552,7 @@ impl NestApplication {
         if inner.is_empty() {
             "/".to_string()
         } else {
-            format!("/{}", inner)
+            format!("/{inner}")
         }
     }
 
@@ -2610,7 +2610,7 @@ where
         let axum::Json(value) =
             <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(req, state)
                 .await
-                .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {}", e)))?;
+                .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
 
         value.validate().map_err(__nestrs_validation_failed)?;
 
@@ -2638,7 +2638,7 @@ where
                 parts, state,
             )
             .await
-            .map_err(|e| BadRequestException::new(format!("Invalid query: {}", e)))?;
+            .map_err(|e| BadRequestException::new(format!("Invalid query: {e}")))?;
         value.validate().map_err(__nestrs_validation_failed)?;
         Ok(Self(value))
     }
@@ -2664,7 +2664,7 @@ where
                 parts, state,
             )
             .await
-            .map_err(|e| BadRequestException::new(format!("Invalid path params: {}", e)))?;
+            .map_err(|e| BadRequestException::new(format!("Invalid path params: {e}")))?;
         value.validate().map_err(__nestrs_validation_failed)?;
         Ok(Self(value))
     }

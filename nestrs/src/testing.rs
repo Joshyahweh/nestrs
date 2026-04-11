@@ -6,6 +6,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use tower::ServiceExt;
 
+type TestingRegistryOverride = Box<dyn FnOnce(&mut ProviderRegistry) + Send>;
+
 pub struct TestingModule {
     registry: Arc<ProviderRegistry>,
     router: axum::Router,
@@ -37,7 +39,7 @@ pub struct TestingModuleBuilder<M>
 where
     M: ModuleGraph,
 {
-    overrides: Vec<Box<dyn FnOnce(&mut ProviderRegistry) + Send>>,
+    overrides: Vec<TestingRegistryOverride>,
     configure_http:
         Option<Box<dyn FnOnce(crate::NestApplication) -> crate::NestApplication + Send>>,
     _marker: PhantomData<M>,
@@ -129,6 +131,15 @@ where
             registry: built_registry,
             router: built_router,
         }
+    }
+}
+
+impl<M> Default for TestingModuleBuilder<M>
+where
+    M: ModuleGraph,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -48,4 +48,3 @@ async fn openapi_json_includes_registered_routes() {
         "expected /v1/o/ping to be present in OpenAPI doc"
     );
 }
-

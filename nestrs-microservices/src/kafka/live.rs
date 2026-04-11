@@ -6,9 +6,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use super::connection::client_builder_from_parts;
 use async_trait::async_trait;
 use chrono::Utc;
-use super::connection::client_builder_from_parts;
 use rskafka::client::partition::{Compression, OffsetAt, UnknownTopicHandling};
 use rskafka::record::Record;
 use serde_json::Value;
@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::connection::KafkaConnectionOptions;
-use crate::wire::{dispatch_emit, dispatch_send, WireKind, WireRequest, WireError, WireResponse};
+use crate::wire::{dispatch_emit, dispatch_send, WireError, WireKind, WireRequest, WireResponse};
 use crate::{MicroserviceHandler, MicroserviceServer, ShutdownFuture, Transport, TransportError};
 
 /// Client / producer options.
@@ -85,8 +85,11 @@ impl KafkaTransport {
         if let Some(c) = g.as_ref() {
             return Ok(c.clone());
         }
-        let builder = client_builder_from_parts(self.options.bootstrap_brokers.clone(), &self.options.connection)
-            .map_err(|e| TransportError::new(format!("kafka client options: {e}")))?;
+        let builder = client_builder_from_parts(
+            self.options.bootstrap_brokers.clone(),
+            &self.options.connection,
+        )
+        .map_err(|e| TransportError::new(format!("kafka client options: {e}")))?;
         let c = Arc::new(
             builder
                 .build()
@@ -124,7 +127,9 @@ impl KafkaTransport {
         let c = self.connect().await?;
         c.partition_client(topic.to_owned(), 0, UnknownTopicHandling::Retry)
             .await
-            .map_err(|e| TransportError::new(format!("kafka partition client `{topic}` failed: {e}")))
+            .map_err(|e| {
+                TransportError::new(format!("kafka partition client `{topic}` failed: {e}"))
+            })
     }
 }
 
@@ -162,7 +167,8 @@ impl Transport for KafkaTransport {
             .await
             .map_err(|e| TransportError::new(format!("kafka produce failed: {e}")))?;
         #[cfg(feature = "microservice-metrics")]
-        metrics::counter!("nestrs_microservice_kafka_produce_total", "topic" => "requests").increment(1);
+        metrics::counter!("nestrs_microservice_kafka_produce_total", "topic" => "requests")
+            .increment(1);
 
         let deadline = tokio::time::Instant::now() + self.options.request_timeout;
         let mut next_off = start_off;
@@ -193,8 +199,9 @@ impl Transport for KafkaTransport {
                     .value
                     .as_deref()
                     .ok_or_else(|| TransportError::new("kafka reply missing value"))?;
-                let wire: WireResponse = serde_json::from_slice(val)
-                    .map_err(|e| TransportError::new(format!("deserialize response failed: {e}")))?;
+                let wire: WireResponse = serde_json::from_slice(val).map_err(|e| {
+                    TransportError::new(format!("deserialize response failed: {e}"))
+                })?;
                 if wire.ok {
                     return Ok(wire.payload.unwrap_or(Value::Null));
                 }
@@ -233,7 +240,8 @@ impl Transport for KafkaTransport {
             .await
             .map_err(|e| TransportError::new(format!("kafka produce failed: {e}")))?;
         #[cfg(feature = "microservice-metrics")]
-        metrics::counter!("nestrs_microservice_kafka_produce_total", "topic" => "requests").increment(1);
+        metrics::counter!("nestrs_microservice_kafka_produce_total", "topic" => "requests")
+            .increment(1);
         Ok(())
     }
 }
@@ -282,7 +290,10 @@ pub struct KafkaMicroserviceServer {
 }
 
 impl KafkaMicroserviceServer {
-    pub fn new(options: KafkaMicroserviceOptions, handlers: Vec<Arc<dyn MicroserviceHandler>>) -> Self {
+    pub fn new(
+        options: KafkaMicroserviceOptions,
+        handlers: Vec<Arc<dyn MicroserviceHandler>>,
+    ) -> Self {
         Self {
             options,
             client: Mutex::new(None),
@@ -296,8 +307,11 @@ impl KafkaMicroserviceServer {
         if let Some(c) = g.as_ref() {
             return Ok(c.clone());
         }
-        let builder = client_builder_from_parts(self.options.bootstrap_brokers.clone(), &self.options.connection)
-            .map_err(|e| TransportError::new(format!("kafka client options: {e}")))?;
+        let builder = client_builder_from_parts(
+            self.options.bootstrap_brokers.clone(),
+            &self.options.connection,
+        )
+        .map_err(|e| TransportError::new(format!("kafka client options: {e}")))?;
         let c = Arc::new(
             builder
                 .build()
@@ -317,7 +331,11 @@ impl KafkaMicroserviceServer {
             }
         }
         let req_pc = c
-            .partition_client(self.options.requests_topic(), 0, UnknownTopicHandling::Retry)
+            .partition_client(
+                self.options.requests_topic(),
+                0,
+                UnknownTopicHandling::Retry,
+            )
             .await
             .map_err(|e| TransportError::new(format!("kafka partition client failed: {e}")))?;
         let earliest = req_pc.get_offset(OffsetAt::Earliest).await.unwrap_or(0);
@@ -327,7 +345,8 @@ impl KafkaMicroserviceServer {
     }
 
     pub async fn listen(self) -> Result<(), TransportError> {
-        self.listen_with_shutdown(std::future::pending::<()>()).await
+        self.listen_with_shutdown(std::future::pending::<()>())
+            .await
     }
 
     pub async fn listen_with_shutdown<F>(self, shutdown: F) -> Result<(), TransportError>
@@ -436,7 +455,10 @@ impl KafkaMicroserviceServer {
 
 #[async_trait]
 impl MicroserviceServer for KafkaMicroserviceServer {
-    async fn listen_with_shutdown(self: Box<Self>, shutdown: ShutdownFuture) -> Result<(), TransportError> {
+    async fn listen_with_shutdown(
+        self: Box<Self>,
+        shutdown: ShutdownFuture,
+    ) -> Result<(), TransportError> {
         (*self).listen_with_shutdown(shutdown).await
     }
 }

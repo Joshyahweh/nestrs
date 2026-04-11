@@ -79,4 +79,3 @@ where
         Err(ClientIpMissing)
     }
 }
-

@@ -30,4 +30,3 @@ impl RouteRegistry {
         guard.clone()
     }
 }
-

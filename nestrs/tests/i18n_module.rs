@@ -74,12 +74,8 @@ async fn i18n_resolves_locale_and_translates() {
     assert_eq!(std::str::from_utf8(&body).expect("utf8"), "Hello");
 
     // Interpolation.
-    let res = client
-        .get("/i18n/welcome?lang=fr")
-        .send()
-        .await;
+    let res = client.get("/i18n/welcome?lang=fr").send().await;
     assert_eq!(res.status(), StatusCode::OK);
     let body = to_bytes(res.into_body(), 1024).await.expect("body");
     assert_eq!(std::str::from_utf8(&body).expect("utf8"), "Bonjour, Ada!");
 }
-

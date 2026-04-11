@@ -46,10 +46,8 @@ hello world\r\n\
         .post("/upload")
         .header(
             axum::http::header::CONTENT_TYPE,
-            axum::http::HeaderValue::from_str(&format!(
-                "multipart/form-data; boundary={boundary}"
-            ))
-            .unwrap(),
+            axum::http::HeaderValue::from_str(&format!("multipart/form-data; boundary={boundary}"))
+                .unwrap(),
         )
         .body(Body::from(body))
         .send()
@@ -63,4 +61,3 @@ hello world\r\n\
         "unexpected response body: {s}"
     );
 }
-

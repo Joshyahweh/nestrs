@@ -73,7 +73,8 @@ impl CacheEntry {
     }
 
     fn ttl(&self) -> Option<Duration> {
-        self.expires_at.and_then(|t| t.checked_duration_since(Instant::now()))
+        self.expires_at
+            .and_then(|t| t.checked_duration_since(Instant::now()))
     }
 }
 
@@ -202,9 +203,11 @@ impl CacheService {
                 let Some(value) = self.get_json(key).await else {
                     return Ok(None);
                 };
-                serde_json::from_value(value).map(Some).map_err(|e| CacheError {
-                    message: format!("cache decode failed: {e}"),
-                })
+                serde_json::from_value(value)
+                    .map(Some)
+                    .map_err(|e| CacheError {
+                        message: format!("cache decode failed: {e}"),
+                    })
             }
             #[cfg(feature = "cache-redis")]
             CacheBackend::Redis { .. } => {
@@ -220,25 +223,26 @@ impl CacheService {
                 let Some(raw) = raw else {
                     return Ok(None);
                 };
-                serde_json::from_str(&raw).map(Some).map_err(|e| CacheError {
-                    message: format!("cache decode failed: {e}"),
-                })
+                serde_json::from_str(&raw)
+                    .map(Some)
+                    .map_err(|e| CacheError {
+                        message: format!("cache decode failed: {e}"),
+                    })
             }
         }
     }
 
-    pub async fn set_json(&self, key: impl Into<String>, value: serde_json::Value, ttl: Option<Duration>) {
+    pub async fn set_json(
+        &self,
+        key: impl Into<String>,
+        value: serde_json::Value,
+        ttl: Option<Duration>,
+    ) {
         match &self.backend {
             CacheBackend::InMemory { inner } => {
                 let expires_at = ttl.and_then(|d| Instant::now().checked_add(d));
                 let mut guard = inner.write().await;
-                guard.insert(
-                    key.into(),
-                    CacheEntry {
-                        value,
-                        expires_at,
-                    },
-                );
+                guard.insert(key.into(), CacheEntry { value, expires_at });
             }
             #[cfg(feature = "cache-redis")]
             CacheBackend::Redis { .. } => {
@@ -257,14 +261,20 @@ impl CacheService {
                 cmd.arg(&rk).arg(payload);
                 if let Some(ttl) = ttl {
                     // Use millisecond precision to match in-memory TTL granularity.
-                    cmd.arg("PX").arg(ttl.as_millis().min(u128::from(i64::MAX as u64)) as i64);
+                    cmd.arg("PX")
+                        .arg(ttl.as_millis().min(u128::from(i64::MAX as u64)) as i64);
                 }
                 let _: redis::RedisResult<()> = cmd.query_async::<()>(&mut conn).await;
             }
         }
     }
 
-    pub async fn set<T>(&self, key: impl Into<String>, value: &T, ttl: Option<Duration>) -> Result<(), CacheError>
+    pub async fn set<T>(
+        &self,
+        key: impl Into<String>,
+        value: &T,
+        ttl: Option<Duration>,
+    ) -> Result<(), CacheError>
     where
         T: Serialize,
     {
@@ -358,7 +368,8 @@ mod tests {
         let registry = ProviderRegistry::new();
         let cache = CacheService::construct(&registry);
 
-        cache.set("k", &serde_json::json!({"v": 1}), None)
+        cache
+            .set("k", &serde_json::json!({"v": 1}), None)
             .await
             .unwrap();
         let v: serde_json::Value = cache.get("k").await.unwrap().unwrap();
@@ -374,7 +385,12 @@ mod tests {
         let registry = ProviderRegistry::new();
         let cache = CacheService::construct(&registry);
 
-        cache.set("k", &serde_json::json!({"v": 1}), Some(Duration::from_millis(30)))
+        cache
+            .set(
+                "k",
+                &serde_json::json!({"v": 1}),
+                Some(Duration::from_millis(30)),
+            )
             .await
             .unwrap();
         assert!(cache.ttl("k").await.is_some());
@@ -383,4 +399,3 @@ mod tests {
         assert!(cache.ttl("k").await.is_none());
     }
 }
-

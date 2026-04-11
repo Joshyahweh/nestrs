@@ -12,7 +12,10 @@ struct PingHandler;
 
 #[async_trait]
 impl CommandHandler<Ping> for PingHandler {
-    async fn execute(&self, _command: Ping) -> Result<<Ping as Command>::Response, nestrs_cqrs::CqrsError> {
+    async fn execute(
+        &self,
+        _command: Ping,
+    ) -> Result<<Ping as Command>::Response, nestrs_cqrs::CqrsError> {
         Ok("pong".to_string())
     }
 }
@@ -27,7 +30,10 @@ struct GetAnswerHandler;
 
 #[async_trait]
 impl QueryHandler<GetAnswer> for GetAnswerHandler {
-    async fn execute(&self, _query: GetAnswer) -> Result<<GetAnswer as Query>::Response, nestrs_cqrs::CqrsError> {
+    async fn execute(
+        &self,
+        _query: GetAnswer,
+    ) -> Result<<GetAnswer as Query>::Response, nestrs_cqrs::CqrsError> {
         Ok(42)
     }
 }
@@ -43,8 +49,11 @@ async fn command_bus_register_and_execute() {
 #[tokio::test]
 async fn query_bus_register_and_execute() {
     let bus = QueryBus::new();
-    bus.register::<GetAnswer, _>(Arc::new(GetAnswerHandler)).await;
-    let res = bus.execute(GetAnswer).await.expect("execute should succeed");
+    bus.register::<GetAnswer, _>(Arc::new(GetAnswerHandler))
+        .await;
+    let res = bus
+        .execute(GetAnswer)
+        .await
+        .expect("execute should succeed");
     assert_eq!(res, 42);
 }
-

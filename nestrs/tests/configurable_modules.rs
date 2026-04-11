@@ -32,11 +32,11 @@ fn configurable_module_builder_for_root_overrides_options() {
 
 #[tokio::test]
 async fn configurable_module_builder_for_root_async_overrides_options() {
-    let dm = ConfigurableModuleBuilder::<MyOptions>::for_root_async::<MyConfigModule, _, _>(|| async {
-        MyOptions { value: 7 }
-    })
-    .await;
+    let dm =
+        ConfigurableModuleBuilder::<MyOptions>::for_root_async::<MyConfigModule, _, _>(|| async {
+            MyOptions { value: 7 }
+        })
+        .await;
     let service = dm.registry.get::<MyService>();
     assert_eq!(service.value(), 7);
 }
-

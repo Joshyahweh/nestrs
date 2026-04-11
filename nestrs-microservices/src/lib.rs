@@ -11,38 +11,44 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-mod wire;
-mod tcp;
-mod kafka;
-mod mqtt;
 #[cfg(feature = "grpc")]
 mod grpc;
+mod kafka;
+mod mqtt;
 #[cfg(feature = "nats")]
 mod nats;
 #[cfg(feature = "redis")]
 mod redis;
+mod tcp;
+mod wire;
 
+#[cfg(feature = "grpc")]
+pub use grpc::{
+    GrpcMicroserviceOptions, GrpcMicroserviceServer, GrpcTransport, GrpcTransportOptions,
+};
 pub use kafka::KafkaTransport;
 #[cfg(feature = "kafka")]
 pub use kafka::{
-    kafka_cluster_reachable, kafka_cluster_reachable_with, KafkaConnectionOptions, KafkaMicroserviceOptions,
-    KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions, KafkaTransportOptions,
+    kafka_cluster_reachable, kafka_cluster_reachable_with, KafkaConnectionOptions,
+    KafkaMicroserviceOptions, KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions,
+    KafkaTransportOptions,
 };
 pub use mqtt::MqttTransport;
 #[cfg(feature = "mqtt")]
 pub use mqtt::{
-    MqttMicroserviceOptions, MqttMicroserviceServer, MqttSocketOptions, MqttTlsMode, MqttTransportOptions,
+    MqttMicroserviceOptions, MqttMicroserviceServer, MqttSocketOptions, MqttTlsMode,
+    MqttTransportOptions,
+};
+#[cfg(feature = "nats")]
+pub use nats::{
+    NatsMicroserviceOptions, NatsMicroserviceServer, NatsTransport, NatsTransportOptions,
 };
 pub use nestrs_events::EventBus;
-pub use tcp::{TcpMicroserviceOptions, TcpMicroserviceServer, TcpTransport, TcpTransportOptions};
-#[cfg(feature = "grpc")]
-pub use grpc::{GrpcMicroserviceOptions, GrpcMicroserviceServer, GrpcTransport, GrpcTransportOptions};
-#[cfg(feature = "nats")]
-pub use nats::{NatsMicroserviceOptions, NatsMicroserviceServer, NatsTransport, NatsTransportOptions};
 #[cfg(feature = "redis")]
 pub use redis::{
     RedisMicroserviceOptions, RedisMicroserviceServer, RedisTransport, RedisTransportOptions,
 };
+pub use tcp::{TcpMicroserviceOptions, TcpMicroserviceServer, TcpTransport, TcpTransportOptions};
 
 #[doc(hidden)]
 pub use linkme;
@@ -168,7 +174,9 @@ impl ClientProxy {
 #[async_trait]
 impl nestrs_core::Injectable for ClientProxy {
     fn construct(_registry: &nestrs_core::ProviderRegistry) -> Arc<Self> {
-        panic!("ClientProxy must be provided by ClientsModule::register(...) or constructed manually");
+        panic!(
+            "ClientProxy must be provided by ClientsModule::register(...) or constructed manually"
+        );
     }
 }
 
@@ -250,12 +258,7 @@ impl ClientsService {
 
     pub fn expect(&self, name: &str) -> ClientProxy {
         self.get(name).unwrap_or_else(|| {
-            let known = self
-                .clients
-                .keys()
-                .copied()
-                .collect::<Vec<_>>()
-                .join(", ");
+            let known = self.clients.keys().copied().collect::<Vec<_>>().join(", ");
             panic!("ClientProxy `{name}` not registered. Known clients: [{known}]");
         })
     }
@@ -286,7 +289,10 @@ impl ClientsModule {
         let mut clients = HashMap::<&'static str, ClientProxy>::new();
         for cfg in configs {
             if !seen.insert(cfg.name) {
-                panic!("ClientsModule::register: duplicate client name `{}`", cfg.name);
+                panic!(
+                    "ClientsModule::register: duplicate client name `{}`",
+                    cfg.name
+                );
             }
             clients.insert(cfg.name, ClientProxy::new(cfg.transport.clone()));
         }
@@ -299,14 +305,13 @@ impl ClientsModule {
         });
         registry.override_provider::<ClientsService>(clients_service);
 
-        let mut exports = vec![
-            TypeId::of::<ClientsService>(),
-            TypeId::of::<EventBus>(),
-        ];
+        let mut exports = vec![TypeId::of::<ClientsService>(), TypeId::of::<EventBus>()];
 
         if configs.len() == 1 {
             let first = &configs[0];
-            registry.override_provider::<ClientProxy>(Arc::new(ClientProxy::new(first.transport.clone())));
+            registry.override_provider::<ClientProxy>(Arc::new(ClientProxy::new(
+                first.transport.clone(),
+            )));
             exports.push(TypeId::of::<ClientProxy>());
         }
 

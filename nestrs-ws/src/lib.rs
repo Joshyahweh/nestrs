@@ -31,7 +31,8 @@ pub struct WsClient {
 
 impl WsClient {
     pub fn emit<T: Serialize>(&self, event: &str, data: T) -> Result<(), WsSendError> {
-        let payload = serde_json::to_value(data).map_err(|e| WsSendError::Serialize(e.to_string()))?;
+        let payload =
+            serde_json::to_value(data).map_err(|e| WsSendError::Serialize(e.to_string()))?;
         self.emit_json(event, payload)
     }
 
@@ -42,7 +43,9 @@ impl WsClient {
         };
         let text =
             serde_json::to_string(&frame).map_err(|e| WsSendError::Serialize(e.to_string()))?;
-        self.tx.send(Message::Text(text)).map_err(|_| WsSendError::Closed)
+        self.tx
+            .send(Message::Text(text))
+            .map_err(|_| WsSendError::Closed)
     }
 }
 

@@ -116,4 +116,3 @@ async fn forward_ref_breaks_back_edge_and_builds_router() {
         .expect("router should serve request");
     assert_eq!(b.status(), StatusCode::OK);
 }
-

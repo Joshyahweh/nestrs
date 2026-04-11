@@ -15,18 +15,9 @@ pub struct KafkaTlsOptions {
 /// SASL authentication (maps to rskafka [`SaslConfig`]).
 #[derive(Clone, Debug)]
 pub enum KafkaSaslOptions {
-    Plain {
-        username: String,
-        password: String,
-    },
-    ScramSha256 {
-        username: String,
-        password: String,
-    },
-    ScramSha512 {
-        username: String,
-        password: String,
-    },
+    Plain { username: String, password: String },
+    ScramSha256 { username: String, password: String },
+    ScramSha512 { username: String, password: String },
 }
 
 /// Shared broker connection knobs for [`super::KafkaTransportOptions`] and [`super::KafkaMicroserviceOptions`].
@@ -61,7 +52,9 @@ fn build_rustls_config(opts: &KafkaTlsOptions) -> Result<Arc<rustls::ClientConfi
         let mut cursor = std::io::Cursor::new(pem.as_bytes());
         for item in rustls_pemfile::certs(&mut cursor) {
             let cert = item.map_err(|e| format!("PEM parse: {e}"))?;
-            root_store.add(cert).map_err(|e| format!("bad CA cert: {e}"))?;
+            root_store
+                .add(cert)
+                .map_err(|e| format!("bad CA cert: {e}"))?;
         }
     } else {
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());

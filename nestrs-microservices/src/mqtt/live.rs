@@ -12,10 +12,10 @@ use rumqttc::{
     AsyncClient, Event, Incoming, MqttOptions, QoS, TlsConfiguration, Transport as RumqttTransport,
 };
 use serde_json::Value;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
 
-use crate::wire::{dispatch_emit, dispatch_send, WireKind, WireRequest, WireError, WireResponse};
+use crate::wire::{dispatch_emit, dispatch_send, WireError, WireKind, WireRequest, WireResponse};
 use crate::{MicroserviceHandler, MicroserviceServer, ShutdownFuture, Transport, TransportError};
 
 /// TLS mode for MQTT (native-tls).
@@ -63,10 +63,12 @@ fn apply_mqtt_socket(mqtt_opts: &mut MqttOptions, socket: &MqttSocketOptions) {
     if let Some(tls) = &socket.tls {
         let transport = match tls {
             MqttTlsMode::Native => RumqttTransport::tls_with_config(TlsConfiguration::Native),
-            MqttTlsMode::CaPem(ca) => RumqttTransport::tls_with_config(TlsConfiguration::SimpleNative {
-                ca: ca.clone(),
-                client_auth: None,
-            }),
+            MqttTlsMode::CaPem(ca) => {
+                RumqttTransport::tls_with_config(TlsConfiguration::SimpleNative {
+                    ca: ca.clone(),
+                    client_auth: None,
+                })
+            }
         };
         mqtt_opts.set_transport(transport);
     }
@@ -175,7 +177,8 @@ impl Transport for MqttTransport {
             .await
             .map_err(|e| TransportError::new(format!("mqtt publish failed: {e}")))?;
         #[cfg(feature = "microservice-metrics")]
-        metrics::counter!("nestrs_microservice_mqtt_publish_total", "topic" => "requests").increment(1);
+        metrics::counter!("nestrs_microservice_mqtt_publish_total", "topic" => "requests")
+            .increment(1);
 
         let text = match self.wait_reply(rx).await {
             Ok(t) => t,
@@ -219,7 +222,8 @@ impl Transport for MqttTransport {
             .await
             .map_err(|e| TransportError::new(format!("mqtt publish failed: {e}")))?;
         #[cfg(feature = "microservice-metrics")]
-        metrics::counter!("nestrs_microservice_mqtt_publish_total", "topic" => "requests").increment(1);
+        metrics::counter!("nestrs_microservice_mqtt_publish_total", "topic" => "requests")
+            .increment(1);
         Ok(())
     }
 }
@@ -268,19 +272,27 @@ pub struct MqttMicroserviceServer {
 }
 
 impl MqttMicroserviceServer {
-    pub fn new(options: MqttMicroserviceOptions, handlers: Vec<Arc<dyn MicroserviceHandler>>) -> Self {
+    pub fn new(
+        options: MqttMicroserviceOptions,
+        handlers: Vec<Arc<dyn MicroserviceHandler>>,
+    ) -> Self {
         Self { options, handlers }
     }
 
     pub async fn listen(self) -> Result<(), TransportError> {
-        self.listen_with_shutdown(std::future::pending::<()>()).await
+        self.listen_with_shutdown(std::future::pending::<()>())
+            .await
     }
 
     pub async fn listen_with_shutdown<F>(self, shutdown: F) -> Result<(), TransportError>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
-        let mut mqtt_opts = MqttOptions::new(&self.options.client_id, &self.options.host, self.options.port);
+        let mut mqtt_opts = MqttOptions::new(
+            &self.options.client_id,
+            &self.options.host,
+            self.options.port,
+        );
         mqtt_opts.set_keep_alive(Duration::from_secs(30));
         apply_mqtt_socket(&mut mqtt_opts, &self.options.socket);
         let (client, mut eventloop) = AsyncClient::new(mqtt_opts, 128);
@@ -355,7 +367,10 @@ impl MqttMicroserviceServer {
 
 #[async_trait]
 impl MicroserviceServer for MqttMicroserviceServer {
-    async fn listen_with_shutdown(self: Box<Self>, shutdown: ShutdownFuture) -> Result<(), TransportError> {
+    async fn listen_with_shutdown(
+        self: Box<Self>,
+        shutdown: ShutdownFuture,
+    ) -> Result<(), TransportError> {
         (*self).listen_with_shutdown(shutdown).await
     }
 }

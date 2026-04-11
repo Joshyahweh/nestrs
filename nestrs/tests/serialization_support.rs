@@ -71,4 +71,3 @@ async fn serialize_macro_wraps_ok_values_in_json() {
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["error"], "Bad Request");
 }
-

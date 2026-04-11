@@ -22,4 +22,3 @@ where
         Ok(Self(bytes))
     }
 }
-

@@ -62,4 +62,3 @@ async fn queued_jobs_are_processed_by_registered_processors() {
     registry.run_on_application_shutdown().await;
     registry.run_on_module_destroy().await;
 }
-

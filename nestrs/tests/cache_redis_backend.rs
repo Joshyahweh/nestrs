@@ -4,7 +4,9 @@ use nestrs::prelude::*;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn test_redis_url() -> Option<String> {
-    std::env::var("NESTRS_TEST_REDIS_URL").ok().filter(|s| !s.trim().is_empty())
+    std::env::var("NESTRS_TEST_REDIS_URL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
 }
 
 fn unique_key(prefix: &str) -> String {
@@ -28,7 +30,11 @@ async fn cache_redis_backend_round_trips_and_expires() {
     let key = unique_key("nestrs:test:cache");
 
     cache
-        .set(&key, &serde_json::json!({"v": 1}), Some(Duration::from_millis(80)))
+        .set(
+            &key,
+            &serde_json::json!({"v": 1}),
+            Some(Duration::from_millis(80)),
+        )
         .await
         .unwrap();
 
@@ -43,4 +49,3 @@ async fn cache_redis_backend_round_trips_and_expires() {
     // DEL should be idempotent even if already expired.
     let _ = cache.del(&key).await;
 }
-

@@ -119,10 +119,13 @@ impl Transport for NatsTransport {
         let bytes = serde_json::to_vec(&payload)
             .map_err(|e| TransportError::new(format!("serialize request failed: {e}")))?;
 
-        let msg = tokio::time::timeout(self.options.request_timeout, client.request(subject, bytes.into()))
-            .await
-            .map_err(|_| TransportError::new("nats request timed out"))?
-            .map_err(|e| TransportError::new(format!("nats request failed: {e}")))?;
+        let msg = tokio::time::timeout(
+            self.options.request_timeout,
+            client.request(subject, bytes.into()),
+        )
+        .await
+        .map_err(|_| TransportError::new("nats request timed out"))?
+        .map_err(|e| TransportError::new(format!("nats request failed: {e}")))?;
 
         let wire: WireResponse = serde_json::from_slice(&msg.payload)
             .map_err(|e| TransportError::new(format!("deserialize response failed: {e}")))?;
@@ -184,7 +187,10 @@ pub struct NatsMicroserviceServer {
 }
 
 impl NatsMicroserviceServer {
-    pub fn new(options: NatsMicroserviceOptions, handlers: Vec<std::sync::Arc<dyn MicroserviceHandler>>) -> Self {
+    pub fn new(
+        options: NatsMicroserviceOptions,
+        handlers: Vec<std::sync::Arc<dyn MicroserviceHandler>>,
+    ) -> Self {
         let options = NatsTransportOptions {
             url: options.url,
             prefix: options.prefix,
@@ -194,7 +200,8 @@ impl NatsMicroserviceServer {
     }
 
     pub async fn listen(self) -> Result<(), TransportError> {
-        self.listen_with_shutdown(std::future::pending::<()>()).await
+        self.listen_with_shutdown(std::future::pending::<()>())
+            .await
     }
 
     pub async fn listen_with_shutdown<F>(self, shutdown: F) -> Result<(), TransportError>
@@ -288,4 +295,3 @@ impl crate::MicroserviceServer for NatsMicroserviceServer {
         (*self).listen_with_shutdown(shutdown).await
     }
 }
-

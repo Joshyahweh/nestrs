@@ -56,4 +56,3 @@ async fn routes_macro_registers_handlers_and_ver_overrides() {
         .expect("serve");
     assert_eq!(res.status(), StatusCode::OK);
 }
-

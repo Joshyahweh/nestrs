@@ -95,4 +95,3 @@ async fn interceptors_and_filters_apply_per_route() {
     let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!(v["message"], "rewritten");
 }
-

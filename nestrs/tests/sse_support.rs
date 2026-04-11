@@ -44,4 +44,3 @@ async fn sse_route_sets_event_stream_content_type() {
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("heartbeat"), "unexpected body: {body}");
 }
-

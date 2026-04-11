@@ -71,7 +71,10 @@ where
 #[async_trait]
 trait ErasedCommandHandler: Send + Sync + 'static {
     fn command_type_id(&self) -> TypeId;
-    async fn execute_boxed(&self, command: Box<dyn Any + Send>) -> Result<Box<dyn Any + Send>, CqrsError>;
+    async fn execute_boxed(
+        &self,
+        command: Box<dyn Any + Send>,
+    ) -> Result<Box<dyn Any + Send>, CqrsError>;
 }
 
 struct CommandHandlerBox<H, C>
@@ -108,7 +111,10 @@ where
 #[async_trait]
 trait ErasedQueryHandler: Send + Sync + 'static {
     fn query_type_id(&self) -> TypeId;
-    async fn execute_boxed(&self, query: Box<dyn Any + Send>) -> Result<Box<dyn Any + Send>, CqrsError>;
+    async fn execute_boxed(
+        &self,
+        query: Box<dyn Any + Send>,
+    ) -> Result<Box<dyn Any + Send>, CqrsError>;
 }
 
 struct QueryHandlerBox<H, Q>
@@ -130,7 +136,10 @@ where
         TypeId::of::<Q>()
     }
 
-    async fn execute_boxed(&self, query: Box<dyn Any + Send>) -> Result<Box<dyn Any + Send>, CqrsError> {
+    async fn execute_boxed(
+        &self,
+        query: Box<dyn Any + Send>,
+    ) -> Result<Box<dyn Any + Send>, CqrsError> {
         let query = query
             .downcast::<Q>()
             .map_err(|_| CqrsError::new("query downcast failed"))?;
@@ -268,4 +277,3 @@ impl ModuleGraph for CqrsModule {
         router
     }
 }
-

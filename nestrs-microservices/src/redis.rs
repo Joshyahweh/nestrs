@@ -1,4 +1,4 @@
-use crate::wire::{dispatch_emit, dispatch_send, WireKind, WireRequest, WireResponse, WireError};
+use crate::wire::{dispatch_emit, dispatch_send, WireError, WireKind, WireRequest, WireResponse};
 use crate::{MicroserviceHandler, Transport, TransportError};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -206,7 +206,10 @@ pub struct RedisMicroserviceServer {
 }
 
 impl RedisMicroserviceServer {
-    pub fn new(options: RedisMicroserviceOptions, handlers: Vec<Arc<dyn MicroserviceHandler>>) -> Self {
+    pub fn new(
+        options: RedisMicroserviceOptions,
+        handlers: Vec<Arc<dyn MicroserviceHandler>>,
+    ) -> Self {
         let options = RedisTransportOptions {
             url: options.url,
             prefix: options.prefix,
@@ -222,7 +225,8 @@ impl RedisMicroserviceServer {
     }
 
     pub async fn listen(self) -> Result<(), TransportError> {
-        self.listen_with_shutdown(std::future::pending::<()>()).await
+        self.listen_with_shutdown(std::future::pending::<()>())
+            .await
     }
 
     pub async fn listen_with_shutdown<F>(self, shutdown: F) -> Result<(), TransportError>
@@ -304,4 +308,3 @@ impl crate::MicroserviceServer for RedisMicroserviceServer {
         (*self).listen_with_shutdown(shutdown).await
     }
 }
-

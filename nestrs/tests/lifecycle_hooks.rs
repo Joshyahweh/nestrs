@@ -52,4 +52,3 @@ async fn lifecycle_hooks_are_callable_from_registry() {
     assert!(APP_SHUTDOWN.load(Ordering::SeqCst));
     assert!(MODULE_DESTROY.load(Ordering::SeqCst));
 }
-

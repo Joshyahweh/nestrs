@@ -47,4 +47,3 @@ async fn testing_module_overrides_provider_instance_and_serves_router() {
     let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
     assert_eq!(std::str::from_utf8(&body).unwrap(), "mock");
 }
-

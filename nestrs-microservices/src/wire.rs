@@ -56,7 +56,11 @@ pub(crate) async fn dispatch_send(
     )))
 }
 
-pub(crate) async fn dispatch_emit(handlers: &[Arc<dyn MicroserviceHandler>], pattern: &str, payload: Value) {
+pub(crate) async fn dispatch_emit(
+    handlers: &[Arc<dyn MicroserviceHandler>],
+    pattern: &str,
+    payload: Value,
+) {
     for h in handlers {
         let _ = h.handle_event(pattern, payload.clone()).await;
     }

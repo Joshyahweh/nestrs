@@ -54,7 +54,12 @@ impl I18nOptions {
         self
     }
 
-    pub fn insert(&mut self, locale: impl Into<String>, key: impl Into<String>, value: impl Into<String>) {
+    pub fn insert(
+        &mut self,
+        locale: impl Into<String>,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) {
         let locale = locale.into();
         self.catalogs
             .entry(locale)
@@ -64,9 +69,7 @@ impl I18nOptions {
 }
 
 fn normalize_locale(raw: &str) -> String {
-    raw.trim()
-        .replace('_', "-")
-        .to_ascii_lowercase()
+    raw.trim().replace('_', "-").to_ascii_lowercase()
 }
 
 fn base_locale(locale: &str) -> &str {
@@ -313,4 +316,3 @@ impl I18nModule {
         )
     }
 }
-

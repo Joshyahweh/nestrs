@@ -43,4 +43,3 @@ async fn ws_gateway_route_is_registered() {
 
     assert_ne!(res.status(), StatusCode::NOT_FOUND);
 }
-

@@ -46,4 +46,3 @@ async fn interval_tasks_run_after_wiring_scheduler() {
     registry.run_on_application_shutdown().await;
     registry.run_on_module_destroy().await;
 }
-

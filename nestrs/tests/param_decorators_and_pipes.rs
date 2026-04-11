@@ -1,8 +1,8 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
 use nestrs::prelude::*;
-use tower::util::ServiceExt;
 use std::net::SocketAddr;
+use tower::util::ServiceExt;
 
 #[derive(Default)]
 #[injectable]
@@ -77,7 +77,9 @@ async fn param_body_with_validation_pipe_returns_422_on_invalid() {
         .expect("serve");
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let bytes = to_bytes(response.into_body(), 64 * 1024).await.expect("read");
+    let bytes = to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("read");
     let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!(v["statusCode"], 422);
     assert_eq!(v["message"], "Validation failed");
@@ -140,7 +142,8 @@ async fn param_ip_reads_connect_info_when_present() {
         .expect("serve");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let bytes = to_bytes(response.into_body(), 64 * 1024).await.expect("read");
+    let bytes = to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("read");
     assert_eq!(String::from_utf8_lossy(&bytes), "127.0.0.1");
 }
-

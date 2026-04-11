@@ -117,5 +117,8 @@ fn clients_module_does_not_register_ambiguous_default_proxy_when_multiple() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = dm.registry.get::<ClientProxy>();
     }));
-    assert!(result.is_err(), "default ClientProxy should not be registered");
+    assert!(
+        result.is_err(),
+        "default ClientProxy should not be registered"
+    );
 }

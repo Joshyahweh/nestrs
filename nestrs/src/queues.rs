@@ -143,11 +143,7 @@ impl QueueHandle {
             .await
     }
 
-    pub async fn add<T>(
-        &self,
-        name: impl Into<String>,
-        payload: &T,
-    ) -> Result<u64, QueueError>
+    pub async fn add<T>(&self, name: impl Into<String>, payload: &T) -> Result<u64, QueueError>
     where
         T: Serialize + Send + Sync,
     {
@@ -217,7 +213,10 @@ impl QueuesRuntime {
         let mut queues = HashMap::<&'static str, Arc<QueueState>>::new();
         for cfg in configs {
             if queues.contains_key(cfg.name) {
-                panic!("QueuesModule::register: duplicate queue name `{}`", cfg.name);
+                panic!(
+                    "QueuesModule::register: duplicate queue name `{}`",
+                    cfg.name
+                );
             }
             let (tx, rx) = mpsc::channel::<QueueJob>(cfg.buffer);
             queues.insert(
@@ -268,12 +267,7 @@ impl QueuesRuntime {
 
     pub fn expect_queue(&self, name: &str) -> QueueHandle {
         self.queue(name).unwrap_or_else(|| {
-            let known = self
-                .queues
-                .keys()
-                .copied()
-                .collect::<Vec<_>>()
-                .join(", ");
+            let known = self.queues.keys().copied().collect::<Vec<_>>().join(", ");
             panic!("Queue `{name}` not registered. Known queues: [{known}]");
         })
     }
@@ -417,4 +411,3 @@ pub async fn wire_queue_processors(registry: &ProviderRegistry) {
     let runtime = registry.get::<QueuesRuntime>();
     runtime.start_workers(registry).await;
 }
-

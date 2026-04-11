@@ -38,7 +38,8 @@ where
     M: ModuleGraph,
 {
     overrides: Vec<Box<dyn FnOnce(&mut ProviderRegistry) + Send>>,
-    configure_http: Option<Box<dyn FnOnce(crate::NestApplication) -> crate::NestApplication + Send>>,
+    configure_http:
+        Option<Box<dyn FnOnce(crate::NestApplication) -> crate::NestApplication + Send>>,
     _marker: PhantomData<M>,
 }
 
@@ -58,8 +59,9 @@ where
     where
         T: crate::core::Injectable + Send + Sync + 'static,
     {
-        self.overrides
-            .push(Box::new(move |registry| registry.override_provider::<T>(instance)));
+        self.overrides.push(Box::new(move |registry| {
+            registry.override_provider::<T>(instance)
+        }));
         self
     }
 
@@ -195,10 +197,6 @@ impl TestRequest {
         }
 
         let req = builder.body(self.body).expect("build request");
-        self.router
-            .oneshot(req)
-            .await
-            .expect("router oneshot")
+        self.router.oneshot(req).await.expect("router oneshot")
     }
 }
-

@@ -87,9 +87,9 @@ impl Transport for TcpTransport {
             payload,
         };
 
-        let mut stream = TcpStream::connect(self.options.addr).await.map_err(|e| {
-            TransportError::new(format!("tcp transport connect failed: {e}"))
-        })?;
+        let mut stream = TcpStream::connect(self.options.addr)
+            .await
+            .map_err(|e| TransportError::new(format!("tcp transport connect failed: {e}")))?;
 
         let line = serde_json::to_string(&req)
             .map_err(|e| TransportError::new(format!("serialize request failed: {e}")))?;
@@ -149,9 +149,9 @@ impl Transport for TcpTransport {
             payload,
         };
 
-        let mut stream = TcpStream::connect(self.options.addr).await.map_err(|e| {
-            TransportError::new(format!("tcp transport connect failed: {e}"))
-        })?;
+        let mut stream = TcpStream::connect(self.options.addr)
+            .await
+            .map_err(|e| TransportError::new(format!("tcp transport connect failed: {e}")))?;
 
         let line = serde_json::to_string(&req)
             .map_err(|e| TransportError::new(format!("serialize event failed: {e}")))?;
@@ -188,12 +188,16 @@ pub struct TcpMicroserviceServer {
 }
 
 impl TcpMicroserviceServer {
-    pub fn new(options: TcpMicroserviceOptions, handlers: Vec<Arc<dyn MicroserviceHandler>>) -> Self {
+    pub fn new(
+        options: TcpMicroserviceOptions,
+        handlers: Vec<Arc<dyn MicroserviceHandler>>,
+    ) -> Self {
         Self { options, handlers }
     }
 
     pub async fn listen(self) -> Result<(), TransportError> {
-        self.listen_with_shutdown(std::future::pending::<()>()).await
+        self.listen_with_shutdown(std::future::pending::<()>())
+            .await
     }
 
     pub async fn listen_with_shutdown<F>(self, shutdown: F) -> Result<(), TransportError>
@@ -238,9 +242,7 @@ async fn serve_connection(stream: TcpStream, handlers: Arc<Vec<Arc<dyn Microserv
             Err(_) => {
                 // best-effort error frame for malformed payloads
                 let _ = write_half
-                    .write_all(
-                        br#"{"id":"0","ok":false,"error":{"message":"invalid request"}}"#,
-                    )
+                    .write_all(br#"{"id":"0","ok":false,"error":{"message":"invalid request"}}"#)
                     .await;
                 let _ = write_half.write_all(b"\n").await;
                 continue;
@@ -314,4 +316,3 @@ impl crate::MicroserviceServer for TcpMicroserviceServer {
         (*self).listen_with_shutdown(shutdown).await
     }
 }
-

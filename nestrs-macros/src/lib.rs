@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::spanned::Spanned;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
 use syn::{
     parse_macro_input, DeriveInput, Expr, Field, Fields, Ident, ImplItemFn, Item, ItemStruct,
     LitInt, LitStr, Meta, Result, Token, Type,
@@ -151,7 +151,10 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         match expr {
             Expr::Path(p) => imports_static.push(ImportItem {
-                ty: Type::Path(syn::TypePath { qself: None, path: p.path }),
+                ty: Type::Path(syn::TypePath {
+                    qself: None,
+                    path: p.path,
+                }),
                 forward_ref: false,
             }),
             other => imports_dynamic.push(other),
@@ -421,7 +424,9 @@ pub fn injectable(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(other) => {
             return syn::Error::new_spanned(
                 item_struct,
-                format!("unsupported injectable scope `{other}` (expected singleton|transient|request)"),
+                format!(
+                    "unsupported injectable scope `{other}` (expected singleton|transient|request)"
+                ),
             )
             .to_compile_error()
             .into();
@@ -436,10 +441,7 @@ pub fn injectable(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         Fields::Named(named) => {
             let assignments = named.named.iter().map(|field| {
-                let field_ident = field
-                    .ident
-                    .as_ref()
-                    .expect("named field should have ident");
+                let field_ident = field.ident.as_ref().expect("named field should have ident");
                 let ty = &field.ty;
 
                 // Inject `Arc<T>` fields from the registry.
@@ -464,11 +466,8 @@ pub fn injectable(attr: TokenStream, item: TokenStream) -> TokenStream {
                     .to_compile_error();
                 }
                 let syn::PathArguments::AngleBracketed(args) = seg.arguments else {
-                    return syn::Error::new_spanned(
-                        ty,
-                        "Arc field must be `Arc<T>`",
-                    )
-                    .to_compile_error();
+                    return syn::Error::new_spanned(ty, "Arc field must be `Arc<T>`")
+                        .to_compile_error();
                 };
                 let inner = args
                     .args
@@ -558,9 +557,7 @@ pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
                 host = Some(value.value());
                 Ok(())
             } else {
-                Err(meta.error(
-                    "unknown controller key; expected `prefix`, `version`, or `host`",
-                ))
+                Err(meta.error("unknown controller key; expected `prefix`, `version`, or `host`"))
             }
         });
 
@@ -1358,20 +1355,15 @@ fn parse_roles(attrs: &[syn::Attribute]) -> Result<Vec<(LitStr, LitStr)>> {
                 "roles expects one or more string literals, e.g. #[roles(\"admin\")]",
             ));
         };
-        let args: Punctuated<LitStr, Token![,]> =
-            Punctuated::<LitStr, Token![,]>::parse_terminated
-                .parse2(list.tokens.clone())
-                .map_err(|_| {
-                    syn::Error::new_spanned(
-                        list,
-                        "roles expects one or more string literals, e.g. #[roles(\"admin\")]",
-                    )
-                })?;
-        let joined = args
-            .iter()
-            .map(|s| s.value())
-            .collect::<Vec<_>>()
-            .join(",");
+        let args: Punctuated<LitStr, Token![,]> = Punctuated::<LitStr, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())
+            .map_err(|_| {
+                syn::Error::new_spanned(
+                    list,
+                    "roles expects one or more string literals, e.g. #[roles(\"admin\")]",
+                )
+            })?;
+        let joined = args.iter().map(|s| s.value()).collect::<Vec<_>>().join(",");
         out.push((
             LitStr::new("roles", attr.span()),
             LitStr::new(&joined, attr.span()),
@@ -1552,15 +1544,15 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
     let route_entries = routes
         .into_iter()
         .map(|r| {
-        let method = r.method.to_ident();
-        let path = r.path;
-        let handler_name = r.handler;
-        let handler = quote!(#self_ty::#handler_name);
-        let guards = r.guards;
+            let method = r.method.to_ident();
+            let path = r.path;
+            let handler_name = r.handler;
+            let handler = quote!(#self_ty::#handler_name);
+            let guards = r.guards;
             let interceptors = r.interceptors;
             let filters = r.filters;
             let metadata = r.metadata;
-        let maybe_ver = r.version.map(|v| quote!(@ver(#v)));
+            let maybe_ver = r.version.map(|v| quote!(@ver(#v)));
             let interceptors_tokens = if interceptors.is_empty() {
                 quote! {}
             } else {
@@ -1579,15 +1571,15 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
                 quote! { metadata ( #( ( #keys, #values ) ),* ) }
             };
 
-        quote! {
-            #maybe_ver
-                #method #path with ( #(#guards),* )
-                #interceptors_tokens
-                #filters_tokens
-                #metadata_tokens
-                => #handler,
-        }
-    })
+            quote! {
+                #maybe_ver
+                    #method #path with ( #(#guards),* )
+                    #interceptors_tokens
+                    #filters_tokens
+                    #metadata_tokens
+                    => #handler,
+            }
+        })
         .collect::<Vec<_>>();
 
     let register = if let Some(ctrl_guard) = controller_guards {
@@ -1864,9 +1856,12 @@ pub fn event_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_impl = parse_macro_input!(item as syn::ItemImpl);
 
     if item_impl.trait_.is_some() {
-        return syn::Error::new_spanned(item_impl, "event_routes supports inherent impl blocks only")
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(
+            item_impl,
+            "event_routes supports inherent impl blocks only",
+        )
+        .to_compile_error()
+        .into();
     }
 
     let self_ty = item_impl.self_ty.clone();
@@ -2075,12 +2070,9 @@ pub fn schedule_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
         };
 
         if func.sig.asyncness.is_none() {
-            return syn::Error::new_spanned(
-                func.sig.clone(),
-                "scheduled tasks must be async",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(func.sig.clone(), "scheduled tasks must be async")
+                .to_compile_error()
+                .into();
         }
 
         let mut inputs = func.sig.inputs.iter();
@@ -2122,12 +2114,9 @@ pub fn schedule_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             .collect::<Vec<_>>();
 
         if !typed_args.is_empty() {
-            return syn::Error::new_spanned(
-                func,
-                "scheduled tasks must be one of: (&self)",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(func, "scheduled tasks must be one of: (&self)")
+                .to_compile_error()
+                .into();
         }
 
         tasks.push(TaskDef {
@@ -2212,9 +2201,12 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_impl = parse_macro_input!(item as syn::ItemImpl);
 
     if item_impl.trait_.is_some() {
-        return syn::Error::new_spanned(item_impl, "micro_routes supports inherent impl blocks only")
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(
+            item_impl,
+            "micro_routes supports inherent impl blocks only",
+        )
+        .to_compile_error()
+        .into();
     }
 
     let self_ty = item_impl.self_ty.clone();

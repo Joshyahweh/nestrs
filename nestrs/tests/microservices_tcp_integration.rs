@@ -160,4 +160,3 @@ async fn tcp_microservice_send_round_trips_and_http_exception_serializes_details
     let _ = tx.send(());
     let _ = join.await;
 }
-

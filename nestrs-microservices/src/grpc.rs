@@ -140,12 +140,16 @@ pub struct GrpcMicroserviceServer {
 }
 
 impl GrpcMicroserviceServer {
-    pub fn new(options: GrpcMicroserviceOptions, handlers: Vec<Arc<dyn MicroserviceHandler>>) -> Self {
+    pub fn new(
+        options: GrpcMicroserviceOptions,
+        handlers: Vec<Arc<dyn MicroserviceHandler>>,
+    ) -> Self {
         Self { options, handlers }
     }
 
     pub async fn listen(self) -> Result<(), TransportError> {
-        self.listen_with_shutdown(std::future::pending::<()>()).await
+        self.listen_with_shutdown(std::future::pending::<()>())
+            .await
     }
 
     pub async fn listen_with_shutdown<F>(self, shutdown: F) -> Result<(), TransportError>
@@ -255,4 +259,3 @@ impl crate::MicroserviceServer for GrpcMicroserviceServer {
         (*self).listen_with_shutdown(shutdown).await
     }
 }
-

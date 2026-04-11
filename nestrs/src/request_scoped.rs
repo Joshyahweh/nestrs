@@ -45,4 +45,3 @@ where
         Ok(Self(registry.get::<T>()))
     }
 }
-

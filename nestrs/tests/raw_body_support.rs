@@ -36,4 +36,3 @@ async fn raw_body_reads_full_bytes() {
     let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
     assert_eq!(std::str::from_utf8(&bytes).unwrap(), "5:hello");
 }
-

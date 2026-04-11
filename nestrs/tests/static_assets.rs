@@ -40,7 +40,10 @@ async fn serve_static_mounts_at_root_not_under_global_prefix() {
     std::fs::write(dir.join("hello.txt"), "hello").unwrap();
 
     let app = TestingModule::builder::<AppModule>()
-        .configure_http(move |app| app.set_global_prefix("api").serve_static("/public", dir.clone()))
+        .configure_http(move |app| {
+            app.set_global_prefix("api")
+                .serve_static("/public", dir.clone())
+        })
         .compile()
         .await;
 
@@ -56,4 +59,3 @@ async fn serve_static_mounts_at_root_not_under_global_prefix() {
     let res = client.get("/api/public/hello.txt").send().await;
     assert_eq!(res.status(), 404);
 }
-

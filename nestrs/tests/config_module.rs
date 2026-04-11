@@ -26,4 +26,3 @@ async fn config_module_exports_typed_config_provider() {
     let consumer = registry.get::<ConfigConsumer>();
     assert_eq!(consumer.config.port, 1234);
 }
-

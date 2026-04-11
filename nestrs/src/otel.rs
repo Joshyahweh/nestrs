@@ -90,7 +90,9 @@ impl OpenTelemetryConfig {
     }
 }
 
-pub fn install_otlp_tracer(config: OpenTelemetryConfig) -> Result<opentelemetry_sdk::trace::Tracer, String> {
+pub fn install_otlp_tracer(
+    config: OpenTelemetryConfig,
+) -> Result<opentelemetry_sdk::trace::Tracer, String> {
     global::set_text_map_propagator(TraceContextPropagator::new());
 
     let endpoint = config.resolved_endpoint();
@@ -132,4 +134,3 @@ pub fn shutdown_tracer_provider() {
 // context as OTLP traces when using `tracing-opentelemetry`. For **OTLP log** export, route
 // structured logs through the OpenTelemetry Collector (e.g. `filelog` receiver → OTLP) or adopt
 // an ecosystem crate when stable Rust OTLP log exporters match your `opentelemetry` version.
-

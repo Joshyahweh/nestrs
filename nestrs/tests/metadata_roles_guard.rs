@@ -91,4 +91,3 @@ async fn roles_metadata_is_visible_to_guards() {
         .expect("serve");
     assert_eq!(denied.status(), StatusCode::FORBIDDEN);
 }
-

@@ -3,18 +3,17 @@ extern crate self as nestrs;
 pub use async_trait::async_trait;
 #[doc(hidden)]
 pub use axum;
-#[doc(hidden)]
-pub use serde_json;
 use axum::body::{to_bytes, Body};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 pub use nestrs_macros::{
-    all, controller, cron, delete, dto, event_pattern, get, head, http_code, injectable,
-    interval, message_pattern, micro_routes, module, on_event, event_routes, options, patch, post,
-    put, redirect, schedule_routes, queue_processor,
-    response_header, roles, routes, set_metadata, raw_body, sse, subscribe_message, use_filters,
-    use_guards,
-    use_interceptors, use_pipes, serialize, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
+    all, controller, cron, delete, dto, event_pattern, event_routes, get, head, http_code,
+    injectable, interval, message_pattern, micro_routes, module, on_event, options, patch, post,
+    put, queue_processor, raw_body, redirect, response_header, roles, routes, schedule_routes,
+    serialize, set_metadata, sse, subscribe_message, use_filters, use_guards, use_interceptors,
+    use_pipes, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
 };
+#[doc(hidden)]
+pub use serde_json;
 use std::sync::OnceLock;
 use validator::Validate;
 
@@ -48,12 +47,12 @@ pub mod core {
     pub use nestrs_core::*;
 }
 
+#[cfg(feature = "microservices")]
+pub use nestrs_events::EventBus;
 #[cfg(feature = "graphql")]
 pub use nestrs_graphql as graphql;
 #[cfg(feature = "microservices")]
 pub use nestrs_microservices as microservices;
-#[cfg(feature = "microservices")]
-pub use nestrs_events::EventBus;
 #[cfg(feature = "microservices")]
 mod microservice_health;
 #[cfg(feature = "microservices")]
@@ -67,53 +66,55 @@ pub use nestrs_openapi as openapi;
 #[cfg(feature = "ws")]
 pub use nestrs_ws as ws;
 
-mod config;
 mod cache;
+mod client_ip;
+mod config;
+mod exception_filter;
 mod i18n;
+mod interceptor;
+pub mod multipart;
 #[cfg(feature = "otel")]
 pub mod otel;
-#[cfg(feature = "schedule")]
-pub mod schedule;
+mod pipes;
+pub mod problem;
 #[cfg(feature = "queues")]
 pub mod queues;
-mod client_ip;
-mod exception_filter;
-mod interceptor;
 mod raw_body;
-mod pipes;
 mod request_context;
 mod request_scoped;
+#[cfg(feature = "schedule")]
+pub mod schedule;
 pub mod sse;
-pub mod multipart;
 mod testing;
 mod versioning;
-pub mod problem;
 
-pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
 #[cfg(feature = "cache-redis")]
 pub use cache::RedisCacheOptions;
-pub use i18n::{I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale};
-#[cfg(feature = "otel")]
-pub use otel::{OpenTelemetryConfig, OtlpProtocol};
-#[cfg(feature = "schedule")]
-pub use schedule::{ScheduleModule, ScheduleRuntime};
-#[cfg(feature = "queues")]
-pub use queues::{
-    JobOptions, QueueConfig, QueueError, QueueHandler, QueueHandle, QueueJob, QueuesModule,
-    QueuesService, QueuesRuntime,
-};
+pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
 pub use client_ip::{ClientIp, ClientIpMissing};
 pub use config::{load_config, ConfigError, ConfigModule};
 pub use exception_filter::ExceptionFilter;
+pub use i18n::{I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale};
 pub use interceptor::{Interceptor, LoggingInterceptor};
+#[cfg(feature = "otel")]
+pub use otel::{OpenTelemetryConfig, OtlpProtocol};
 pub use pipes::ParseIntPipe;
 pub use pipes::ValidationPipe;
+pub use problem::ProblemDetails;
+#[cfg(feature = "queues")]
+pub use queues::{
+    JobOptions, QueueConfig, QueueError, QueueHandle, QueueHandler, QueueJob, QueuesModule,
+    QueuesRuntime, QueuesService,
+};
 pub use raw_body::RawBody;
 pub use request_context::{RequestContext, RequestContextMissing};
 pub use request_scoped::{RequestScoped, RequestScopedMissing};
+#[cfg(feature = "schedule")]
+pub use schedule::{ScheduleModule, ScheduleRuntime};
 pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
-pub use problem::ProblemDetails;
-pub use versioning::{host_restriction_middleware, ApiVersioningPolicy, NestApiVersion, VersioningType};
+pub use versioning::{
+    host_restriction_middleware, ApiVersioningPolicy, NestApiVersion, VersioningType,
+};
 
 /// Axum middleware from an [`Interceptor`](Interceptor) type (uses `I::default()` per request).
 #[macro_export]
@@ -139,73 +140,69 @@ pub mod prelude {
     pub use crate::interceptor_layer;
     #[cfg(feature = "microservices")]
     pub use crate::microservices;
-    #[cfg(feature = "microservices")]
-    pub use crate::microservices::{
-        ClientConfig, ClientProxy, ClientsModule, ClientsService, EventBus, KafkaTransport, MqttTransport,
-        Transport, TransportError,
-    };
-    #[cfg(feature = "microservices")]
-    pub use crate::BrokerHealthStub;
-    #[cfg(all(feature = "microservices", feature = "microservices-nats"))]
-    pub use crate::NatsBrokerHealth;
-    #[cfg(all(feature = "microservices", feature = "microservices-redis"))]
-    pub use crate::RedisBrokerHealth;
     #[cfg(all(feature = "microservices", feature = "microservices-kafka"))]
     pub use crate::microservices::{
         kafka_cluster_reachable_with, KafkaConnectionOptions, KafkaMicroserviceOptions,
         KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions, KafkaTransportOptions,
+    };
+    #[cfg(feature = "microservices")]
+    pub use crate::microservices::{
+        ClientConfig, ClientProxy, ClientsModule, ClientsService, EventBus, KafkaTransport,
+        MqttTransport, Transport, TransportError,
     };
     #[cfg(all(feature = "microservices", feature = "microservices-mqtt"))]
     pub use crate::microservices::{
         MqttMicroserviceOptions, MqttMicroserviceServer, MqttSocketOptions, MqttTlsMode,
         MqttTransportOptions,
     };
-    #[cfg(feature = "queues")]
-    pub use crate::queues;
+    #[cfg(feature = "openapi")]
+    pub use crate::openapi;
     #[cfg(feature = "otel")]
     pub use crate::otel;
     #[cfg(feature = "queues")]
+    pub use crate::queues;
+    #[cfg(feature = "otel")]
+    pub use crate::try_init_tracing_opentelemetry;
+    #[cfg(feature = "ws")]
+    pub use crate::ws;
+    #[cfg(feature = "microservices")]
+    pub use crate::BrokerHealthStub;
+    #[cfg(all(feature = "microservices", feature = "microservices-nats"))]
+    pub use crate::NatsBrokerHealth;
+    #[cfg(all(feature = "microservices", feature = "microservices-redis"))]
+    pub use crate::RedisBrokerHealth;
     pub use crate::{
-        JobOptions, QueueConfig, QueueError, QueueHandler, QueueHandle, QueueJob, QueuesModule,
+        all, async_trait, controller, cron, delete, dto, event_pattern, event_routes, get, head,
+        http_code, impl_routes, injectable, interval, load_config, message_pattern, micro_routes,
+        module, nestrs_default_not_found_handler, on_event, options, patch, post, put,
+        queue_processor, raw_body, redirect, response_header, roles, routes, runtime_is_production,
+        schedule_routes, serialize, set_metadata, sse, subscribe_message, try_init_tracing,
+        use_filters, use_guards, use_interceptors, use_pipes, ver, version, ws_gateway, ws_routes,
+        ApiVersioningPolicy, BadGatewayException, BadRequestException, CacheError, CacheModule,
+        CacheOptions, CacheService, ClientIp, ClientIpMissing, ConfigError, ConfigModule,
+        ConflictException, CorsOptions, ExceptionFilter, ForbiddenException,
+        GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus, HttpException, I18n,
+        I18nMissing, I18nModule, I18nOptions, I18nService, Interceptor,
+        InternalServerErrorException, Locale, LoggingInterceptor, MethodNotAllowedException,
+        NestApiVersion, NestApplication, NestConfig, NestDto, NestFactory, NotAcceptableException,
+        NotFoundException, NotImplementedException, ParseIntPipe, PathNormalization,
+        PayloadTooLargeException, PaymentRequiredException, ProblemDetails, RateLimitOptions,
+        RawBody, ReadinessContext, RequestContext, RequestContextMissing, RequestScoped,
+        RequestScopedMissing, RequestTimeoutException, RequestTracingOptions, SecurityHeaders,
+        ServiceUnavailableException, TestClient, TestRequest, TestingModule, TestingModuleBuilder,
+        TooManyRequestsException, TracingConfig, TracingFormat, UnauthorizedException,
+        UnprocessableEntityException, UnsupportedMediaTypeException, ValidatedBody, ValidatedPath,
+        ValidatedQuery, ValidationPipe, VersioningType,
+    };
+    #[cfg(feature = "queues")]
+    pub use crate::{
+        JobOptions, QueueConfig, QueueError, QueueHandle, QueueHandler, QueueJob, QueuesModule,
         QueuesRuntime, QueuesService,
     };
     #[cfg(feature = "otel")]
     pub use crate::{OpenTelemetryConfig, OtlpProtocol};
     #[cfg(feature = "schedule")]
     pub use crate::{ScheduleModule, ScheduleRuntime};
-    #[cfg(feature = "openapi")]
-    pub use crate::openapi;
-    #[cfg(feature = "ws")]
-    pub use crate::ws;
-    pub use crate::{
-        all, async_trait, controller, cron, delete, dto, event_pattern, get, head, http_code,
-        impl_routes, injectable, message_pattern, module, nestrs_default_not_found_handler,
-        interval, on_event, event_routes, options, patch, post, put, redirect, response_header, roles, routes,
-        schedule_routes, queue_processor,
-        runtime_is_production, set_metadata, try_init_tracing, use_filters, use_guards,
-        micro_routes, raw_body, serialize, sse, subscribe_message, use_interceptors, use_pipes,
-        ver, version, ws_gateway, ws_routes, BadGatewayException, BadRequestException,
-        CacheError, CacheModule, CacheOptions, CacheService,
-        I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale,
-        ClientIp, ClientIpMissing, ConflictException, CorsOptions, ExceptionFilter, ForbiddenException,
-        GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus, HttpException,
-        Interceptor, InternalServerErrorException, LoggingInterceptor, MethodNotAllowedException,
-        load_config, ConfigError, ConfigModule, ApiVersioningPolicy, NestApiVersion, NestApplication,
-        NestConfig, NestDto, NestFactory, VersioningType,
-        NotAcceptableException, NotFoundException, NotImplementedException, ParseIntPipe,
-        TestClient, TestRequest, TestingModule, TestingModuleBuilder,
-        RawBody,
-        ValidationPipe,
-        PathNormalization, PayloadTooLargeException,
-        PaymentRequiredException, ProblemDetails, RateLimitOptions, ReadinessContext, RequestContext,
-        RequestContextMissing, RequestScoped, RequestScopedMissing, RequestTimeoutException,
-        RequestTracingOptions, SecurityHeaders, ServiceUnavailableException,
-        TooManyRequestsException, TracingConfig, TracingFormat, UnauthorizedException,
-        UnprocessableEntityException, UnsupportedMediaTypeException, ValidatedBody, ValidatedPath,
-        ValidatedQuery,
-    };
-    #[cfg(feature = "otel")]
-    pub use crate::try_init_tracing_opentelemetry;
     pub use axum::{extract::Multipart, extract::State, response::IntoResponse, Json};
 }
 
@@ -795,7 +792,9 @@ impl NestFactory {
     ///
     /// Use `.also_listen_http(port)` to run HTTP + microservice in one process (hybrid bootstrap).
     #[cfg(feature = "microservices")]
-    pub fn create_microservice<M>(options: crate::microservices::TcpMicroserviceOptions) -> MicroserviceApplication
+    pub fn create_microservice<M>(
+        options: crate::microservices::TcpMicroserviceOptions,
+    ) -> MicroserviceApplication
     where
         M: core::Module + crate::microservices::MicroserviceModule,
     {
@@ -807,8 +806,9 @@ impl NestFactory {
             .map(|f| f(&registry))
             .collect::<Vec<_>>();
 
-        let server: Box<dyn crate::microservices::MicroserviceServer> =
-            Box::new(crate::microservices::TcpMicroserviceServer::new(options, handlers));
+        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
+            crate::microservices::TcpMicroserviceServer::new(options, handlers),
+        );
 
         let http = NestApplication {
             registry: registry.clone(),
@@ -868,8 +868,9 @@ impl NestFactory {
             .map(|f| f(&registry))
             .collect::<Vec<_>>();
 
-        let server: Box<dyn crate::microservices::MicroserviceServer> =
-            Box::new(crate::microservices::NatsMicroserviceServer::new(options, handlers));
+        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
+            crate::microservices::NatsMicroserviceServer::new(options, handlers),
+        );
 
         let http = NestApplication {
             registry: registry.clone(),
@@ -929,8 +930,9 @@ impl NestFactory {
             .map(|f| f(&registry))
             .collect::<Vec<_>>();
 
-        let server: Box<dyn crate::microservices::MicroserviceServer> =
-            Box::new(crate::microservices::RedisMicroserviceServer::new(options, handlers));
+        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
+            crate::microservices::RedisMicroserviceServer::new(options, handlers),
+        );
 
         let http = NestApplication {
             registry: registry.clone(),
@@ -990,8 +992,9 @@ impl NestFactory {
             .map(|f| f(&registry))
             .collect::<Vec<_>>();
 
-        let server: Box<dyn crate::microservices::MicroserviceServer> =
-            Box::new(crate::microservices::GrpcMicroserviceServer::new(options, handlers));
+        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
+            crate::microservices::GrpcMicroserviceServer::new(options, handlers),
+        );
 
         let http = NestApplication {
             registry: registry.clone(),
@@ -1113,7 +1116,8 @@ impl MicroserviceApplication {
         };
 
         let shutdown_for_ms: crate::microservices::ShutdownFuture = Box::pin(shutdown_for_ms);
-        let ms_task = tokio::spawn(async move { server.listen_with_shutdown(shutdown_for_ms).await });
+        let ms_task =
+            tokio::spawn(async move { server.listen_with_shutdown(shutdown_for_ms).await });
 
         let http_task = if let Some(port) = http_port {
             let mut rx = rx.clone();
@@ -1470,7 +1474,9 @@ impl NestApplication {
         Mutation: crate::graphql::ObjectType + Send + Sync + 'static,
         Subscription: crate::graphql::SubscriptionType + Send + Sync + 'static,
     {
-        self.router = self.router.merge(crate::graphql::graphql_router(schema, path));
+        self.router = self
+            .router
+            .merge(crate::graphql::graphql_router(schema, path));
         self
     }
 
@@ -1592,7 +1598,8 @@ impl NestApplication {
         }
 
         for (mount_path, dir) in static_mounts {
-            let svc = tower_http::services::ServeDir::new(dir).append_index_html_on_directories(true);
+            let svc =
+                tower_http::services::ServeDir::new(dir).append_index_html_on_directories(true);
             let static_router = axum::Router::new().nest_service(mount_path.as_str(), svc);
             router = axum::Router::new().merge(static_router).merge(router);
         }
@@ -1861,8 +1868,8 @@ async fn axum_serve(
 ) {
     use axum::extract::Request;
     use axum::ServiceExt;
-    use tower::Layer;
     use std::net::SocketAddr;
+    use tower::Layer;
 
     let err = |e: std::io::Error| panic!("server error: {e}");
 
@@ -1877,9 +1884,9 @@ async fn axum_serve(
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
         )
-            .with_graceful_shutdown(s)
-            .await
-            .unwrap_or_else(err),
+        .with_graceful_shutdown(s)
+        .await
+        .unwrap_or_else(err),
         (Some(PathNormalization::TrimTrailingSlash), None) => {
             let app =
                 tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash().layer(router);
@@ -1887,8 +1894,8 @@ async fn axum_serve(
                 listener,
                 ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(app),
             )
-                .await
-                .unwrap_or_else(err)
+            .await
+            .unwrap_or_else(err)
         }
         (Some(PathNormalization::TrimTrailingSlash), Some(s)) => {
             let app =
@@ -1897,9 +1904,9 @@ async fn axum_serve(
                 listener,
                 ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(app),
             )
-                .with_graceful_shutdown(s)
-                .await
-                .unwrap_or_else(err)
+            .with_graceful_shutdown(s)
+            .await
+            .unwrap_or_else(err)
         }
         (Some(PathNormalization::AppendTrailingSlash), None) => {
             let app = tower_http::normalize_path::NormalizePathLayer::append_trailing_slash()
@@ -1908,8 +1915,8 @@ async fn axum_serve(
                 listener,
                 ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(app),
             )
-                .await
-                .unwrap_or_else(err)
+            .await
+            .unwrap_or_else(err)
         }
         (Some(PathNormalization::AppendTrailingSlash), Some(s)) => {
             let app = tower_http::normalize_path::NormalizePathLayer::append_trailing_slash()
@@ -1918,9 +1925,9 @@ async fn axum_serve(
                 listener,
                 ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(app),
             )
-                .with_graceful_shutdown(s)
-                .await
-                .unwrap_or_else(err)
+            .with_graceful_shutdown(s)
+            .await
+            .unwrap_or_else(err)
         }
     }
 }
@@ -2093,7 +2100,9 @@ async fn request_tracing_middleware(
 }
 
 async fn request_scope_middleware(
-    axum::extract::State(registry): axum::extract::State<std::sync::Arc<crate::core::ProviderRegistry>>,
+    axum::extract::State(registry): axum::extract::State<
+        std::sync::Arc<crate::core::ProviderRegistry>,
+    >,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
@@ -2196,9 +2205,9 @@ async fn rate_limit_middleware(
             match redis_rate_allow(client, &key, *window_secs, *max_requests).await {
                 Ok(true) => {}
                 Ok(false) => {
-                    return axum::response::IntoResponse::into_response(TooManyRequestsException::new(
-                        "Rate limit exceeded",
-                    ));
+                    return axum::response::IntoResponse::into_response(
+                        TooManyRequestsException::new("Rate limit exceeded"),
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(target: "nestrs", "redis rate limit check failed: {e}");

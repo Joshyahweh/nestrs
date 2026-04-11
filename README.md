@@ -24,7 +24,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `0.1.0` (from `VERSION` and workspace package settings)
+- Current workspace version: `0.1.1` (from `VERSION` and workspace package settings)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
@@ -38,7 +38,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs/` - main framework crate (public runtime API)
 - `nestrs-core/` - runtime primitives (context, traits, metadata, strategy)
 - `nestrs-macros/` - proc macros and helper attributes
-- `nestrs-cli/` - scaffold/generate CLI
+- `nestrs-cli/` - scaffold/generate CLI (crates.io package name: **`nestrs-scaffold`**, binary: `nestrs`)
 - `nestrs-prisma/` - Prisma integration crate
 - `nestrs-microservices/` - transport/client/event primitives
 - `nestrs-openapi/`, `nestrs-graphql/`, `nestrs-ws/` - parity extension crates
@@ -122,7 +122,7 @@ python3 scripts/load/evaluate_threshold_reassessment.py
 - `.github/workflows/performance.yml` - performance benches, gating, reporting, optional publishing
 - `.github/workflows/benchmark-storage-sync.yml` - storage sync template for S3/GCS/Azure
 - `.github/workflows/release-version-check.yml` - enforces `VERSION` and latest `CHANGELOG.md` release heading stay in sync
-- `.github/workflows/publish-crates.yml` - tag-driven crates.io publish via trusted publishing (OIDC)
+- `.github/workflows/publish-crates.yml` - tag-driven crates.io publish after preflight; uses `CARGO_REGISTRY_TOKEN` (optional OIDC/trusted publishing can replace this)
 
 ## GitHub community templates
 

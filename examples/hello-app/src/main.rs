@@ -1,16 +1,21 @@
 use nestrs::prelude::*;
 use nestrs_prisma::{PrismaModule, PrismaOptions, PrismaService};
+use std::path::PathBuf;
 use std::sync::Arc;
 
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct UserRow {
+    pub id: i64,
+    pub email: String,
+    pub name: String,
+}
+
+#[injectable]
 pub struct AppService {
     prisma: Arc<PrismaService>,
 }
 
 impl AppService {
-    pub fn new(prisma: Arc<PrismaService>) -> Self {
-        Self { prisma }
-    }
-
     pub fn get_hello(&self) -> &'static str {
         "Hello World"
     }
@@ -22,17 +27,22 @@ impl AppService {
         }
     }
 
-    pub fn db_health(&self) -> DbHealthResponse {
+    pub async fn db_health(&self) -> DbHealthResponse {
+        let sample = self
+            .prisma
+            .query_scalar("SELECT 1")
+            .await
+            .unwrap_or_else(|e| e);
         DbHealthResponse {
-            status: self.prisma.health().to_string(),
-            sample: self.prisma.query_raw("select 1"),
+            status: "up".into(),
+            sample,
         }
     }
-}
 
-impl Injectable for AppService {
-    fn construct(registry: &ProviderRegistry) -> Arc<Self> {
-        Arc::new(Self::new(registry.get::<PrismaService>()))
+    pub async fn list_users(&self) -> Result<Vec<UserRow>, String> {
+        self.prisma
+            .query_all_as(r#"SELECT "id", "email", "name" FROM "User""#)
+            .await
     }
 }
 
@@ -59,6 +69,7 @@ pub struct DbHealthResponse {
 #[controller(prefix = "/api", version = "v1")]
 pub struct AppController;
 
+#[routes(state = AppService)]
 impl AppController {
     #[get("/")]
     pub async fn root(State(service): State<Arc<AppService>>) -> &'static str {
@@ -77,10 +88,19 @@ impl AppController {
     }
 
     #[get("/db-health")]
-    pub async fn db_health(
+    pub async fn db_health(State(service): State<Arc<AppService>>) -> Json<DbHealthResponse> {
+        Json(service.db_health().await)
+    }
+
+    #[get("/users-db")]
+    pub async fn users_db(
         State(service): State<Arc<AppService>>,
-    ) -> Result<Json<DbHealthResponse>, HttpException> {
-        Ok(Json(service.db_health()))
+    ) -> Result<Json<Vec<UserRow>>, HttpException> {
+        service
+            .list_users()
+            .await
+            .map(Json)
+            .map_err(InternalServerErrorException::new)
     }
 
     #[get("/created-style")]
@@ -102,35 +122,23 @@ impl AppController {
     }
 
     #[get("/feature")]
+    #[ver("v2")]
     pub async fn versioned_feature() -> &'static str {
         "feature-route-v2"
     }
 }
 
-impl_routes!(AppController, state AppService => [
-    GET "/" with () => AppController::root,
-    GET "/db-health" with () => AppController::db_health,
-    GET "/created-style" with () => AppController::created_style,
-    GET "/header-style" with () => AppController::header_style,
-    GET "/docs" with () => AppController::docs,
-    @ver("v2") GET "/feature" with () => AppController::versioned_feature,
-    POST "/users" with () => AppController::create_user,
-]);
-
 #[version("v2")]
 #[controller(prefix = "/api")]
 pub struct AppControllerV2;
 
+#[routes(state = AppService)]
 impl AppControllerV2 {
     #[get("/")]
     pub async fn root() -> &'static str {
         "Hello World v2"
     }
 }
-
-impl_routes!(AppControllerV2, state AppService => [
-    GET "/" with () => AppControllerV2::root,
-]);
 
 #[module(
     imports = [PrismaModule],
@@ -147,11 +155,31 @@ pub struct AppModule;
 
 #[tokio::main]
 async fn main() {
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let db_url = format!("sqlite:{}", base.join("dev.db").display());
+    let schema_path = base.join("prisma/schema.prisma");
+
     let _ = PrismaModule::for_root_with_options(
-        PrismaOptions::from_url("file:./dev.db")
+        PrismaOptions::from_url(db_url)
             .pool_min(1)
-            .pool_max(10),
+            .pool_max(10)
+            .schema_path(schema_path.to_string_lossy().as_ref()),
     );
+
+    let prisma = PrismaService::default();
+    for ddl in [
+        r#"CREATE TABLE IF NOT EXISTS "User" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "email" TEXT NOT NULL,
+            "name" TEXT NOT NULL
+        )"#,
+        r#"CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email")"#,
+    ] {
+        if let Err(e) = prisma.execute(ddl).await {
+            eprintln!("hello-app schema bootstrap: {e}");
+            break;
+        }
+    }
 
     NestFactory::create::<AppModule>()
         .set_global_prefix("platform")

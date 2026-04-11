@@ -12,4 +12,8 @@ keywords = ["graphql", "nest", "axum", "async", "api"]
 categories = ["web-programming", "network-programming"]
 
 [dependencies]
-async-trait = "0.1"
+async-graphql = "=7.0.17"
+async-graphql-derive = "=7.0.17"
+async-graphql-parser = "=7.0.17"
+async-graphql-value = "=7.0.17"
+axum.workspace = true

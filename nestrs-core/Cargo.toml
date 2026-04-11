@@ -15,3 +15,4 @@ categories = ["web-programming", "asynchronous"]
 axum.workspace = true
 async-trait = "0.1"
 serde_json = "1"
+tokio.workspace = true

@@ -19,8 +19,28 @@ The macro surface now includes:
 - `#[message_pattern("...")]`
 - `#[event_pattern("...")]`
 - `#[on_event("...")]`
+- `#[event_routes]` (impl-block macro that wires `#[on_event]` handlers)
 
-These are parity placeholders for handler declaration style while transport/runtime adapters evolve.
+`#[message_pattern]` / `#[event_pattern]` are activated by `#[micro_routes]`.
+
+`#[on_event]` handlers are activated by `#[event_routes]` and are auto-subscribed at runtime when
+the app boots (via `EventBus`).
+
+## ClientsModule
+
+`ClientsModule::register(&[ClientConfig { ... }])` returns a `DynamicModule` that exports:
+
+- `ClientsService` (lookup by name: `clients.expect("USER_SERVICE")`)
+- `EventBus`
+- `ClientProxy` only when exactly one client is registered (default client)
+
+## Extra transports (feature flags)
+
+The `nestrs-microservices` crate supports additional adapters behind feature flags:
+
+- `nats` (NATS request/reply + publish/subscribe)
+- `redis` (Redis pub/sub request/reply + fire-and-forget)
+- `grpc` (tonic-based gRPC send/emit service)
 
 ## Integration events guidance
 

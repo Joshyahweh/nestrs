@@ -1,6 +1,6 @@
 //! In-process async event bus for domain and integration events (`#[on_event]` / Nest `EventEmitter2`).
 //!
-//! This crate is separate from [`nestrs_microservices`] so HTTP-only apps can depend on events
+//! This crate is separate from `nestrs-microservices` so HTTP-only apps can depend on events
 //! without pulling transport adapters.
 
 use async_trait::async_trait;

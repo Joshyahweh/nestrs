@@ -89,12 +89,11 @@ impl Transport for RedisTransport {
         let reply = format!("__nestrs.reply.{id}");
         let channel = self.options.channel(pattern);
 
-        let mut conn = self
+        let mut pubsub = self
             .client
-            .get_async_connection()
+            .get_async_pubsub()
             .await
-            .map_err(|e| TransportError::new(format!("redis connect failed: {e}")))?;
-        let mut pubsub = conn.into_pubsub();
+            .map_err(|e| TransportError::new(format!("redis pubsub failed: {e}")))?;
         pubsub
             .subscribe(&reply)
             .await
@@ -112,7 +111,7 @@ impl Transport for RedisTransport {
 
         let mut pub_conn = self
             .client
-            .get_async_connection()
+            .get_multiplexed_async_connection()
             .await
             .map_err(|e| TransportError::new(format!("redis connect failed: {e}")))?;
         redis::cmd("PUBLISH")
@@ -166,7 +165,7 @@ impl Transport for RedisTransport {
 
         let mut conn = self
             .client
-            .get_async_connection()
+            .get_multiplexed_async_connection()
             .await
             .map_err(|e| TransportError::new(format!("redis connect failed: {e}")))?;
         redis::cmd("PUBLISH")
@@ -233,12 +232,11 @@ impl RedisMicroserviceServer {
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
-        let conn = self
+        let mut pubsub = self
             .client
-            .get_async_connection()
+            .get_async_pubsub()
             .await
-            .map_err(|e| TransportError::new(format!("redis connect failed: {e}")))?;
-        let mut pubsub = conn.into_pubsub();
+            .map_err(|e| TransportError::new(format!("redis pubsub failed: {e}")))?;
         pubsub
             .psubscribe(self.options.wildcard())
             .await
@@ -274,7 +272,8 @@ impl RedisMicroserviceServer {
                                     Err(e) => WireResponse { ok: false, payload: None, error: Some(WireError { message: e.message, details: e.details }) },
                                 };
                                 if let Ok(text) = serde_json::to_string(&wire) {
-                                    if let Ok(mut conn) = client.get_async_connection().await {
+                                    if let Ok(mut conn) = client.get_multiplexed_async_connection().await
+                                    {
                                         let _ = redis::cmd("PUBLISH")
                                             .arg(&reply)
                                             .arg(text)

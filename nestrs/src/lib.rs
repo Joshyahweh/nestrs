@@ -1,16 +1,27 @@
+extern crate self as nestrs;
+
 pub use async_trait::async_trait;
+#[doc(hidden)]
+pub use axum;
+#[doc(hidden)]
+pub use serde_json;
 use axum::body::{to_bytes, Body};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 pub use nestrs_macros::{
-    all, controller, delete, dto, event_pattern, get, head, http_code, injectable, message_pattern,
-    module, on_event, options, patch, post, put, redirect, response_header, roles, set_metadata,
-    use_filters, use_guards, use_interceptors, use_pipes, version, NestDto,
+    all, controller, cron, delete, dto, event_pattern, get, head, http_code, injectable,
+    interval, message_pattern, micro_routes, module, on_event, event_routes, options, patch, post,
+    put, redirect, schedule_routes, queue_processor,
+    response_header, roles, routes, set_metadata, raw_body, sse, subscribe_message, use_filters,
+    use_guards,
+    use_interceptors, use_pipes, serialize, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
 };
 use std::sync::OnceLock;
 use validator::Validate;
 
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 static TRACING_SUBSCRIBER: OnceLock<Result<(), String>> = OnceLock::new();
+#[cfg(feature = "otel")]
+static OTEL_INSTALLED: OnceLock<()> = OnceLock::new();
 
 fn init_prometheus_recorder() -> &'static PrometheusHandle {
     PROMETHEUS_HANDLE.get_or_init(|| {
@@ -46,15 +57,49 @@ pub use nestrs_openapi as openapi;
 #[cfg(feature = "ws")]
 pub use nestrs_ws as ws;
 
+mod config;
+mod cache;
+mod i18n;
+#[cfg(feature = "otel")]
+pub mod otel;
+#[cfg(feature = "schedule")]
+pub mod schedule;
+#[cfg(feature = "queues")]
+pub mod queues;
+mod client_ip;
 mod exception_filter;
 mod interceptor;
+mod raw_body;
 mod pipes;
 mod request_context;
+mod request_scoped;
+pub mod sse;
+pub mod multipart;
+mod testing;
 
+pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
+#[cfg(feature = "cache-redis")]
+pub use cache::RedisCacheOptions;
+pub use i18n::{I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale};
+#[cfg(feature = "otel")]
+pub use otel::{OpenTelemetryConfig, OtlpProtocol};
+#[cfg(feature = "schedule")]
+pub use schedule::{ScheduleModule, ScheduleRuntime};
+#[cfg(feature = "queues")]
+pub use queues::{
+    JobOptions, QueueConfig, QueueError, QueueHandler, QueueHandle, QueueJob, QueuesModule,
+    QueuesService, QueuesRuntime,
+};
+pub use client_ip::{ClientIp, ClientIpMissing};
+pub use config::{load_config, ConfigError, ConfigModule};
 pub use exception_filter::ExceptionFilter;
 pub use interceptor::{Interceptor, LoggingInterceptor};
 pub use pipes::ParseIntPipe;
+pub use pipes::ValidationPipe;
+pub use raw_body::RawBody;
 pub use request_context::{RequestContext, RequestContextMissing};
+pub use request_scoped::{RequestScoped, RequestScopedMissing};
+pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
 
 /// Axum middleware from an [`Interceptor`](Interceptor) type (uses `I::default()` per request).
 #[macro_export]
@@ -71,36 +116,65 @@ macro_rules! interceptor_layer {
 
 pub mod prelude {
     pub use crate::core::{
-        AuthError, AuthStrategy, CanActivate, Controller, DynamicModule, GuardError, Injectable,
-        MetadataRegistry, Module, PipeTransform, ProviderRegistry,
+        AuthError, AuthStrategy, CanActivate, ConfigurableModuleBuilder, Controller, DynamicModule,
+        DynamicModuleBuilder, GuardError, Injectable, MetadataRegistry, Module, ModuleOptions,
+        PipeTransform, ProviderRegistry, ProviderScope,
     };
     #[cfg(feature = "graphql")]
     pub use crate::graphql;
     pub use crate::interceptor_layer;
     #[cfg(feature = "microservices")]
     pub use crate::microservices;
+    #[cfg(feature = "microservices")]
+    pub use crate::microservices::{
+        ClientConfig, ClientProxy, ClientsModule, ClientsService, EventBus, Transport, TransportError,
+    };
+    #[cfg(feature = "queues")]
+    pub use crate::queues;
+    #[cfg(feature = "otel")]
+    pub use crate::otel;
+    #[cfg(feature = "queues")]
+    pub use crate::{
+        JobOptions, QueueConfig, QueueError, QueueHandler, QueueHandle, QueueJob, QueuesModule,
+        QueuesRuntime, QueuesService,
+    };
+    #[cfg(feature = "otel")]
+    pub use crate::{OpenTelemetryConfig, OtlpProtocol};
+    #[cfg(feature = "schedule")]
+    pub use crate::{ScheduleModule, ScheduleRuntime};
     #[cfg(feature = "openapi")]
     pub use crate::openapi;
     #[cfg(feature = "ws")]
     pub use crate::ws;
     pub use crate::{
-        all, async_trait, controller, delete, dto, event_pattern, get, head, http_code,
+        all, async_trait, controller, cron, delete, dto, event_pattern, get, head, http_code,
         impl_routes, injectable, message_pattern, module, nestrs_default_not_found_handler,
-        on_event, options, patch, post, put, redirect, response_header, roles,
+        interval, on_event, event_routes, options, patch, post, put, redirect, response_header, roles, routes,
+        schedule_routes, queue_processor,
         runtime_is_production, set_metadata, try_init_tracing, use_filters, use_guards,
-        use_interceptors, use_pipes, version, BadGatewayException, BadRequestException,
-        ConflictException, CorsOptions, ExceptionFilter, ForbiddenException,
+        micro_routes, raw_body, serialize, sse, subscribe_message, use_interceptors, use_pipes,
+        ver, version, ws_gateway, ws_routes, BadGatewayException, BadRequestException,
+        CacheError, CacheModule, CacheOptions, CacheService,
+        I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale,
+        ClientIp, ClientIpMissing, ConflictException, CorsOptions, ExceptionFilter, ForbiddenException,
         GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus, HttpException,
         Interceptor, InternalServerErrorException, LoggingInterceptor, MethodNotAllowedException,
-        NestApplication, NestDto, NestFactory, NotAcceptableException, NotFoundException,
-        NotImplementedException, ParseIntPipe, PathNormalization, PayloadTooLargeException,
+        load_config, ConfigError, ConfigModule, NestApplication, NestConfig, NestDto, NestFactory,
+        NotAcceptableException, NotFoundException, NotImplementedException, ParseIntPipe,
+        TestClient, TestRequest, TestingModule, TestingModuleBuilder,
+        RawBody,
+        ValidationPipe,
+        PathNormalization, PayloadTooLargeException,
         PaymentRequiredException, RateLimitOptions, ReadinessContext, RequestContext,
-        RequestContextMissing, RequestTimeoutException, RequestTracingOptions, SecurityHeaders,
-        ServiceUnavailableException, TooManyRequestsException, TracingConfig, TracingFormat,
-        UnauthorizedException, UnprocessableEntityException, UnsupportedMediaTypeException,
-        ValidatedBody,
+        RequestContextMissing, RequestScoped, RequestScopedMissing, RequestTimeoutException,
+        RequestTracingOptions, SecurityHeaders, ServiceUnavailableException,
+        TooManyRequestsException, TracingConfig, TracingFormat, UnauthorizedException,
+        UnprocessableEntityException, UnsupportedMediaTypeException, ValidatedBody, ValidatedPath,
+        ValidatedQuery,
     };
-    pub use axum::{extract::State, response::IntoResponse, Json};
+    #[cfg(feature = "otel")]
+    pub use crate::try_init_tracing_opentelemetry;
+    pub use axum::{extract::Multipart, extract::State, response::IntoResponse, Json};
 }
 
 /// Returns `true` when the process environment indicates a **production** deployment.
@@ -205,6 +279,30 @@ fn install_tracing_subscriber(config: TracingConfig) -> Result<(), String> {
     result.map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "otel")]
+fn install_tracing_subscriber_otel(
+    config: TracingConfig,
+    otel: OpenTelemetryConfig,
+) -> Result<(), String> {
+    use tracing_subscriber::prelude::*;
+
+    let filter = tracing_env_filter(&config);
+    let tracer = crate::otel::install_otlp_tracer(otel)?;
+    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    let registry = tracing_subscriber::registry().with(filter).with(otel_layer);
+    let result = match config.format {
+        TracingFormat::Pretty => registry
+            .with(tracing_subscriber::fmt::layer().pretty())
+            .try_init(),
+        TracingFormat::Json => registry
+            .with(tracing_subscriber::fmt::layer().json())
+            .try_init(),
+    };
+
+    result.map_err(|e| e.to_string())
+}
+
 /// Installs the global `tracing` subscriber once (idempotent). Subsequent calls return the same result as the first.
 ///
 /// If a global subscriber was already installed (e.g. by tests or another crate), installation errors that indicate
@@ -219,8 +317,29 @@ pub fn try_init_tracing(config: TracingConfig) -> Result<(), String> {
         .clone()
 }
 
+/// Installs a global `tracing` subscriber that exports spans to an OTLP collector (OpenTelemetry).
+///
+/// Feature-gated behind `otel`. The first successful tracing initialization wins; subsequent calls
+/// return the result of the first initializer.
+#[cfg(feature = "otel")]
+pub fn try_init_tracing_opentelemetry(
+    config: TracingConfig,
+    otel: OpenTelemetryConfig,
+) -> Result<(), String> {
+    TRACING_SUBSCRIBER
+        .get_or_init(|| match install_tracing_subscriber_otel(config, otel) {
+            Ok(()) => {
+                let _ = OTEL_INSTALLED.set(());
+                Ok(())
+            }
+            Err(msg) if msg.to_lowercase().contains("already") => Ok(()),
+            Err(e) => Err(e),
+        })
+        .clone()
+}
 pub struct NestFactory;
 pub trait NestDto {}
+pub trait NestConfig {}
 
 /// Result of a single [`HealthIndicator::check`].
 #[derive(Debug, Clone)]
@@ -478,9 +597,12 @@ pub enum PathNormalization {
 }
 
 pub struct NestApplication {
+    registry: std::sync::Arc<crate::core::ProviderRegistry>,
     router: axum::Router,
     uri_version: Option<String>,
     global_prefix: Option<String>,
+    /// Static file mounts at the server root (not under URI versioning / global prefix).
+    static_mounts: Vec<(String, std::path::PathBuf)>,
     cors_options: Option<CorsOptions>,
     security_headers: Option<SecurityHeaders>,
     rate_limit_options: Option<RateLimitOptions>,
@@ -494,12 +616,18 @@ pub struct NestApplication {
     request_id: bool,
     /// Injects [`RequestContext`] into each request’s extensions (see [`Self::use_request_context`]).
     request_context: bool,
+    /// Enables request-scoped providers (`ProviderScope::Request`) via task-local cache + per-request registry injection.
+    request_scope: bool,
+    /// Resolves locale per request and installs [`crate::Locale`] / [`crate::I18n`] extractors (see [`Self::use_i18n`]).
+    i18n: bool,
     /// GET route for liveness (merged at server root, not under [`Self::enable_uri_versioning`] / [`Self::set_global_prefix`]).
     liveness_path: Option<String>,
     /// GET readiness route at server root + indicator list (see [`Self::enable_readiness_check`]).
     readiness: Option<(String, Vec<std::sync::Arc<dyn HealthIndicator>>)>,
     /// Prometheus scrape path at server root (see [`Self::enable_metrics`]).
     metrics_path: Option<String>,
+    #[cfg(feature = "openapi")]
+    openapi: Option<nestrs_openapi::OpenApiOptions>,
     request_tracing: Option<RequestTracingOptions>,
     /// User-defined Tower layers applied **outermost** after all built-in middleware (see [`Self::use_global_layer`]).
     global_layers: Vec<GlobalLayerFn>,
@@ -522,11 +650,13 @@ type GlobalLayerFn = Box<dyn Fn(axum::Router) -> axum::Router + Send + Sync + 's
 
 impl NestFactory {
     pub fn create<M: core::Module>() -> NestApplication {
-        let (_registry, router) = M::build();
+        let (registry, router) = M::build();
         NestApplication {
+            registry: std::sync::Arc::new(registry),
             router,
             uri_version: None,
             global_prefix: None,
+            static_mounts: Vec::new(),
             cors_options: None,
             security_headers: None,
             rate_limit_options: None,
@@ -537,9 +667,13 @@ impl NestFactory {
             production_errors: false,
             request_id: false,
             request_context: false,
+            request_scope: false,
+            i18n: false,
             liveness_path: None,
             readiness: None,
             metrics_path: None,
+            #[cfg(feature = "openapi")]
+            openapi: None,
             request_tracing: None,
             global_layers: Vec::new(),
             exception_filter: None,
@@ -554,21 +688,23 @@ impl NestFactory {
     /// Creates an app from a root static module plus runtime-selected dynamic modules.
     ///
     /// Useful for conditional feature routers (for example `if cfg!(feature = "...")` imports).
-    /// Dynamic modules currently compose routing trees; full scoped-provider dynamic semantics are
-    /// planned under the advanced-modules roadmap.
+    /// Dynamic modules can compose routing trees and export providers into the root module registry.
     pub fn create_with_modules<M, I>(dynamic_modules: I) -> NestApplication
     where
         M: core::Module,
         I: IntoIterator<Item = core::DynamicModule>,
     {
-        let (_registry, mut router) = M::build();
+        let (mut registry, mut router) = M::build();
         for dm in dynamic_modules {
+            registry.absorb_exported(dm.registry, &dm.exports);
             router = router.merge(dm.router);
         }
         NestApplication {
+            registry: std::sync::Arc::new(registry),
             router,
             uri_version: None,
             global_prefix: None,
+            static_mounts: Vec::new(),
             cors_options: None,
             security_headers: None,
             rate_limit_options: None,
@@ -579,9 +715,13 @@ impl NestFactory {
             production_errors: false,
             request_id: false,
             request_context: false,
+            request_scope: false,
+            i18n: false,
             liveness_path: None,
             readiness: None,
             metrics_path: None,
+            #[cfg(feature = "openapi")]
+            openapi: None,
             request_tracing: None,
             global_layers: Vec::new(),
             exception_filter: None,
@@ -590,6 +730,372 @@ impl NestFactory {
             request_decompression: false,
             listen_ip: None,
             path_normalization: None,
+        }
+    }
+
+    /// Creates a microservice app (feature: `microservices`) using the TCP transport adapter.
+    ///
+    /// Use `.also_listen_http(port)` to run HTTP + microservice in one process (hybrid bootstrap).
+    #[cfg(feature = "microservices")]
+    pub fn create_microservice<M>(options: crate::microservices::TcpMicroserviceOptions) -> MicroserviceApplication
+    where
+        M: core::Module + crate::microservices::MicroserviceModule,
+    {
+        let (registry, router) = M::build();
+        let registry = std::sync::Arc::new(registry);
+
+        let handlers = M::microservice_handlers()
+            .into_iter()
+            .map(|f| f(&registry))
+            .collect::<Vec<_>>();
+
+        let server: Box<dyn crate::microservices::MicroserviceServer> =
+            Box::new(crate::microservices::TcpMicroserviceServer::new(options, handlers));
+
+        let http = NestApplication {
+            registry: registry.clone(),
+            router,
+            uri_version: None,
+            global_prefix: None,
+            static_mounts: Vec::new(),
+            cors_options: None,
+            security_headers: None,
+            rate_limit_options: None,
+            request_timeout: None,
+            concurrency_limit: None,
+            load_shed: false,
+            body_limit_bytes: None,
+            production_errors: false,
+            request_id: false,
+            request_context: false,
+            request_scope: false,
+            i18n: false,
+            liveness_path: None,
+            readiness: None,
+            metrics_path: None,
+            #[cfg(feature = "openapi")]
+            openapi: None,
+            request_tracing: None,
+            global_layers: Vec::new(),
+            exception_filter: None,
+            default_404_fallback: false,
+            compression: false,
+            request_decompression: false,
+            listen_ip: None,
+            path_normalization: None,
+        };
+
+        MicroserviceApplication {
+            registry,
+            http,
+            server,
+            http_port: None,
+        }
+    }
+
+    /// Creates a microservice app (feature: `microservices-nats`) using the NATS transport adapter.
+    #[cfg(feature = "microservices-nats")]
+    pub fn create_microservice_nats<M>(
+        options: crate::microservices::NatsMicroserviceOptions,
+    ) -> MicroserviceApplication
+    where
+        M: core::Module + crate::microservices::MicroserviceModule,
+    {
+        let (registry, router) = M::build();
+        let registry = std::sync::Arc::new(registry);
+
+        let handlers = M::microservice_handlers()
+            .into_iter()
+            .map(|f| f(&registry))
+            .collect::<Vec<_>>();
+
+        let server: Box<dyn crate::microservices::MicroserviceServer> =
+            Box::new(crate::microservices::NatsMicroserviceServer::new(options, handlers));
+
+        let http = NestApplication {
+            registry: registry.clone(),
+            router,
+            uri_version: None,
+            global_prefix: None,
+            static_mounts: Vec::new(),
+            cors_options: None,
+            security_headers: None,
+            rate_limit_options: None,
+            request_timeout: None,
+            concurrency_limit: None,
+            load_shed: false,
+            body_limit_bytes: None,
+            production_errors: false,
+            request_id: false,
+            request_context: false,
+            request_scope: false,
+            i18n: false,
+            liveness_path: None,
+            readiness: None,
+            metrics_path: None,
+            #[cfg(feature = "openapi")]
+            openapi: None,
+            request_tracing: None,
+            global_layers: Vec::new(),
+            exception_filter: None,
+            default_404_fallback: false,
+            compression: false,
+            request_decompression: false,
+            listen_ip: None,
+            path_normalization: None,
+        };
+
+        MicroserviceApplication {
+            registry,
+            http,
+            server,
+            http_port: None,
+        }
+    }
+
+    /// Creates a microservice app (feature: `microservices-redis`) using the Redis transport adapter.
+    #[cfg(feature = "microservices-redis")]
+    pub fn create_microservice_redis<M>(
+        options: crate::microservices::RedisMicroserviceOptions,
+    ) -> MicroserviceApplication
+    where
+        M: core::Module + crate::microservices::MicroserviceModule,
+    {
+        let (registry, router) = M::build();
+        let registry = std::sync::Arc::new(registry);
+
+        let handlers = M::microservice_handlers()
+            .into_iter()
+            .map(|f| f(&registry))
+            .collect::<Vec<_>>();
+
+        let server: Box<dyn crate::microservices::MicroserviceServer> =
+            Box::new(crate::microservices::RedisMicroserviceServer::new(options, handlers));
+
+        let http = NestApplication {
+            registry: registry.clone(),
+            router,
+            uri_version: None,
+            global_prefix: None,
+            static_mounts: Vec::new(),
+            cors_options: None,
+            security_headers: None,
+            rate_limit_options: None,
+            request_timeout: None,
+            concurrency_limit: None,
+            load_shed: false,
+            body_limit_bytes: None,
+            production_errors: false,
+            request_id: false,
+            request_context: false,
+            request_scope: false,
+            i18n: false,
+            liveness_path: None,
+            readiness: None,
+            metrics_path: None,
+            #[cfg(feature = "openapi")]
+            openapi: None,
+            request_tracing: None,
+            global_layers: Vec::new(),
+            exception_filter: None,
+            default_404_fallback: false,
+            compression: false,
+            request_decompression: false,
+            listen_ip: None,
+            path_normalization: None,
+        };
+
+        MicroserviceApplication {
+            registry,
+            http,
+            server,
+            http_port: None,
+        }
+    }
+
+    /// Creates a microservice app (feature: `microservices-grpc`) using the gRPC transport adapter.
+    #[cfg(feature = "microservices-grpc")]
+    pub fn create_microservice_grpc<M>(
+        options: crate::microservices::GrpcMicroserviceOptions,
+    ) -> MicroserviceApplication
+    where
+        M: core::Module + crate::microservices::MicroserviceModule,
+    {
+        let (registry, router) = M::build();
+        let registry = std::sync::Arc::new(registry);
+
+        let handlers = M::microservice_handlers()
+            .into_iter()
+            .map(|f| f(&registry))
+            .collect::<Vec<_>>();
+
+        let server: Box<dyn crate::microservices::MicroserviceServer> =
+            Box::new(crate::microservices::GrpcMicroserviceServer::new(options, handlers));
+
+        let http = NestApplication {
+            registry: registry.clone(),
+            router,
+            uri_version: None,
+            global_prefix: None,
+            static_mounts: Vec::new(),
+            cors_options: None,
+            security_headers: None,
+            rate_limit_options: None,
+            request_timeout: None,
+            concurrency_limit: None,
+            load_shed: false,
+            body_limit_bytes: None,
+            production_errors: false,
+            request_id: false,
+            request_context: false,
+            request_scope: false,
+            i18n: false,
+            liveness_path: None,
+            readiness: None,
+            metrics_path: None,
+            #[cfg(feature = "openapi")]
+            openapi: None,
+            request_tracing: None,
+            global_layers: Vec::new(),
+            exception_filter: None,
+            default_404_fallback: false,
+            compression: false,
+            request_decompression: false,
+            listen_ip: None,
+            path_normalization: None,
+        };
+
+        MicroserviceApplication {
+            registry,
+            http,
+            server,
+            http_port: None,
+        }
+    }
+}
+
+/// Microservice bootstrap handle (NestJS `createMicroservice` analogue).
+#[cfg(feature = "microservices")]
+pub struct MicroserviceApplication {
+    registry: std::sync::Arc<crate::core::ProviderRegistry>,
+    http: NestApplication,
+    server: Box<dyn crate::microservices::MicroserviceServer>,
+    http_port: Option<u16>,
+}
+
+#[cfg(feature = "microservices")]
+impl MicroserviceApplication {
+    /// Opt-in hybrid mode: run the HTTP router on `port` in the same process.
+    pub fn also_listen_http(mut self, port: u16) -> Self {
+        self.http_port = Some(port);
+        self
+    }
+
+    /// Apply additional HTTP configuration before `listen*`.
+    pub fn configure_http<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(NestApplication) -> NestApplication,
+    {
+        self.http = f(self.http);
+        self
+    }
+
+    /// Resolve a provider from the app DI container.
+    pub fn get<T>(&self) -> std::sync::Arc<T>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.registry.get::<T>()
+    }
+
+    pub async fn listen(self) {
+        self.listen_with_shutdown(nestrs_shutdown_signal()).await;
+    }
+
+    pub async fn listen_with_shutdown<F>(self, shutdown: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        use tokio::sync::watch;
+
+        let registry = self.registry.clone();
+        let mut http = self.http;
+        let server = self.server;
+        let http_port = self.http_port;
+
+        // Lifecycle hooks are shared across HTTP + microservice (run once).
+        registry.eager_init_singletons();
+        crate::microservices::wire_on_event_handlers(registry.as_ref());
+        registry.run_on_module_init().await;
+        registry.run_on_application_bootstrap().await;
+        #[cfg(feature = "schedule")]
+        crate::schedule::wire_scheduled_tasks(registry.as_ref()).await;
+        #[cfg(feature = "queues")]
+        crate::queues::wire_queue_processors(registry.as_ref()).await;
+
+        let (tx, rx) = watch::channel(false);
+        tokio::spawn(async move {
+            shutdown.await;
+            let _ = tx.send(true);
+        });
+
+        let shutdown_for_ms = {
+            let mut rx = rx.clone();
+            async move {
+                while !*rx.borrow() {
+                    if rx.changed().await.is_err() {
+                        break;
+                    }
+                }
+            }
+        };
+
+        let shutdown_for_ms: crate::microservices::ShutdownFuture = Box::pin(shutdown_for_ms);
+        let ms_task = tokio::spawn(async move { server.listen_with_shutdown(shutdown_for_ms).await });
+
+        let http_task = if let Some(port) = http_port {
+            let mut rx = rx.clone();
+            let shutdown_for_http = async move {
+                while !*rx.borrow() {
+                    if rx.changed().await.is_err() {
+                        break;
+                    }
+                }
+            };
+
+            Some(tokio::spawn(async move {
+                let ip = http
+                    .listen_ip
+                    .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+                let path_normalization = http.path_normalization.take();
+                let router = http.build_router();
+
+                let listener = tokio::net::TcpListener::bind((ip, port))
+                    .await
+                    .unwrap_or_else(|e| panic!("failed to bind on {ip}:{port}: {e}"));
+
+                axum_serve(
+                    listener,
+                    router,
+                    path_normalization,
+                    Some(Box::pin(shutdown_for_http)),
+                )
+                .await;
+            }))
+        } else {
+            None
+        };
+
+        let _ = ms_task.await;
+        if let Some(t) = http_task {
+            let _ = t.await;
+        }
+
+        registry.run_on_application_shutdown().await;
+        registry.run_on_module_destroy().await;
+        #[cfg(feature = "otel")]
+        if OTEL_INSTALLED.get().is_some() {
+            crate::otel::shutdown_tracer_provider();
         }
     }
 }
@@ -604,8 +1110,35 @@ impl NestApplication {
         }
     }
 
+    fn normalize_static_mount(path: String) -> String {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return "/".to_string();
+        }
+        let inner = trimmed.trim_matches('/');
+        if inner.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", inner)
+        }
+    }
+
     pub fn set_global_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.global_prefix = Some(Self::normalize_segment(prefix.into()));
+        self
+    }
+
+    /// Serve static assets from `dir` at `mount_path` (NestJS `ServeStaticModule` / `useStaticAssets` analogue).
+    ///
+    /// The static service is mounted at the **server root** (not under URI versioning / global prefix),
+    /// similar to health and metrics probes.
+    pub fn serve_static(
+        mut self,
+        mount_path: impl Into<String>,
+        dir: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        self.static_mounts
+            .push((Self::normalize_static_mount(mount_path.into()), dir.into()));
         self
     }
 
@@ -737,6 +1270,24 @@ impl NestApplication {
         self
     }
 
+    /// Resolves locale per request and installs [`Locale`] / [`I18n`] extractors.
+    ///
+    /// Requires `I18nService` to be registered (typically via `I18nModule` import).
+    pub fn use_i18n(mut self) -> Self {
+        self.i18n = true;
+        self
+    }
+
+    /// Enables request-scoped providers (`ProviderScope::Request`) and the [`RequestScoped`] extractor.
+    ///
+    /// This installs a middleware that:
+    /// - injects the app's provider registry into request extensions
+    /// - creates a task-local request-scope cache so repeated resolutions within one request share instances
+    pub fn use_request_scope(mut self) -> Self {
+        self.request_scope = true;
+        self
+    }
+
     /// Registers a minimal JSON **liveness** probe at `path` (for example `"/health"`).
     ///
     /// The route is mounted at the **server root**, not under [`Self::enable_uri_versioning`] or
@@ -778,6 +1329,57 @@ impl NestApplication {
         self
     }
 
+    /// Enables OpenAPI JSON + Swagger UI (feature: `openapi`).
+    ///
+    /// Registers:
+    /// - `GET /openapi.json`
+    /// - `GET /docs`
+    #[cfg(feature = "openapi")]
+    pub fn enable_openapi(mut self) -> Self {
+        self.openapi = Some(nestrs_openapi::OpenApiOptions::default());
+        self
+    }
+
+    #[cfg(feature = "openapi")]
+    pub fn enable_openapi_with_options(mut self, options: nestrs_openapi::OpenApiOptions) -> Self {
+        self.openapi = Some(options);
+        self
+    }
+
+    /// Enables a GraphQL endpoint (feature: `graphql`).
+    ///
+    /// Registers `GET/POST /graphql` under the app router (so URI versioning/global prefix apply).
+    #[cfg(feature = "graphql")]
+    pub fn enable_graphql<Query, Mutation, Subscription>(
+        mut self,
+        schema: crate::graphql::Schema<Query, Mutation, Subscription>,
+    ) -> Self
+    where
+        Query: crate::graphql::ObjectType + Send + Sync + 'static,
+        Mutation: crate::graphql::ObjectType + Send + Sync + 'static,
+        Subscription: crate::graphql::SubscriptionType + Send + Sync + 'static,
+    {
+        self.router = self
+            .router
+            .merge(crate::graphql::graphql_router(schema, "/graphql"));
+        self
+    }
+
+    #[cfg(feature = "graphql")]
+    pub fn enable_graphql_with_path<Query, Mutation, Subscription>(
+        mut self,
+        schema: crate::graphql::Schema<Query, Mutation, Subscription>,
+        path: impl Into<String>,
+    ) -> Self
+    where
+        Query: crate::graphql::ObjectType + Send + Sync + 'static,
+        Mutation: crate::graphql::ObjectType + Send + Sync + 'static,
+        Subscription: crate::graphql::SubscriptionType + Send + Sync + 'static,
+    {
+        self.router = self.router.merge(crate::graphql::graphql_router(schema, path));
+        self
+    }
+
     /// Emits structured request logs through `tracing` with fields:
     /// `method`, `path`, `status`, `duration_ms`, and `request_id` (when present).
     pub fn use_request_tracing(mut self, options: RequestTracingOptions) -> Self {
@@ -790,6 +1392,20 @@ impl NestApplication {
     pub fn configure_tracing(self, config: TracingConfig) -> Self {
         try_init_tracing(config)
             .unwrap_or_else(|e| panic!("nestrs: configure_tracing failed: {e}"));
+        self
+    }
+
+    /// Like [`Self::configure_tracing`], but also exports spans to an OTLP collector (OpenTelemetry).
+    ///
+    /// Feature-gated behind `otel`.
+    #[cfg(feature = "otel")]
+    pub fn configure_tracing_opentelemetry(
+        self,
+        config: TracingConfig,
+        otel: OpenTelemetryConfig,
+    ) -> Self {
+        try_init_tracing_opentelemetry(config, otel)
+            .unwrap_or_else(|e| panic!("nestrs: configure_tracing_opentelemetry failed: {e}"));
         self
     }
 
@@ -843,7 +1459,10 @@ impl NestApplication {
     fn build_router(self) -> axum::Router {
         let production_errors = self.production_errors;
         let request_context = self.request_context;
+        let request_scope = self.request_scope;
+        let i18n = self.i18n;
         let request_id = self.request_id;
+        let static_mounts = self.static_mounts;
         let liveness_path = self.liveness_path;
         let readiness = self.readiness;
         let metrics_path = self.metrics_path.clone();
@@ -854,14 +1473,25 @@ impl NestApplication {
         let request_decompression = self.request_decompression;
         let concurrency_limit = self.concurrency_limit;
         let load_shed = self.load_shed;
+        let registry = self.registry;
+        let uri_version = self.uri_version;
+        let global_prefix = self.global_prefix;
+        #[cfg(feature = "openapi")]
+        let openapi = self.openapi;
         let mut router = self.router;
 
-        if let Some(v) = self.uri_version {
-            router = axum::Router::new().nest(&v, router);
+        if let Some(ref v) = uri_version {
+            router = axum::Router::new().nest(v, router);
         }
 
-        if let Some(p) = self.global_prefix {
-            router = axum::Router::new().nest(&p, router);
+        if let Some(ref p) = global_prefix {
+            router = axum::Router::new().nest(p, router);
+        }
+
+        for (mount_path, dir) in static_mounts {
+            let svc = tower_http::services::ServeDir::new(dir).append_index_html_on_directories(true);
+            let static_router = axum::Router::new().nest_service(mount_path.as_str(), svc);
+            router = axum::Router::new().merge(static_router).merge(router);
         }
 
         if let Some(path) = liveness_path {
@@ -902,6 +1532,21 @@ impl NestApplication {
             router = axum::Router::new().merge(probe).merge(router);
         }
 
+        #[cfg(feature = "openapi")]
+        if let Some(mut options) = openapi {
+            let api_prefix = match (global_prefix.as_deref(), uri_version.as_deref()) {
+                (None, None) => "".to_string(),
+                (Some(p), None) => p.to_string(),
+                (None, Some(v)) => v.to_string(),
+                (Some(p), Some(v)) => {
+                    format!("{}/{}", p.trim_end_matches('/'), v.trim_start_matches('/'))
+                }
+            };
+            options.api_prefix = api_prefix;
+            let docs = nestrs_openapi::openapi_router(options);
+            router = axum::Router::new().merge(docs).merge(router);
+        }
+
         if default_404_fallback {
             router = router.fallback(axum::routing::any(nestrs_default_not_found_handler));
         }
@@ -910,6 +1555,13 @@ impl NestApplication {
             router = router.layer(axum::middleware::from_fn_with_state(
                 filter,
                 exception_filter::exception_filter_middleware,
+            ));
+        }
+
+        if request_scope {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                registry.clone(),
+                request_scope_middleware,
             ));
         }
 
@@ -961,6 +1613,14 @@ impl NestApplication {
         if request_context {
             router = router.layer(axum::middleware::from_fn(
                 request_context::install_request_context_middleware,
+            ));
+        }
+
+        if i18n {
+            let svc = registry.get::<crate::I18nService>();
+            router = router.layer(axum::middleware::from_fn_with_state(
+                svc,
+                i18n::install_i18n_middleware,
             ));
         }
 
@@ -1016,9 +1676,20 @@ impl NestApplication {
         let ip = self
             .listen_ip
             .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        let registry = self.registry.clone();
         let mut s = self;
         let path_normalization = s.path_normalization.take();
         let router = s.build_router();
+
+        registry.eager_init_singletons();
+        #[cfg(feature = "microservices")]
+        crate::microservices::wire_on_event_handlers(registry.as_ref());
+        registry.run_on_module_init().await;
+        registry.run_on_application_bootstrap().await;
+        #[cfg(feature = "schedule")]
+        crate::schedule::wire_scheduled_tasks(registry.as_ref()).await;
+        #[cfg(feature = "queues")]
+        crate::queues::wire_queue_processors(registry.as_ref()).await;
 
         let listener = tokio::net::TcpListener::bind((ip, port))
             .await
@@ -1036,9 +1707,20 @@ impl NestApplication {
         let ip = self
             .listen_ip
             .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        let registry = self.registry.clone();
         let mut s = self;
         let path_normalization = s.path_normalization.take();
         let router = s.build_router();
+
+        registry.eager_init_singletons();
+        #[cfg(feature = "microservices")]
+        crate::microservices::wire_on_event_handlers(registry.as_ref());
+        registry.run_on_module_init().await;
+        registry.run_on_application_bootstrap().await;
+        #[cfg(feature = "schedule")]
+        crate::schedule::wire_scheduled_tasks(registry.as_ref()).await;
+        #[cfg(feature = "queues")]
+        crate::queues::wire_queue_processors(registry.as_ref()).await;
 
         let listener = tokio::net::TcpListener::bind((ip, port))
             .await
@@ -1051,6 +1733,13 @@ impl NestApplication {
             Some(Box::pin(shutdown)),
         )
         .await;
+
+        registry.run_on_application_shutdown().await;
+        registry.run_on_module_destroy().await;
+        #[cfg(feature = "otel")]
+        if OTEL_INSTALLED.get().is_some() {
+            crate::otel::shutdown_tracer_provider();
+        }
     }
 
     /// [`Self::listen_with_shutdown`] with **Ctrl+C** on all platforms and **SIGTERM** on Unix
@@ -1070,26 +1759,41 @@ async fn axum_serve(
     use axum::extract::Request;
     use axum::ServiceExt;
     use tower::Layer;
+    use std::net::SocketAddr;
 
     let err = |e: std::io::Error| panic!("server error: {e}");
 
     match (path_normalization, shutdown) {
-        (None, None) => axum::serve(listener, router).await.unwrap_or_else(err),
-        (None, Some(s)) => axum::serve(listener, router)
+        (None, None) => axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap_or_else(err),
+        (None, Some(s)) => axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
             .with_graceful_shutdown(s)
             .await
             .unwrap_or_else(err),
         (Some(PathNormalization::TrimTrailingSlash), None) => {
             let app =
                 tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash().layer(router);
-            axum::serve(listener, ServiceExt::<Request>::into_make_service(app))
+            axum::serve(
+                listener,
+                ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(app),
+            )
                 .await
                 .unwrap_or_else(err)
         }
         (Some(PathNormalization::TrimTrailingSlash), Some(s)) => {
             let app =
                 tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash().layer(router);
-            axum::serve(listener, ServiceExt::<Request>::into_make_service(app))
+            axum::serve(
+                listener,
+                ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(app),
+            )
                 .with_graceful_shutdown(s)
                 .await
                 .unwrap_or_else(err)
@@ -1097,14 +1801,20 @@ async fn axum_serve(
         (Some(PathNormalization::AppendTrailingSlash), None) => {
             let app = tower_http::normalize_path::NormalizePathLayer::append_trailing_slash()
                 .layer(router);
-            axum::serve(listener, ServiceExt::<Request>::into_make_service(app))
+            axum::serve(
+                listener,
+                ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(app),
+            )
                 .await
                 .unwrap_or_else(err)
         }
         (Some(PathNormalization::AppendTrailingSlash), Some(s)) => {
             let app = tower_http::normalize_path::NormalizePathLayer::append_trailing_slash()
                 .layer(router);
-            axum::serve(listener, ServiceExt::<Request>::into_make_service(app))
+            axum::serve(
+                listener,
+                ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(app),
+            )
                 .with_graceful_shutdown(s)
                 .await
                 .unwrap_or_else(err)
@@ -1277,6 +1987,20 @@ async fn request_tracing_middleware(
     );
 
     response
+}
+
+async fn request_scope_middleware(
+    axum::extract::State(registry): axum::extract::State<std::sync::Arc<crate::core::ProviderRegistry>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    crate::core::with_request_scope(async move {
+        let (mut parts, body) = req.into_parts();
+        parts.extensions.insert(registry);
+        let req = axum::http::Request::from_parts(parts, body);
+        next.run(req).await
+    })
+    .await
 }
 
 #[derive(Debug)]
@@ -1641,6 +2365,31 @@ impl axum::response::IntoResponse for HttpException {
     }
 }
 
+fn __nestrs_validation_failed(e: validator::ValidationErrors) -> HttpException {
+    let mut errors = Vec::new();
+    for (field, field_errors) in e.field_errors() {
+        let constraints = field_errors
+            .iter()
+            .map(|ve| {
+                let code = ve.code.to_string();
+                let message = ve
+                    .message
+                    .as_ref()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| code.clone());
+                (code, message)
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+
+        errors.push(serde_json::json!({
+            "field": field,
+            "constraints": constraints,
+        }));
+    }
+
+    UnprocessableEntityException::new("Validation failed").with_details(serde_json::json!(errors))
+}
+
 pub struct ValidatedBody<T>(pub T);
 
 #[axum::async_trait]
@@ -1657,32 +2406,60 @@ where
                 .await
                 .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {}", e)))?;
 
-        value.validate().map_err(|e| {
-            let mut errors = Vec::new();
-            for (field, field_errors) in e.field_errors() {
-                let constraints = field_errors
-                    .iter()
-                    .map(|ve| {
-                        let code = ve.code.to_string();
-                        let message = ve
-                            .message
-                            .as_ref()
-                            .map(|m| m.to_string())
-                            .unwrap_or_else(|| code.clone());
-                        (code, message)
-                    })
-                    .collect::<std::collections::HashMap<_, _>>();
+        value.validate().map_err(__nestrs_validation_failed)?;
 
-                errors.push(serde_json::json!({
-                    "field": field,
-                    "constraints": constraints,
-                }));
-            }
+        Ok(Self(value))
+    }
+}
 
-            UnprocessableEntityException::new("Validation failed")
-                .with_details(serde_json::json!(errors))
-        })?;
+/// Validates a query string-extracted DTO (NestJS `ValidationPipe` + `@Query()` analogue).
+pub struct ValidatedQuery<T>(pub T);
 
+#[axum::async_trait]
+impl<S, T> axum::extract::FromRequestParts<S> for ValidatedQuery<T>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Validate + Send + 'static,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Query(value) =
+            <axum::extract::Query<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid query: {}", e)))?;
+        value.validate().map_err(__nestrs_validation_failed)?;
+        Ok(Self(value))
+    }
+}
+
+/// Validates a path param-extracted DTO (NestJS `ValidationPipe` + `@Param()` analogue).
+pub struct ValidatedPath<T>(pub T);
+
+#[axum::async_trait]
+impl<S, T> axum::extract::FromRequestParts<S> for ValidatedPath<T>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Validate + Send + 'static,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Path(value) =
+            <axum::extract::Path<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid path params: {}", e)))?;
+        value.validate().map_err(__nestrs_validation_failed)?;
         Ok(Self(value))
     }
 }
@@ -1711,6 +2488,9 @@ macro_rules! impl_routes {
                 $(@ver($route_version:literal))?
                 $method:ident $path:literal
                 with ( $($guard:ty),* )
+                $( interceptors ( $($interceptor:ty),* ) )?
+                $( filters ( $($filter:ty),* ) )?
+                $( metadata ( $( ( $meta_key:literal, $meta_value:literal ) ),* ) )?
                 => $handler:path
                 ,
             )+
@@ -1727,17 +2507,47 @@ macro_rules! impl_routes {
                 router
                     $(
                         .route(
-                            $crate::impl_routes!(
-                                @join
-                                $crate::impl_routes!(@effective_version version $(, $route_version)?),
-                                prefix,
-                                $path
-                            ),
-                            $crate::impl_routes!(@method $method, $handler)
-                                .layer(::axum::middleware::from_fn(
+                            {
+                                let __path = $crate::impl_routes!(
+                                    @join
+                                    $crate::impl_routes!(
+                                        @effective_version
+                                        version
+                                        $(, $route_version)?
+                                    ),
+                                    prefix,
+                                    $path
+                                );
+                                $crate::core::RouteRegistry::register(
+                                    stringify!($method),
+                                    __path,
+                                    concat!(module_path!(), "::", stringify!($handler)),
+                                );
+                                __path
+                            },
+                            {
+                                $(
+                                    $(
+                                        $crate::core::MetadataRegistry::set(
+                                            concat!(module_path!(), "::", stringify!($handler)),
+                                            $meta_key,
+                                            $meta_value,
+                                        );
+                                    )*
+                                )?
+                                let mut __route = $crate::impl_routes!(@method $method, $handler);
+                                __route = $crate::impl_routes!(
+                                    @apply_interceptors
+                                    __route
+                                    $(, $($interceptor),* )?
+                                );
+                                __route = __route.layer(::axum::middleware::from_fn(
                                     |req: ::axum::extract::Request,
                                      next: ::axum::middleware::Next| async move {
-                                        let (parts, body) = req.into_parts();
+                                        let (mut parts, body) = req.into_parts();
+                                        parts.extensions.insert($crate::core::HandlerKey(
+                                            concat!(module_path!(), "::", stringify!($handler)),
+                                        ));
                                         $(
                                             if let Err(e) =
                                                 $crate::__nestrs_run_guard::<$guard>(&parts).await
@@ -1748,8 +2558,14 @@ macro_rules! impl_routes {
                                         let req = ::axum::http::Request::from_parts(parts, body);
                                         next.run(req).await
                                     },
-                                ))
-                                .with_state(state.clone())
+                                ));
+                                __route = $crate::impl_routes!(
+                                    @apply_filters
+                                    __route
+                                    $(, $($filter),* )?
+                                );
+                                __route.with_state(state.clone())
+                            }
                         )
                     )+
             }
@@ -1763,6 +2579,9 @@ macro_rules! impl_routes {
                 $(@ver($route_version:literal))?
                 $method:ident $path:literal
                 with ( $($guard:ty),* )
+                $( interceptors ( $($interceptor:ty),* ) )?
+                $( filters ( $($filter:ty),* ) )?
+                $( metadata ( $( ( $meta_key:literal, $meta_value:literal ) ),* ) )?
                 => $handler:path
                 ,
             )+
@@ -1779,17 +2598,47 @@ macro_rules! impl_routes {
                 router
                     $(
                         .route(
-                            $crate::impl_routes!(
-                                @join
-                                $crate::impl_routes!(@effective_version version $(, $route_version)?),
-                                prefix,
-                                $path
-                            ),
-                            $crate::impl_routes!(@method $method, $handler)
-                                .layer(::axum::middleware::from_fn(
+                            {
+                                let __path = $crate::impl_routes!(
+                                    @join
+                                    $crate::impl_routes!(
+                                        @effective_version
+                                        version
+                                        $(, $route_version)?
+                                    ),
+                                    prefix,
+                                    $path
+                                );
+                                $crate::core::RouteRegistry::register(
+                                    stringify!($method),
+                                    __path,
+                                    concat!(module_path!(), "::", stringify!($handler)),
+                                );
+                                __path
+                            },
+                            {
+                                $(
+                                    $(
+                                        $crate::core::MetadataRegistry::set(
+                                            concat!(module_path!(), "::", stringify!($handler)),
+                                            $meta_key,
+                                            $meta_value,
+                                        );
+                                    )*
+                                )?
+                                let mut __route = $crate::impl_routes!(@method $method, $handler);
+                                __route = $crate::impl_routes!(
+                                    @apply_interceptors
+                                    __route
+                                    $(, $($interceptor),* )?
+                                );
+                                __route = __route.layer(::axum::middleware::from_fn(
                                     |req: ::axum::extract::Request,
                                      next: ::axum::middleware::Next| async move {
-                                        let (parts, body) = req.into_parts();
+                                        let (mut parts, body) = req.into_parts();
+                                        parts.extensions.insert($crate::core::HandlerKey(
+                                            concat!(module_path!(), "::", stringify!($handler)),
+                                        ));
                                         $(
                                             if let Err(e) =
                                                 $crate::__nestrs_run_guard::<$guard>(&parts).await
@@ -1800,11 +2649,14 @@ macro_rules! impl_routes {
                                         let req = ::axum::http::Request::from_parts(parts, body);
                                         next.run(req).await
                                     },
-                                ))
-                                .layer(::axum::middleware::from_fn(
+                                ));
+                                __route = __route.layer(::axum::middleware::from_fn(
                                     |req: ::axum::extract::Request,
                                      next: ::axum::middleware::Next| async move {
-                                        let (parts, body) = req.into_parts();
+                                        let (mut parts, body) = req.into_parts();
+                                        parts.extensions.insert($crate::core::HandlerKey(
+                                            concat!(module_path!(), "::", stringify!($handler)),
+                                        ));
                                         if let Err(e) =
                                             $crate::__nestrs_run_guard::<$ctrl_guard>(&parts).await
                                         {
@@ -1813,8 +2665,14 @@ macro_rules! impl_routes {
                                         let req = ::axum::http::Request::from_parts(parts, body);
                                         next.run(req).await
                                     },
-                                ))
-                                .with_state(state.clone())
+                                ));
+                                __route = $crate::impl_routes!(
+                                    @apply_filters
+                                    __route
+                                    $(, $($filter),* )?
+                                );
+                                __route.with_state(state.clone())
+                            }
                         )
                     )+
             }
@@ -1858,4 +2716,27 @@ macro_rules! impl_routes {
     (@method DELETE, $handler:path) => { axum::routing::delete($handler) };
     (@method OPTIONS, $handler:path) => { axum::routing::options($handler) };
     (@method HEAD, $handler:path) => { axum::routing::head($handler) };
+    (@method ALL, $handler:path) => { axum::routing::any($handler) };
+    (@apply_interceptors $router:expr) => { $router };
+    (@apply_interceptors $router:expr,) => { $router };
+    (@apply_interceptors $router:expr, $head:ty $(, $tail:ty)*) => {{
+        $crate::impl_routes!(@apply_interceptors $router $(, $tail)*)
+            .layer($crate::interceptor_layer!($head))
+    }};
+    (@apply_filters $router:expr) => { $router };
+    (@apply_filters $router:expr,) => { $router };
+    (@apply_filters $router:expr, $head:ty $(, $tail:ty)*) => {{
+        $crate::impl_routes!(@apply_filters $router $(, $tail)*)
+            .layer(::axum::middleware::from_fn(
+                |req: ::axum::extract::Request, next: ::axum::middleware::Next| async move {
+                    let filter: $head = ::core::default::Default::default();
+                    let res = next.run(req).await;
+                    if let Some(ex) = res.extensions().get::<$crate::HttpException>().cloned() {
+                        filter.catch(ex).await
+                    } else {
+                        res
+                    }
+                },
+            ))
+    }};
 }

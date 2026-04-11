@@ -14,12 +14,24 @@ categories = ["web-programming", "asynchronous", "network-programming"]
 [features]
 default = []
 microservices = ["dep:nestrs-microservices"]
+microservices-nats = ["microservices", "nestrs-microservices/nats"]
+microservices-redis = ["microservices", "nestrs-microservices/redis"]
+microservices-grpc = ["microservices", "nestrs-microservices/grpc"]
 ws = ["dep:nestrs-ws"]
 graphql = ["dep:nestrs-graphql"]
 openapi = ["dep:nestrs-openapi"]
+cache-redis = ["dep:redis"]
+schedule = ["dep:tokio-cron-scheduler", "dep:linkme"]
+queues = ["dep:linkme"]
+otel = [
+  "dep:opentelemetry",
+  "dep:opentelemetry_sdk",
+  "dep:opentelemetry-otlp",
+  "dep:tracing-opentelemetry",
+]
 
 [dependencies]
-axum.workspace = true
+axum = { workspace = true, features = ["multipart"] }
 tokio.workspace = true
 nestrs-core = { version = "0.1.0", path = "../nestrs-core" }
 nestrs-macros = { version = "0.1.0", path = "../nestrs-macros" }
@@ -31,19 +43,29 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 validator = { version = "0.20", features = ["derive"] }
 tower = { version = "0.5", features = ["limit", "load-shed"] }
-tower-http = { version = "0.6", features = ["cors", "set-header", "limit", "request-id", "compression-gzip", "decompression-gzip", "normalize-path"] }
+tower-http = { version = "0.6", features = ["cors", "set-header", "limit", "request-id", "compression-gzip", "decompression-gzip", "normalize-path", "fs"] }
 async-trait = "0.1"
 metrics = "0.24"
 # Recorder + render only; we expose `/metrics` via Axum (no built-in hyper listener / push gateway).
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
-tracing = "=0.1.41"
+tracing = "=0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+dotenvy = "0.15.7"
+envy = "0.4.2"
+redis = { version = "0.29", features = ["tokio-comp"], optional = true }
+tokio-cron-scheduler = { version = "0.15.1", optional = true }
+linkme = { version = "0.3", optional = true }
+opentelemetry = { version = "0.31.0", features = ["trace"], optional = true }
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.31.1", default-features = false, features = ["trace", "grpc-tonic"], optional = true }
+tracing-opentelemetry = { version = "0.32.1", default-features = false, optional = true }
 
 [dev-dependencies]
 flate2 = "1"
 tower = { version = "0.5", features = ["util"] }
 serial_test = "3"
 criterion = { version = "0.5", features = ["async_tokio"] }
+futures-util = "0.3"
 
 [[bench]]
 name = "router_hot_path"

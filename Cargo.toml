@@ -5,6 +5,7 @@ members = [
   "nestrs-macros",
   "nestrs-prisma",
   "nestrs-microservices",
+  "nestrs-cqrs",
   "nestrs-ws",
   "nestrs-graphql",
   "nestrs-openapi",

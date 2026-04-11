@@ -2,15 +2,12 @@ use nestrs::prelude::*;
 use nestrs_prisma::{PrismaModule, PrismaOptions, PrismaService};
 use std::sync::Arc;
 
+#[injectable]
 pub struct AppService {
     prisma: Arc<PrismaService>,
 }
 
 impl AppService {
-    pub fn new(prisma: Arc<PrismaService>) -> Self {
-        Self { prisma }
-    }
-
     pub fn get_hello(&self) -> &'static str {
         "Hello World"
     }
@@ -27,12 +24,6 @@ impl AppService {
             status: self.prisma.health().to_string(),
             sample: self.prisma.query_raw("select 1"),
         }
-    }
-}
-
-impl Injectable for AppService {
-    fn construct(registry: &ProviderRegistry) -> Arc<Self> {
-        Arc::new(Self::new(registry.get::<PrismaService>()))
     }
 }
 
@@ -59,6 +50,7 @@ pub struct DbHealthResponse {
 #[controller(prefix = "/api", version = "v1")]
 pub struct AppController;
 
+#[routes(state = AppService)]
 impl AppController {
     #[get("/")]
     pub async fn root(State(service): State<Arc<AppService>>) -> &'static str {
@@ -102,35 +94,23 @@ impl AppController {
     }
 
     #[get("/feature")]
+    #[ver("v2")]
     pub async fn versioned_feature() -> &'static str {
         "feature-route-v2"
     }
 }
 
-impl_routes!(AppController, state AppService => [
-    GET "/" with () => AppController::root,
-    GET "/db-health" with () => AppController::db_health,
-    GET "/created-style" with () => AppController::created_style,
-    GET "/header-style" with () => AppController::header_style,
-    GET "/docs" with () => AppController::docs,
-    @ver("v2") GET "/feature" with () => AppController::versioned_feature,
-    POST "/users" with () => AppController::create_user,
-]);
-
 #[version("v2")]
 #[controller(prefix = "/api")]
 pub struct AppControllerV2;
 
+#[routes(state = AppService)]
 impl AppControllerV2 {
     #[get("/")]
     pub async fn root() -> &'static str {
         "Hello World v2"
     }
 }
-
-impl_routes!(AppControllerV2, state AppService => [
-    GET "/" with () => AppControllerV2::root,
-]);
 
 #[module(
     imports = [PrismaModule],

@@ -4,6 +4,7 @@
 # Build artifacts
 target/
 **/target/
+docs/book/
 
 # Benchmark and generated report artifacts
 benchmarks/reports/

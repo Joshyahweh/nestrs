@@ -11,10 +11,34 @@ description = "Microservice transport and client primitives for nestrs."
 keywords = ["microservices", "events", "nest", "transport", "async"]
 categories = ["network-programming", "asynchronous"]
 
+[features]
+default = []
+# Optional transport adapters
+nats = ["dep:async-nats", "dep:futures-util", "dep:time"]
+redis = ["dep:redis", "dep:futures-util"]
+grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:bytes"]
+
 [dependencies]
 async-trait = "0.1"
+tokio = { workspace = true, features = ["io-util"] }
+nestrs-core = { version = "0.1.0", path = "../nestrs-core" }
+axum.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+linkme = "0.3"
+
+async-nats = { version = "0.41", optional = true }
+redis = { version = "0.29", features = ["tokio-comp"], optional = true }
+tonic = { version = "0.14.5", features = ["transport"], optional = true }
+prost = { version = "0.14.3", optional = true }
+bytes = { version = "1", optional = true }
+futures-util = { version = "0.3", optional = true }
+tonic-prost = { version = "0.14.5", optional = true }
+time = { version = "=0.3.45", optional = true }
 
 [dev-dependencies]
 tokio.workspace = true
+
+[build-dependencies]
+protoc-bin-vendored = "3.2.0"
+tonic-prost-build = "0.14.5"

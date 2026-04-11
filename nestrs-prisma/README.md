@@ -1,6 +1,14 @@
 # nestrs-prisma
 
-Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://github.com/Joshyahweh/nestrs): configuration, optional **SQLx** pooling (`DATABASE_URL`), and helpers that stay **ORM-agnostic** so you can choose how models are represented in Rust.
+Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://crates.io/crates/nestrs): configuration, optional **SQLx** pooling (`DATABASE_URL`), and helpers that stay **ORM-agnostic** so you can choose how models are represented in Rust.
+
+**Docs:** [docs.rs/nestrs-prisma](https://docs.rs/nestrs-prisma) · **Repo:** [github.com/Joshyahweh/nestrs](https://github.com/Joshyahweh/nestrs)
+
+```toml
+[dependencies]
+nestrs-prisma = { version = "0.1.2", features = ["sqlx"] }
+nestrs = "0.1.2"
+```
 
 ## 1. Write models in Prisma
 

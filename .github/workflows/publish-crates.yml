@@ -1,6 +1,6 @@
 name: publish-crates
 
-# Publishes only after preflight passes. Use a tag on `main` (e.g. `v0.1.1`) or manual dispatch.
+# Publishes only after preflight passes. Use a tag on `main` (e.g. `v0.1.2`) or manual dispatch.
 on:
   push:
     tags:

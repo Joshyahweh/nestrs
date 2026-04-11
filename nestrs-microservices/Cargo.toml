@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 description = "Microservice transport and client primitives for nestrs."
 keywords = ["microservices", "events", "nest", "transport", "async"]
 categories = ["network-programming", "asynchronous"]
@@ -32,8 +32,8 @@ microservice-metrics = ["dep:metrics"]
 [dependencies]
 async-trait = "0.1"
 tokio = { workspace = true, features = ["io-util"] }
-nestrs-core = { version = "0.1.1", path = "../nestrs-core" }
-nestrs-events = { version = "0.1.1", path = "../nestrs-events" }
+nestrs-core = { version = "0.1.2", path = "../nestrs-core" }
+nestrs-events = { version = "0.1.2", path = "../nestrs-events" }
 axum.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

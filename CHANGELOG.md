@@ -7,17 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-
-- Workspace MSRV is **1.88** (`time` 0.3.47 / `async-nats` 0.47).
-- `async-nats` optional dependency raised to **0.47** (pulls `rustls-webpki` 0.103.x).
-- `publish-crates` workflow: preflight gate, tag must be on `main`, correct crate order (includes `nestrs-events`, `nestrs-cqrs`), **`CARGO_REGISTRY_TOKEN`** secret instead of OIDC until trusted publishing is configured.
+## [0.1.2] - 2026-04-11
 
 ### Added
 
-- Landing page and documentation hub under `website/` with light/dark mode.
-- Contribution and release process docs (`CONTRIBUTING.md`, `RELEASE.md`).
-- Phase 5 hardening optional extension artifacts and maintenance helpers.
+- Dedicated **`README.md`** for each published crate with install snippets and examples; each package’s `readme` in `Cargo.toml` points at its own file so [crates.io](https://crates.io) shows crate-specific documentation instead of the workspace root README.
+- `publish-crates` workflow: **GitHub Release** job after successful tag publish (with generated release notes).
+
+### Fixed
+
+- Rustdoc and Clippy issues affecting `lint-and-docs` CI (private intra-doc links, redundant links, duplicated `cfg` attrs, format/clippy lints).
 
 ## [0.1.1] - 2026-04-11
 

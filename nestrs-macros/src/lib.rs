@@ -782,6 +782,7 @@ struct RouteDef {
     handler: Ident,
     version: Option<LitStr>,
     guards: Vec<Type>,
+    #[allow(dead_code)]
     pipes: Vec<Type>,
     interceptors: Vec<Type>,
     filters: Vec<Type>,
@@ -834,7 +835,7 @@ fn is_validation_pipe(ty: &Type) -> bool {
     let Some(seg) = tp.path.segments.last() else {
         return false;
     };
-    seg.ident.to_string() == "ValidationPipe"
+    seg.ident == "ValidationPipe"
 }
 
 fn parse_subscribe_message(attrs: &[syn::Attribute]) -> Result<Option<LitStr>> {
@@ -1054,7 +1055,7 @@ fn is_ws_client_type(ty: &Type) -> bool {
     let Some(seg) = tp.path.segments.last() else {
         return false;
     };
-    seg.ident.to_string() == "WsClient"
+    seg.ident == "WsClient"
 }
 
 fn is_serde_json_value_type(ty: &Type) -> bool {
@@ -1082,7 +1083,7 @@ fn is_transport_error_type(ty: &Type) -> bool {
     let Some(seg) = tp.path.segments.last() else {
         return false;
     };
-    seg.ident.to_string() == "TransportError"
+    seg.ident == "TransportError"
 }
 
 fn is_http_exception_type(ty: &Type) -> bool {
@@ -1092,7 +1093,7 @@ fn is_http_exception_type(ty: &Type) -> bool {
     let Some(seg) = tp.path.segments.last() else {
         return false;
     };
-    seg.ident.to_string() == "HttpException"
+    seg.ident == "HttpException"
 }
 
 fn split_result_type(ty: &Type) -> Option<(Type, Type)> {
@@ -1530,8 +1531,7 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     if routes.is_empty() {
         let msg = format!(
-            "routes found no #[get]/#[post]/... handlers in impl {} {{ ... }}",
-            controller_ident
+            "routes found no #[get]/#[post]/... handlers in impl {controller_ident} {{ ... }}",
         );
         return syn::Error::new_spanned(item_impl, msg)
             .to_compile_error()
@@ -2379,22 +2379,14 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     nestrs::serde_json::to_value(__out)
                         .map_err(|e| nestrs::microservices::TransportError::new(format!("serialize response failed: {e}")))
                 },
-                (Some(payload_ty), Some(ok_ty), None) => {
-                    if is_serde_json_value_type(payload_ty) {
-                        quote! {
-                            let __out: #ok_ty = self.#name(__payload).await;
-                            nestrs::serde_json::to_value(__out)
-                                .map_err(|e| nestrs::microservices::TransportError::new(format!("serialize response failed: {e}")))
-                        }
-                    } else {
-                        quote! {
-                            let __out: #ok_ty = self.#name(__payload).await;
-                            nestrs::serde_json::to_value(__out)
-                                .map_err(|e| nestrs::microservices::TransportError::new(format!("serialize response failed: {e}")))
-                        }
+                (Some(_payload_ty), Some(ok_ty), None) => {
+                    quote! {
+                        let __out: #ok_ty = self.#name(__payload).await;
+                        nestrs::serde_json::to_value(__out)
+                            .map_err(|e| nestrs::microservices::TransportError::new(format!("serialize response failed: {e}")))
                     }
                 }
-                (None, Some(ok_ty), Some(err_ty)) => {
+                (None, Some(_ok_ty), Some(err_ty)) => {
                     if is_transport_error_type(err_ty) {
                         quote! {
                             match self.#name().await {
@@ -2423,7 +2415,7 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         }
                     }
                 }
-                (Some(payload_ty), Some(_ok_ty), Some(err_ty)) => {
+                (Some(_payload_ty), Some(_ok_ty), Some(err_ty)) => {
                     let pass_payload = quote! { __payload };
 
                     if is_transport_error_type(err_ty) {
@@ -2494,13 +2486,7 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let call = match payload_ty.as_ref() {
                 None => quote! { let _ = self.#name().await; },
-                Some(payload_ty) => {
-                    if is_serde_json_value_type(payload_ty) {
-                        quote! { let _ = self.#name(__payload).await; }
-                    } else {
-                        quote! { let _ = self.#name(__payload).await; }
-                    }
-                }
+                Some(_payload_ty) => quote! { let _ = self.#name(__payload).await; },
             };
 
             event_arms.push(quote! {

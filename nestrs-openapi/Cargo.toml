@@ -6,12 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 description = "OpenAPI extension crate for nestrs."
 keywords = ["openapi", "swagger", "nest", "axum", "api"]
 categories = ["web-programming", "api-bindings"]
 
 [dependencies]
 axum.workspace = true
-nestrs-core = { version = "0.1.1", path = "../nestrs-core" }
+nestrs-core = { version = "0.1.2", path = "../nestrs-core" }
 serde_json = "1"

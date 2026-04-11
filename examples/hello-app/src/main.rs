@@ -100,7 +100,7 @@ impl AppController {
             .list_users()
             .await
             .map(Json)
-            .map_err(|e| InternalServerErrorException::new(e))
+            .map_err(InternalServerErrorException::new)
     }
 
     #[get("/created-style")]

@@ -1,5 +1,3 @@
-#![cfg(feature = "otel")]
-
 use opentelemetry::global;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::SpanExporter;

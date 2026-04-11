@@ -342,8 +342,8 @@ fn generate_resource(
         Transport::Rest => "controller",
     };
     let controller_path = feature_dir.join(file_name(&snake, controller_kind, style));
-    let create_dto_path = feature_dir.join(file_name(&format!("create_{}", snake), "dto", style));
-    let update_dto_path = feature_dir.join(file_name(&format!("update_{}", snake), "dto", style));
+    let create_dto_path = feature_dir.join(file_name(&format!("create_{snake}"), "dto", style));
+    let update_dto_path = feature_dir.join(file_name(&format!("update_{snake}"), "dto", style));
     let mod_rs_path = feature_dir.join("mod.rs");
 
     write_if_absent(
@@ -363,12 +363,12 @@ fn generate_resource(
     )?;
     write_if_absent(
         &create_dto_path,
-        &dto_template(&format!("Create{}Dto", pascal)),
+        &dto_template(&format!("Create{pascal}Dto")),
         opts,
     )?;
     write_if_absent(
         &update_dto_path,
-        &dto_template(&format!("Update{}Dto", pascal)),
+        &dto_template(&format!("Update{pascal}Dto")),
         opts,
     )?;
     write_if_absent(
@@ -406,8 +406,8 @@ fn wire_parent_module(
     };
 
     let existing = fs::read_to_string(&target).map_err(|e| e.to_string())?;
-    let mod_decl = format!("pub mod {};", snake);
-    let use_decl = format!("use crate::{}::{}Module;", snake, pascal);
+    let mod_decl = format!("pub mod {snake};");
+    let use_decl = format!("use crate::{snake}::{pascal}Module;");
 
     let has_mod = existing.contains(&mod_decl);
     let has_use = existing.contains(&use_decl);
@@ -468,8 +468,8 @@ fn print_add_hints(snake: &str, pascal: &str, quiet: bool) {
     if quiet {
         return;
     }
-    println!("// ADD: pub mod {};", snake);
-    println!("// ADD: use crate::{}::{}Module;", snake, pascal);
+    println!("// ADD: pub mod {snake};");
+    println!("// ADD: use crate::{snake}::{pascal}Module;");
 }
 
 fn file_name(stem: &str, suffix: &str, style: Style) -> String {
@@ -623,8 +623,8 @@ fn mod_file_template(stem: &str, controller_kind: &str, style: Style) -> String 
             let service_file = file_name(stem, "service", style);
             let module_file = file_name(stem, "module", style);
             let entry_file = file_name(stem, controller_kind, style);
-            let create_dto_file = file_name(&format!("create_{}", stem), "dto", style);
-            let update_dto_file = file_name(&format!("update_{}", stem), "dto", style);
+            let create_dto_file = file_name(&format!("create_{stem}"), "dto", style);
+            let update_dto_file = file_name(&format!("update_{stem}"), "dto", style);
             format!(
                 "#[path = \"{module_file}\"]\npub mod {stem}_module;\n\
 #[path = \"{entry_file}\"]\npub mod {stem}_{controller_kind};\n\

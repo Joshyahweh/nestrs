@@ -1,6 +1,6 @@
 //! Production-oriented GraphQL limits for [async-graphql](https://docs.rs/async-graphql).
 //!
-//! Depth and complexity are enforced on [`SchemaBuilder`](async_graphql::SchemaBuilder) (see
+//! Depth and complexity are enforced on [`SchemaBuilder`] (see
 //! [`limit_depth`](async_graphql::SchemaBuilder::limit_depth) and
 //! [`limit_complexity`](async_graphql::SchemaBuilder::limit_complexity)), not via extensions.
 

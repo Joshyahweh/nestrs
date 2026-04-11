@@ -33,13 +33,12 @@ async fn multipart_upload_round_trips_file_field() {
 
     let boundary = "X-BOUNDARY";
     let body = format!(
-        "--{b}\r\n\
+        "--{boundary}\r\n\
 Content-Disposition: form-data; name=\"file\"; filename=\"hello.txt\"\r\n\
 Content-Type: text/plain\r\n\
 \r\n\
 hello world\r\n\
---{b}--\r\n",
-        b = boundary
+--{boundary}--\r\n",
     );
 
     let res = client

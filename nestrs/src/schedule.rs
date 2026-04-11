@@ -1,5 +1,3 @@
-#![cfg(feature = "schedule")]
-
 use crate::core::{DynamicModule, Injectable, ProviderRegistry};
 use crate::module;
 use std::sync::Arc;

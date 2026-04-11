@@ -14,7 +14,7 @@ pub const DEFAULT_SCHEMA_PATH: &str = "prisma/schema.prisma";
 /// This mirrors the expected `prisma-client-rust-cli` workflow while keeping
 /// command construction explicit for docs/tools.
 pub fn prisma_generate_command(schema_path: &str) -> String {
-    format!("cargo prisma generate --schema {}", schema_path)
+    format!("cargo prisma generate --schema {schema_path}")
 }
 
 #[derive(Debug, Clone)]

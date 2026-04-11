@@ -1,5 +1,3 @@
-#![cfg(feature = "queues")]
-
 use crate::core::{DynamicModule, Injectable, ProviderRegistry};
 use crate::injectable;
 use async_trait::async_trait;

@@ -1,6 +1,6 @@
 //! Production Kafka transport using [rskafka](https://docs.rs/rskafka) (pure Rust).
 //!
-//! Wire format matches Redis/NATS: [`crate::wire::WireRequest`] on the `requests` topic; replies go to
+//! Wire format matches Redis/NATS: JSON `WireRequest` payloads on the `requests` topic; replies go to
 //! a per-client `replies.{instance_id}` topic with record key = `correlation_id`.
 
 use std::collections::BTreeMap;
@@ -281,7 +281,7 @@ impl KafkaMicroserviceOptions {
     }
 }
 
-/// Consumes `*.requests` partition 0 and dispatches [`WireRequest`] payloads (same as Redis micro listener).
+/// Consumes `*.requests` partition 0 and dispatches `WireRequest` payloads (same as Redis micro listener).
 pub struct KafkaMicroserviceServer {
     options: KafkaMicroserviceOptions,
     client: Mutex<Option<Arc<rskafka::client::Client>>>,

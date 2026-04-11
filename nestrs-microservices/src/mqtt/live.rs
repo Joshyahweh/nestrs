@@ -1,6 +1,6 @@
 //! Production MQTT transport using [rumqttc](https://docs.rs/rumqttc) (native TLS stack).
 //!
-//! Uses the same JSON [`crate::wire::WireRequest`] as Redis/Kafka on a single requests topic; RPC replies are
+//! Uses the same JSON `WireRequest` shape as Redis/Kafka on a single requests topic; RPC replies are
 //! published to a per-request reply topic carried in `WireRequest.reply`.
 
 use std::collections::HashMap;
@@ -265,7 +265,7 @@ impl MqttMicroserviceOptions {
     }
 }
 
-/// Subscribes to `{prefix}/rpc/requests` and dispatches [`WireRequest`] payloads.
+/// Subscribes to `{prefix}/rpc/requests` and dispatches `WireRequest` payloads.
 pub struct MqttMicroserviceServer {
     options: MqttMicroserviceOptions,
     handlers: Vec<Arc<dyn MicroserviceHandler>>,

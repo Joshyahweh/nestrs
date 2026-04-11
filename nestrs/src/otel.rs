@@ -126,3 +126,10 @@ pub fn shutdown_tracer_provider() {
     }
 }
 
+// --- Log correlation (traces + logs) ---
+//
+// Logs emitted with `tracing::info!` / `tracing::error!` inside an active span share the same trace
+// context as OTLP traces when using `tracing-opentelemetry`. For **OTLP log** export, route
+// structured logs through the OpenTelemetry Collector (e.g. `filelog` receiver → OTLP) or adopt
+// an ecosystem crate when stable Rust OTLP log exporters match your `opentelemetry` version.
+

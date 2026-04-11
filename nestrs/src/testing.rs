@@ -86,6 +86,7 @@ where
             registry: registry.clone(),
             router,
             uri_version: None,
+            api_versioning: None,
             global_prefix: None,
             static_mounts: Vec::new(),
             cors_options: None,

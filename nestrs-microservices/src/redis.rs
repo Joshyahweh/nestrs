@@ -1,7 +1,7 @@
+use crate::wire::{dispatch_emit, dispatch_send, WireKind, WireRequest, WireResponse, WireError};
 use crate::{MicroserviceHandler, Transport, TransportError};
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -55,38 +55,6 @@ impl RedisTransportOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum WireKind {
-    Send,
-    Emit,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WireRequest {
-    kind: WireKind,
-    pattern: String,
-    payload: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reply: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WireError {
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WireResponse {
-    ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    payload: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<WireError>,
-}
-
 #[derive(Clone)]
 pub struct RedisTransport {
     options: RedisTransportOptions,
@@ -137,6 +105,7 @@ impl Transport for RedisTransport {
             pattern: pattern.to_string(),
             payload,
             reply: Some(reply.clone()),
+            correlation_id: None,
         };
         let text = serde_json::to_string(&wire)
             .map_err(|e| TransportError::new(format!("serialize request failed: {e}")))?;
@@ -190,6 +159,7 @@ impl Transport for RedisTransport {
             pattern: pattern.to_string(),
             payload,
             reply: None,
+            correlation_id: None,
         };
         let text = serde_json::to_string(&wire)
             .map_err(|e| TransportError::new(format!("serialize event failed: {e}")))?;
@@ -294,7 +264,7 @@ impl RedisMicroserviceServer {
                             let handlers = handlers.clone();
                             let client = self.client.clone();
                             tokio::spawn(async move {
-                                let res = dispatch_send(&handlers, &req.pattern, req.payload).await;
+                                let res = dispatch_send(&handlers, &req.pattern, req.payload.clone()).await;
                                 let wire = match res {
                                     Ok(v) => WireResponse { ok: true, payload: Some(v), error: None },
                                     Err(e) => WireResponse { ok: false, payload: None, error: Some(WireError { message: e.message, details: e.details }) },
@@ -313,7 +283,7 @@ impl RedisMicroserviceServer {
                         WireKind::Emit => {
                             let handlers = handlers.clone();
                             tokio::spawn(async move {
-                                dispatch_emit(&handlers, &req.pattern, req.payload).await;
+                                dispatch_emit(&handlers, &req.pattern, req.payload.clone()).await;
                             });
                         }
                     }
@@ -322,27 +292,6 @@ impl RedisMicroserviceServer {
         }
 
         Ok(())
-    }
-}
-
-async fn dispatch_send(
-    handlers: &[Arc<dyn MicroserviceHandler>],
-    pattern: &str,
-    payload: serde_json::Value,
-) -> Result<serde_json::Value, TransportError> {
-    for h in handlers {
-        if let Some(res) = h.handle_message(pattern, payload.clone()).await {
-            return res;
-        }
-    }
-    Err(TransportError::new(format!(
-        "no microservice handler for pattern `{pattern}`"
-    )))
-}
-
-async fn dispatch_emit(handlers: &[Arc<dyn MicroserviceHandler>], pattern: &str, payload: serde_json::Value) {
-    for h in handlers {
-        let _ = h.handle_event(pattern, payload.clone()).await;
     }
 }
 

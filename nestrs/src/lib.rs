@@ -52,6 +52,16 @@ pub mod core {
 pub use nestrs_graphql as graphql;
 #[cfg(feature = "microservices")]
 pub use nestrs_microservices as microservices;
+#[cfg(feature = "microservices")]
+pub use nestrs_events::EventBus;
+#[cfg(feature = "microservices")]
+mod microservice_health;
+#[cfg(feature = "microservices")]
+pub use microservice_health::BrokerHealthStub;
+#[cfg(all(feature = "microservices", feature = "microservices-nats"))]
+pub use microservice_health::NatsBrokerHealth;
+#[cfg(all(feature = "microservices", feature = "microservices-redis"))]
+pub use microservice_health::RedisBrokerHealth;
 #[cfg(feature = "openapi")]
 pub use nestrs_openapi as openapi;
 #[cfg(feature = "ws")]
@@ -76,6 +86,8 @@ mod request_scoped;
 pub mod sse;
 pub mod multipart;
 mod testing;
+mod versioning;
+pub mod problem;
 
 pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
 #[cfg(feature = "cache-redis")]
@@ -100,6 +112,8 @@ pub use raw_body::RawBody;
 pub use request_context::{RequestContext, RequestContextMissing};
 pub use request_scoped::{RequestScoped, RequestScopedMissing};
 pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
+pub use problem::ProblemDetails;
+pub use versioning::{host_restriction_middleware, ApiVersioningPolicy, NestApiVersion, VersioningType};
 
 /// Axum middleware from an [`Interceptor`](Interceptor) type (uses `I::default()` per request).
 #[macro_export]
@@ -127,7 +141,24 @@ pub mod prelude {
     pub use crate::microservices;
     #[cfg(feature = "microservices")]
     pub use crate::microservices::{
-        ClientConfig, ClientProxy, ClientsModule, ClientsService, EventBus, Transport, TransportError,
+        ClientConfig, ClientProxy, ClientsModule, ClientsService, EventBus, KafkaTransport, MqttTransport,
+        Transport, TransportError,
+    };
+    #[cfg(feature = "microservices")]
+    pub use crate::BrokerHealthStub;
+    #[cfg(all(feature = "microservices", feature = "microservices-nats"))]
+    pub use crate::NatsBrokerHealth;
+    #[cfg(all(feature = "microservices", feature = "microservices-redis"))]
+    pub use crate::RedisBrokerHealth;
+    #[cfg(all(feature = "microservices", feature = "microservices-kafka"))]
+    pub use crate::microservices::{
+        kafka_cluster_reachable_with, KafkaConnectionOptions, KafkaMicroserviceOptions,
+        KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions, KafkaTransportOptions,
+    };
+    #[cfg(all(feature = "microservices", feature = "microservices-mqtt"))]
+    pub use crate::microservices::{
+        MqttMicroserviceOptions, MqttMicroserviceServer, MqttSocketOptions, MqttTlsMode,
+        MqttTransportOptions,
     };
     #[cfg(feature = "queues")]
     pub use crate::queues;
@@ -159,13 +190,14 @@ pub mod prelude {
         ClientIp, ClientIpMissing, ConflictException, CorsOptions, ExceptionFilter, ForbiddenException,
         GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus, HttpException,
         Interceptor, InternalServerErrorException, LoggingInterceptor, MethodNotAllowedException,
-        load_config, ConfigError, ConfigModule, NestApplication, NestConfig, NestDto, NestFactory,
+        load_config, ConfigError, ConfigModule, ApiVersioningPolicy, NestApiVersion, NestApplication,
+        NestConfig, NestDto, NestFactory, VersioningType,
         NotAcceptableException, NotFoundException, NotImplementedException, ParseIntPipe,
         TestClient, TestRequest, TestingModule, TestingModuleBuilder,
         RawBody,
         ValidationPipe,
         PathNormalization, PayloadTooLargeException,
-        PaymentRequiredException, RateLimitOptions, ReadinessContext, RequestContext,
+        PaymentRequiredException, ProblemDetails, RateLimitOptions, ReadinessContext, RequestContext,
         RequestContextMissing, RequestScoped, RequestScopedMissing, RequestTimeoutException,
         RequestTracingOptions, SecurityHeaders, ServiceUnavailableException,
         TooManyRequestsException, TracingConfig, TracingFormat, UnauthorizedException,
@@ -410,6 +442,16 @@ impl RequestTracingOptions {
 pub struct RateLimitOptions {
     max_requests: u64,
     window_secs: u64,
+    #[cfg(feature = "cache-redis")]
+    redis: Option<RedisRateLimitOptions>,
+}
+
+/// Redis-backed fixed window counter (shared across instances). Requires **`cache-redis`**.
+#[cfg(feature = "cache-redis")]
+#[derive(Clone, Debug)]
+pub struct RedisRateLimitOptions {
+    pub url: String,
+    pub key_prefix: String,
 }
 
 impl Default for RateLimitOptions {
@@ -417,6 +459,8 @@ impl Default for RateLimitOptions {
         Self {
             max_requests: 100,
             window_secs: 60,
+            #[cfg(feature = "cache-redis")]
+            redis: None,
         }
     }
 }
@@ -433,6 +477,16 @@ impl RateLimitOptions {
 
     pub fn window_secs(mut self, value: u64) -> Self {
         self.window_secs = value.max(1);
+        self
+    }
+
+    /// Distributed rate limiting via Redis `INCR` + `EXPIRE` (per client IP).
+    #[cfg(feature = "cache-redis")]
+    pub fn redis(mut self, url: impl Into<String>, key_prefix: impl Into<String>) -> Self {
+        self.redis = Some(RedisRateLimitOptions {
+            url: url.into(),
+            key_prefix: key_prefix.into(),
+        });
         self
     }
 
@@ -600,6 +654,8 @@ pub struct NestApplication {
     registry: std::sync::Arc<crate::core::ProviderRegistry>,
     router: axum::Router,
     uri_version: Option<String>,
+    /// Header or `Accept`-based versioning (URI versioning uses [`Self::enable_uri_versioning`]).
+    api_versioning: Option<ApiVersioningPolicy>,
     global_prefix: Option<String>,
     /// Static file mounts at the server root (not under URI versioning / global prefix).
     static_mounts: Vec<(String, std::path::PathBuf)>,
@@ -655,6 +711,7 @@ impl NestFactory {
             registry: std::sync::Arc::new(registry),
             router,
             uri_version: None,
+            api_versioning: None,
             global_prefix: None,
             static_mounts: Vec::new(),
             cors_options: None,
@@ -703,6 +760,7 @@ impl NestFactory {
             registry: std::sync::Arc::new(registry),
             router,
             uri_version: None,
+            api_versioning: None,
             global_prefix: None,
             static_mounts: Vec::new(),
             cors_options: None,
@@ -756,6 +814,7 @@ impl NestFactory {
             registry: registry.clone(),
             router,
             uri_version: None,
+            api_versioning: None,
             global_prefix: None,
             static_mounts: Vec::new(),
             cors_options: None,
@@ -816,6 +875,7 @@ impl NestFactory {
             registry: registry.clone(),
             router,
             uri_version: None,
+            api_versioning: None,
             global_prefix: None,
             static_mounts: Vec::new(),
             cors_options: None,
@@ -876,6 +936,7 @@ impl NestFactory {
             registry: registry.clone(),
             router,
             uri_version: None,
+            api_versioning: None,
             global_prefix: None,
             static_mounts: Vec::new(),
             cors_options: None,
@@ -936,6 +997,7 @@ impl NestFactory {
             registry: registry.clone(),
             router,
             uri_version: None,
+            api_versioning: None,
             global_prefix: None,
             static_mounts: Vec::new(),
             cors_options: None,
@@ -1168,6 +1230,38 @@ impl NestApplication {
 
     pub fn enable_uri_versioning(mut self, version: impl Into<String>) -> Self {
         self.uri_version = Some(Self::normalize_segment(version.into()));
+        self
+    }
+
+    /// Nest [`VersioningType`](https://docs.nestjs.com/techniques/versioning) for **header** or **`Accept`**
+    /// negotiation. Sets [`NestApiVersion`] on the request for guards/interceptors. URI versioning remains
+    /// [`Self::enable_uri_versioning`].
+    pub fn enable_api_versioning(mut self, policy: ApiVersioningPolicy) -> Self {
+        self.api_versioning = Some(policy);
+        self
+    }
+
+    /// Shorthand for header-based versioning (`X-API-Version` by default).
+    pub fn enable_header_versioning(
+        mut self,
+        header_name: impl Into<String>,
+        default_version: Option<String>,
+    ) -> Self {
+        self.api_versioning = Some(ApiVersioningPolicy {
+            kind: VersioningType::Header,
+            header_name: Some(header_name.into()),
+            default_version,
+        });
+        self
+    }
+
+    /// Shorthand for `Accept: ...;version=` style versioning.
+    pub fn enable_media_type_versioning(mut self, default_version: Option<String>) -> Self {
+        self.api_versioning = Some(ApiVersioningPolicy {
+            kind: VersioningType::MediaType,
+            header_name: None,
+            default_version,
+        });
         self
     }
 
@@ -1475,6 +1569,7 @@ impl NestApplication {
         let load_shed = self.load_shed;
         let registry = self.registry;
         let uri_version = self.uri_version;
+        let api_versioning = self.api_versioning.clone();
         let global_prefix = self.global_prefix;
         #[cfg(feature = "openapi")]
         let openapi = self.openapi;
@@ -1486,6 +1581,14 @@ impl NestApplication {
 
         if let Some(ref p) = global_prefix {
             router = axum::Router::new().nest(p, router);
+        }
+
+        if let Some(policy) = api_versioning {
+            let opts = std::sync::Arc::new(policy);
+            router = router.layer(axum::middleware::from_fn_with_state(
+                opts,
+                crate::versioning::api_version_middleware,
+            ));
         }
 
         for (mount_path, dir) in static_mounts {
@@ -2005,8 +2108,22 @@ async fn request_scope_middleware(
 
 #[derive(Debug)]
 struct RateLimitState {
-    options: RateLimitOptions,
-    inner: tokio::sync::Mutex<RateLimitWindow>,
+    inner: RateLimitInner,
+}
+
+#[derive(Debug)]
+enum RateLimitInner {
+    Memory {
+        options: RateLimitOptions,
+        window: tokio::sync::Mutex<RateLimitWindow>,
+    },
+    #[cfg(feature = "cache-redis")]
+    Redis {
+        client: redis::Client,
+        key_prefix: String,
+        window_secs: u64,
+        max_requests: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -2017,12 +2134,33 @@ struct RateLimitWindow {
 
 impl RateLimitState {
     fn new(options: RateLimitOptions) -> Self {
+        #[cfg(feature = "cache-redis")]
+        if let Some(r) = options.redis.clone() {
+            match redis::Client::open(r.url.as_str()) {
+                Ok(client) => {
+                    return Self {
+                        inner: RateLimitInner::Redis {
+                            client,
+                            key_prefix: r.key_prefix,
+                            window_secs: options.window_secs,
+                            max_requests: options.max_requests,
+                        },
+                    };
+                }
+                Err(e) => {
+                    tracing::warn!(target: "nestrs", "redis rate limit: invalid URL: {e}");
+                }
+            }
+        }
+
         Self {
-            options,
-            inner: tokio::sync::Mutex::new(RateLimitWindow {
-                started_at: std::time::Instant::now(),
-                count: 0,
-            }),
+            inner: RateLimitInner::Memory {
+                options,
+                window: tokio::sync::Mutex::new(RateLimitWindow {
+                    started_at: std::time::Instant::now(),
+                    count: 0,
+                }),
+            },
         }
     }
 }
@@ -2032,20 +2170,79 @@ async fn rate_limit_middleware(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    {
-        let mut guard = state.inner.lock().await;
-        if guard.started_at.elapsed().as_secs() >= state.options.window_secs {
-            guard.started_at = std::time::Instant::now();
-            guard.count = 0;
+    match &state.inner {
+        RateLimitInner::Memory { options, window } => {
+            let mut guard = window.lock().await;
+            if guard.started_at.elapsed().as_secs() >= options.window_secs {
+                guard.started_at = std::time::Instant::now();
+                guard.count = 0;
+            }
+            if guard.count >= options.max_requests {
+                return axum::response::IntoResponse::into_response(TooManyRequestsException::new(
+                    "Rate limit exceeded",
+                ));
+            }
+            guard.count += 1;
         }
-        if guard.count >= state.options.max_requests {
-            return axum::response::IntoResponse::into_response(TooManyRequestsException::new(
-                "Rate limit exceeded",
-            ));
+        #[cfg(feature = "cache-redis")]
+        RateLimitInner::Redis {
+            client,
+            key_prefix,
+            window_secs,
+            max_requests,
+        } => {
+            let ip = client_ip_from_request(&req);
+            let key = format!("{key_prefix}:{ip}");
+            match redis_rate_allow(client, &key, *window_secs, *max_requests).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    return axum::response::IntoResponse::into_response(TooManyRequestsException::new(
+                        "Rate limit exceeded",
+                    ));
+                }
+                Err(e) => {
+                    tracing::warn!(target: "nestrs", "redis rate limit check failed: {e}");
+                }
+            }
         }
-        guard.count += 1;
     }
     next.run(req).await
+}
+
+#[cfg(feature = "cache-redis")]
+async fn redis_rate_allow(
+    client: &redis::Client,
+    key: &str,
+    window_secs: u64,
+    max_requests: u64,
+) -> Result<bool, redis::RedisError> {
+    let mut conn = client.get_multiplexed_tokio_connection().await?;
+    let count: i64 = redis::cmd("INCR").arg(key).query_async(&mut conn).await?;
+    let count = u64::try_from(count).unwrap_or(0);
+    if count == 1 {
+        redis::cmd("EXPIRE")
+            .arg(key)
+            .arg(window_secs as usize)
+            .query_async::<()>(&mut conn)
+            .await
+            .ok();
+    }
+    Ok(count <= max_requests)
+}
+
+#[cfg(feature = "cache-redis")]
+fn client_ip_from_request(req: &axum::extract::Request) -> String {
+    req.headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next().map(str::trim))
+        .map(|s| s.to_string())
+        .or_else(|| {
+            req.extensions()
+                .get::<crate::ClientIp>()
+                .map(|c| c.0.to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 async fn request_timeout_middleware(
@@ -2504,7 +2701,7 @@ macro_rules! impl_routes {
                 let state = registry.get::<$state_ty>();
                 let prefix = <$controller>::__nestrs_prefix();
                 let version = <$controller>::__nestrs_version();
-                router
+                let __nestrs_router = router
                     $(
                         .route(
                             {
@@ -2567,7 +2764,8 @@ macro_rules! impl_routes {
                                 __route.with_state(state.clone())
                             }
                         )
-                    )+
+                    )+;
+                $crate::impl_routes!(@maybe_host_wrap $controller, __nestrs_router)
             }
         }
     };
@@ -2595,7 +2793,7 @@ macro_rules! impl_routes {
                 let state = registry.get::<$state_ty>();
                 let prefix = <$controller>::__nestrs_prefix();
                 let version = <$controller>::__nestrs_version();
-                router
+                let __nestrs_router = router
                     $(
                         .route(
                             {
@@ -2674,8 +2872,18 @@ macro_rules! impl_routes {
                                 __route.with_state(state.clone())
                             }
                         )
-                    )+
+                    )+;
+                $crate::impl_routes!(@maybe_host_wrap $controller, __nestrs_router)
             }
+        }
+    };
+    (@maybe_host_wrap $controller:ty, $inner:expr) => {
+        match <$controller>::__nestrs_host() {
+            None => $inner,
+            Some(__nestrs_h) => $inner.layer(::axum::middleware::from_fn_with_state(
+                __nestrs_h,
+                $crate::host_restriction_middleware,
+            )),
         }
     };
     (@effective_version $controller_version:expr) => { $controller_version };

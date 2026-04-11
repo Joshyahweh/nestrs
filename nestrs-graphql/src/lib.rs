@@ -1,5 +1,11 @@
 //! GraphQL integration for `nestrs` using `async-graphql`.
 
+pub mod limits;
+
+pub use limits::{
+    with_default_limits, Analyzer, DEFAULT_MAX_COMPLEXITY, DEFAULT_MAX_DEPTH,
+};
+
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 pub use async_graphql::{BatchRequest, ObjectType, Schema, SubscriptionType};
 use axum::extract::Json;

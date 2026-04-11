@@ -3,6 +3,9 @@ use std::sync::OnceLock;
 
 use nestrs::prelude::*;
 
+#[cfg(feature = "sqlx")]
+use tokio::sync::OnceCell;
+
 /// Recommended default location for a Prisma schema in nestrs apps.
 pub const DEFAULT_SCHEMA_PATH: &str = "prisma/schema.prisma";
 
@@ -50,17 +53,37 @@ impl PrismaOptions {
 
 static PRISMA_OPTIONS: OnceLock<PrismaOptions> = OnceLock::new();
 
+#[cfg(feature = "sqlx")]
+static SQLX_POOL: OnceCell<sqlx::AnyPool> = OnceCell::const_new();
+
+#[cfg(feature = "sqlx")]
+async fn ensure_sqlx_pool() -> Result<&'static sqlx::AnyPool, String> {
+    SQLX_POOL
+        .get_or_try_init(|| async {
+            let opts = PRISMA_OPTIONS.get().cloned().ok_or_else(|| {
+                "PrismaModule::for_root / for_root_with_options must be called before SQL connectivity"
+                    .to_string()
+            })?;
+            sqlx::any::AnyPoolOptions::new()
+                .max_connections(opts.pool_max)
+                .min_connections(opts.pool_min)
+                .connect(&opts.database_url)
+                .await
+                .map_err(|e| format!("sqlx connect: {e}"))
+        })
+        .await
+}
+
 #[derive(Debug, Clone)]
 pub struct PrismaClientHandle {
     pub database_url: String,
     pub schema_path: String,
 }
 
-/// Injectable Prisma service abstraction.
+/// Injectable database service: configuration + optional **SQLx** pool when the `sqlx` feature is on.
 ///
-/// Current implementation is a stable scaffold over configuration and a simple client
-/// handle. A future iteration can replace `PrismaClientHandle` with a concrete
-/// generated Prisma Rust client while preserving this public API shape.
+/// For full Prisma Client Rust codegen, run `cargo prisma generate` and inject the generated client
+/// as an additional provider; this crate stays ORM-agnostic while giving production-ready connectivity.
 pub struct PrismaService {
     options: PrismaOptions,
     client: PrismaClientHandle,
@@ -75,18 +98,63 @@ impl PrismaService {
         &self.options
     }
 
+    /// Lightweight status without hitting the network (always `"ok"` if the service was constructed).
     pub fn health(&self) -> &'static str {
         "ok"
     }
 
-    pub fn query_raw(&self, sql: &str) -> String {
-        format!("query accepted by prisma stub: {}", sql)
+    /// Run arbitrary SQL returning a single scalar (trusted SQL only — use parameters in app code).
+    #[cfg(feature = "sqlx")]
+    pub async fn query_scalar(&self, sql: &str) -> Result<String, String> {
+        let pool = ensure_sqlx_pool().await?;
+        let v: i64 = sqlx::query_scalar(sql)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("sqlx query: {e}"))?;
+        Ok(v.to_string())
     }
 
-    /// DTO ↔ model mapping guidance helper for docs/diagnostics.
-    ///
-    /// This intentionally keeps examples close to NestJS service patterns:
-    /// map generated model rows into response DTOs at the service boundary.
+    /// Run arbitrary SQL and map rows with [`sqlx::FromRow`] (trusted SQL only — use bound parameters in app code).
+    #[cfg(feature = "sqlx")]
+    pub async fn query_all_as<T>(&self, sql: &str) -> Result<Vec<T>, String>
+    where
+        for<'r> T: sqlx::FromRow<'r, sqlx::any::AnyRow> + Send + Unpin,
+    {
+        let pool = ensure_sqlx_pool().await?;
+        sqlx::query_as::<_, T>(sql)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| format!("sqlx query: {e}"))
+    }
+
+    /// Execute DDL/DML without returning rows (migrations, `CREATE TABLE`, etc.).
+    #[cfg(feature = "sqlx")]
+    pub async fn execute(&self, sql: &str) -> Result<u64, String> {
+        let pool = ensure_sqlx_pool().await?;
+        sqlx::query(sql)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("sqlx execute: {e}"))
+            .map(|r| r.rows_affected())
+    }
+
+    /// `SELECT 1` / connectivity check against [`DATABASE_URL`](PrismaOptions::database_url).
+    #[cfg(feature = "sqlx")]
+    pub async fn ping(&self) -> Result<(), String> {
+        let pool = ensure_sqlx_pool().await?;
+        sqlx::query("SELECT 1")
+            .execute(pool)
+            .await
+            .map_err(|e| format!("sqlx ping: {e}"))?;
+        Ok(())
+    }
+
+    /// Stub string when **`sqlx`** is disabled; enable **`sqlx`** for real execution.
+    #[cfg(not(feature = "sqlx"))]
+    pub fn query_raw(&self, sql: &str) -> String {
+        format!("query accepted by prisma stub (enable nestrs-prisma/sqlx): {sql}")
+    }
+
     pub fn mapping_guidance(&self) -> &'static str {
         "Prefer `From<ModelData>` / `TryFrom<ModelData>` impls for response DTOs; avoid returning generated Prisma model types directly from controllers."
     }
@@ -126,22 +194,16 @@ impl Injectable for PrismaService {
 pub struct PrismaModule;
 
 impl PrismaModule {
-    /// Nest-like global module configuration entrypoint.
-    ///
-    /// Call this before `NestFactory::create::<AppModule>()`.
     pub fn for_root(database_url: impl Into<String>) -> Self {
         let _ = PRISMA_OPTIONS.set(PrismaOptions::from_url(database_url));
         Self
     }
 
-    /// More explicit options-based variant.
     pub fn for_root_with_options(options: PrismaOptions) -> Self {
         let _ = PRISMA_OPTIONS.set(options);
         Self
     }
 
-    /// Returns a sample generation command for the currently configured schema.
-    /// Useful for startup logs and docs output.
     pub fn generate_command_hint() -> String {
         let schema_path = PRISMA_OPTIONS
             .get()

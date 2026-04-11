@@ -33,6 +33,25 @@ pub trait Query: Send + Sync + 'static {
     type Response: Send + Sync + 'static;
 }
 
+/// Long-running workflow / saga orchestration hook (compensation-oriented).
+///
+/// Wire steps and persistence in your application; this trait is a **stable extension point**
+/// (Nest CQRS saga modules are typically custom per domain).
+#[async_trait::async_trait]
+pub trait Saga: Send + Sync + 'static {
+    type State: Send + Sync + 'static;
+
+    fn saga_name(&self) -> &'static str;
+
+    /// Undo side effects after a failed step (best-effort).
+    async fn compensate(&self, state: &Self::State) -> Result<(), CqrsError>;
+}
+
+/// Declarative saga definition without async methods (documentation / registration helper).
+pub trait SagaDefinition: Send + Sync + 'static {
+    fn name(&self) -> &'static str;
+}
+
 #[async_trait]
 pub trait CommandHandler<C>: Send + Sync + 'static
 where

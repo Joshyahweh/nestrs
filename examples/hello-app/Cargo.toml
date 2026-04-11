@@ -7,8 +7,9 @@ publish = false
 
 [dependencies]
 nestrs = { path = "../../nestrs" }
-nestrs-prisma = { path = "../../nestrs-prisma" }
+nestrs-prisma = { path = "../../nestrs-prisma", features = ["sqlx"] }
 axum.workspace = true
 tokio.workspace = true
 serde = { version = "1", features = ["derive"] }
 validator = { version = "0.20", features = ["derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "sqlite", "any"] }

@@ -89,6 +89,8 @@ pub struct QueueConfig {
     pub name: &'static str,
     pub concurrency: usize,
     pub buffer: usize,
+    /// When set, jobs that **fail after all attempts** are pushed to this queue (Bull-style dead-letter).
+    pub dead_letter: Option<&'static str>,
 }
 
 impl QueueConfig {
@@ -97,6 +99,7 @@ impl QueueConfig {
             name,
             concurrency: 1,
             buffer: 256,
+            dead_letter: None,
         }
     }
 
@@ -107,6 +110,11 @@ impl QueueConfig {
 
     pub fn with_buffer(mut self, buffer: usize) -> Self {
         self.buffer = buffer.max(1);
+        self
+    }
+
+    pub fn with_dead_letter(mut self, target: &'static str) -> Self {
+        self.dead_letter = Some(target);
         self
     }
 }
@@ -182,6 +190,8 @@ impl QueueHandle {
 
 pub struct QueuesRuntime {
     queues: HashMap<&'static str, Arc<QueueState>>,
+    /// Source queue name → DLQ sender (must be registered in the same `QueuesModule`).
+    dead_letter_tx: HashMap<&'static str, mpsc::Sender<QueueJob>>,
     next_id: Arc<AtomicU64>,
     started: AtomicBool,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
@@ -221,8 +231,26 @@ impl QueuesRuntime {
             );
         }
 
+        let mut dead_letter_tx = HashMap::<&'static str, mpsc::Sender<QueueJob>>::new();
+        for cfg in configs {
+            if let Some(dlq) = cfg.dead_letter {
+                let sender = queues
+                    .get(dlq)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "QueuesModule::register: dead_letter queue `{dlq}` for `{}` is not registered",
+                            cfg.name
+                        )
+                    })
+                    .tx
+                    .clone();
+                dead_letter_tx.insert(cfg.name, sender);
+            }
+        }
+
         Arc::new(Self {
             queues,
+            dead_letter_tx,
             next_id: Arc::new(AtomicU64::new(1)),
             started: AtomicBool::new(false),
             tasks: Mutex::new(Vec::new()),
@@ -281,6 +309,7 @@ impl QueuesRuntime {
 
             let tx = state.tx.clone();
             let sem = Arc::new(Semaphore::new(state.concurrency));
+            let dlq_opt = self.dead_letter_tx.get(*queue_name).cloned();
 
             let rx = {
                 let mut guard = state.rx.lock().await;
@@ -300,19 +329,26 @@ impl QueuesRuntime {
                     let processors = processors.clone();
                     let pick = pick.clone();
                     let tx = tx.clone();
+                    let dlq_opt = dlq_opt.clone();
 
                     tokio::spawn(async move {
                         let idx = pick.fetch_add(1, Ordering::Relaxed) % processors.len();
                         let proc = processors[idx].clone();
 
                         let res = proc.process(job.clone()).await;
-                        if res.is_err() && job.attempts_left > 1 {
+                        if res.is_ok() {
+                            drop(permit);
+                            return;
+                        }
+                        if job.attempts_left > 1 {
                             let mut next = job.clone();
                             next.attempts_left -= 1;
                             if let Some(backoff) = next.backoff {
                                 tokio::time::sleep(backoff).await;
                             }
                             let _ = tx.send(next).await;
+                        } else if let Some(ref dlq) = dlq_opt {
+                            let _ = dlq.send(job).await;
                         }
 
                         drop(permit);

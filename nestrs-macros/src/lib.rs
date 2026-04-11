@@ -536,13 +536,14 @@ pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     });
 
-    let (prefix, mut version) = if attr_tokens.is_empty() {
-        ("/".to_string(), "".to_string())
+    let (prefix, mut version, host) = if attr_tokens.is_empty() {
+        ("/".to_string(), "".to_string(), None::<String>)
     } else if let Ok(v) = syn::parse2::<LitStr>(attr_tokens.clone()) {
-        (v.value(), "".to_string())
+        (v.value(), "".to_string(), None::<String>)
     } else {
         let mut prefix = "/".to_string();
         let mut version = "".to_string();
+        let mut host: Option<String> = None;
         let parser = syn::meta::parser(|meta| {
             if meta.path.is_ident("prefix") {
                 let value: LitStr = meta.value()?.parse()?;
@@ -552,8 +553,14 @@ pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let value: LitStr = meta.value()?.parse()?;
                 version = value.value();
                 Ok(())
+            } else if meta.path.is_ident("host") {
+                let value: LitStr = meta.value()?.parse()?;
+                host = Some(value.value());
+                Ok(())
             } else {
-                Err(meta.error("unknown controller key; expected `prefix` or `version`"))
+                Err(meta.error(
+                    "unknown controller key; expected `prefix`, `version`, or `host`",
+                ))
             }
         });
 
@@ -565,7 +572,7 @@ pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
             .to_compile_error()
             .into();
         }
-        (prefix, version)
+        (prefix, version, host)
     };
     if version.is_empty() {
         if let Some(v) = version_from_attr {
@@ -574,6 +581,18 @@ pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let name = &item_struct.ident;
+    let host_fn = match &host {
+        Some(h) => quote! {
+            pub fn __nestrs_host() -> Option<&'static str> {
+                Some(#h)
+            }
+        },
+        None => quote! {
+            pub fn __nestrs_host() -> Option<&'static str> {
+                None
+            }
+        },
+    };
     let expanded = quote! {
         #item_struct
 
@@ -585,6 +604,8 @@ pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
             pub fn __nestrs_version() -> &'static str {
                 #version
             }
+
+            #host_fn
         }
     };
 
@@ -1984,7 +2005,7 @@ pub fn event_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         const _: () = {
             fn __nestrs_register(registry: &nestrs::core::ProviderRegistry) {
-                let bus = registry.get::<nestrs::microservices::EventBus>();
+                let bus = registry.get::<nestrs::EventBus>();
                 let service = registry.get::<#self_ty>();
                 #(#subscribe_stmts)*
             }
@@ -2794,6 +2815,24 @@ fn convert_dto_field_attrs(field: &Field) -> Vec<syn::Attribute> {
                     out.push(syn::parse_quote!(#[validate(length(#tokens))]));
                 }
             }
+            "Min" => {
+                if let Meta::List(list) = &attr.meta {
+                    let tokens = list.tokens.clone();
+                    out.push(syn::parse_quote!(#[validate(range(min = #tokens))]));
+                }
+            }
+            "Max" => {
+                if let Meta::List(list) = &attr.meta {
+                    let tokens = list.tokens.clone();
+                    out.push(syn::parse_quote!(#[validate(range(max = #tokens))]));
+                }
+            }
+            // Integer / number checks are expressed by Rust types (`i32`, `f64`, …) and `range` where needed.
+            "IsInt" | "IsNumber" => {}
+            "IsUrl" => out.push(syn::parse_quote!(#[validate(url)])),
+            // Nest `@IsOptional()` maps to `Option<T>` in Rust; strip the marker attribute.
+            "IsOptional" => {}
+            "ValidateNested" => out.push(syn::parse_quote!(#[validate(nested)])),
             _ => out.push(attr.clone()),
         }
     }

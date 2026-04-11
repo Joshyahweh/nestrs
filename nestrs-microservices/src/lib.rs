@@ -9,9 +9,12 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
+mod wire;
 mod tcp;
+mod kafka;
+mod mqtt;
 #[cfg(feature = "grpc")]
 mod grpc;
 #[cfg(feature = "nats")]
@@ -19,6 +22,18 @@ mod nats;
 #[cfg(feature = "redis")]
 mod redis;
 
+pub use kafka::KafkaTransport;
+#[cfg(feature = "kafka")]
+pub use kafka::{
+    kafka_cluster_reachable, kafka_cluster_reachable_with, KafkaConnectionOptions, KafkaMicroserviceOptions,
+    KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions, KafkaTransportOptions,
+};
+pub use mqtt::MqttTransport;
+#[cfg(feature = "mqtt")]
+pub use mqtt::{
+    MqttMicroserviceOptions, MqttMicroserviceServer, MqttSocketOptions, MqttTlsMode, MqttTransportOptions,
+};
+pub use nestrs_events::EventBus;
 pub use tcp::{TcpMicroserviceOptions, TcpMicroserviceServer, TcpTransport, TcpTransportOptions};
 #[cfg(feature = "grpc")]
 pub use grpc::{GrpcMicroserviceOptions, GrpcMicroserviceServer, GrpcTransport, GrpcTransportOptions};
@@ -157,58 +172,6 @@ impl nestrs_core::Injectable for ClientProxy {
     }
 }
 
-type EventHandler =
-    Arc<dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
-
-/// In-process async event bus for integration/domain events.
-#[derive(Default)]
-pub struct EventBus {
-    handlers: RwLock<HashMap<String, Vec<EventHandler>>>,
-}
-
-impl EventBus {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn subscribe<F, Fut>(&self, pattern: impl Into<String>, handler: F)
-    where
-        F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
-    {
-        let mut guard = self.handlers.write().expect("event bus lock poisoned");
-        let entry = guard.entry(pattern.into()).or_default();
-        entry.push(Arc::new(move |payload| Box::pin(handler(payload))));
-    }
-
-    pub async fn emit_json(&self, pattern: &str, payload: serde_json::Value) {
-        let handlers = {
-            let guard = self.handlers.read().expect("event bus lock poisoned");
-            guard.get(pattern).cloned().unwrap_or_default()
-        };
-        for handler in handlers {
-            handler(payload.clone()).await;
-        }
-    }
-
-    pub async fn emit<T>(&self, pattern: &str, payload: &T)
-    where
-        T: Serialize + Send + Sync,
-    {
-        let json = serde_json::to_value(payload).unwrap_or_else(|e| {
-            panic!("EventBus emit serialize failed for pattern `{pattern}`: {e}")
-        });
-        self.emit_json(pattern, json).await;
-    }
-}
-
-#[async_trait]
-impl nestrs_core::Injectable for EventBus {
-    fn construct(_registry: &nestrs_core::ProviderRegistry) -> Arc<Self> {
-        Arc::new(Self::new())
-    }
-}
-
 /// Auto-wiring registration entry for `#[event_routes]` + `#[on_event("...")]` handlers.
 pub struct OnEventRegistration {
     pub register: fn(&nestrs_core::ProviderRegistry),
@@ -252,6 +215,26 @@ impl ClientConfig {
     #[cfg(feature = "grpc")]
     pub fn grpc(name: &'static str, options: GrpcTransportOptions) -> Self {
         Self::new(name, Arc::new(GrpcTransport::new(options)))
+    }
+
+    #[cfg(feature = "kafka")]
+    pub fn kafka(name: &'static str, options: KafkaTransportOptions) -> Self {
+        Self::new(name, Arc::new(KafkaTransport::new(options)))
+    }
+
+    #[cfg(not(feature = "kafka"))]
+    pub fn kafka(name: &'static str) -> Self {
+        Self::new(name, Arc::new(KafkaTransport::new()))
+    }
+
+    #[cfg(feature = "mqtt")]
+    pub fn mqtt(name: &'static str, options: MqttTransportOptions) -> Self {
+        Self::new(name, Arc::new(MqttTransport::new(options)))
+    }
+
+    #[cfg(not(feature = "mqtt"))]
+    pub fn mqtt(name: &'static str) -> Self {
+        Self::new(name, Arc::new(MqttTransport::new()))
     }
 }
 

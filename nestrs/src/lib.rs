@@ -2741,13 +2741,13 @@ macro_rules! impl_routes {
                                         );
                                     )*
                                 )?
-                                let mut __route = $crate::impl_routes!(@method $method, $handler);
-                                __route = $crate::impl_routes!(
+                                let __route = $crate::impl_routes!(@method $method, $handler);
+                                let __route = $crate::impl_routes!(
                                     @apply_interceptors
                                     __route
                                     $(, $($interceptor),* )?
                                 );
-                                __route = __route.layer(::axum::middleware::from_fn(
+                                let __route = __route.layer(::axum::middleware::from_fn(
                                     |req: ::axum::extract::Request,
                                      next: ::axum::middleware::Next| async move {
                                         let (mut parts, body) = req.into_parts();
@@ -2765,7 +2765,7 @@ macro_rules! impl_routes {
                                         next.run(req).await
                                     },
                                 ));
-                                __route = $crate::impl_routes!(
+                                let __route = $crate::impl_routes!(
                                     @apply_filters
                                     __route
                                     $(, $($filter),* )?
@@ -2833,13 +2833,13 @@ macro_rules! impl_routes {
                                         );
                                     )*
                                 )?
-                                let mut __route = $crate::impl_routes!(@method $method, $handler);
-                                __route = $crate::impl_routes!(
+                                let __route = $crate::impl_routes!(@method $method, $handler);
+                                let __route = $crate::impl_routes!(
                                     @apply_interceptors
                                     __route
                                     $(, $($interceptor),* )?
                                 );
-                                __route = __route.layer(::axum::middleware::from_fn(
+                                let __route = __route.layer(::axum::middleware::from_fn(
                                     |req: ::axum::extract::Request,
                                      next: ::axum::middleware::Next| async move {
                                         let (mut parts, body) = req.into_parts();
@@ -2857,7 +2857,7 @@ macro_rules! impl_routes {
                                         next.run(req).await
                                     },
                                 ));
-                                __route = __route.layer(::axum::middleware::from_fn(
+                                let __route = __route.layer(::axum::middleware::from_fn(
                                     |req: ::axum::extract::Request,
                                      next: ::axum::middleware::Next| async move {
                                         let (mut parts, body) = req.into_parts();
@@ -2873,7 +2873,7 @@ macro_rules! impl_routes {
                                         next.run(req).await
                                     },
                                 ));
-                                __route = $crate::impl_routes!(
+                                let __route = $crate::impl_routes!(
                                     @apply_filters
                                     __route
                                     $(, $($filter),* )?

@@ -122,7 +122,7 @@ python3 scripts/load/evaluate_threshold_reassessment.py
 - `.github/workflows/performance.yml` - performance benches, gating, reporting, optional publishing
 - `.github/workflows/benchmark-storage-sync.yml` - storage sync template for S3/GCS/Azure
 - `.github/workflows/release-version-check.yml` - enforces `VERSION` and latest `CHANGELOG.md` release heading stay in sync
-- `.github/workflows/publish-crates.yml` - tag-driven crates.io publish via trusted publishing (OIDC)
+- `.github/workflows/publish-crates.yml` - tag-driven crates.io publish after preflight; uses `CARGO_REGISTRY_TOKEN` (optional OIDC/trusted publishing can replace this)
 
 ## GitHub community templates
 

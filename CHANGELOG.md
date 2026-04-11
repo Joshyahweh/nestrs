@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Workspace MSRV is **1.88** (`time` 0.3.47 / `async-nats` 0.47).
+- `async-nats` optional dependency raised to **0.47** (pulls `rustls-webpki` 0.103.x).
+- `publish-crates` workflow: preflight gate, tag must be on `main`, correct crate order (includes `nestrs-events`, `nestrs-cqrs`), **`CARGO_REGISTRY_TOKEN`** secret instead of OIDC until trusted publishing is configured.
+
 ### Added
 
 - Landing page and documentation hub under `website/` with light/dark mode.

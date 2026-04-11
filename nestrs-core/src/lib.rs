@@ -100,7 +100,7 @@ impl ProviderRegistry {
             value
         }
 
-        let mut entry = ProviderEntry {
+        let entry = ProviderEntry {
             type_name: std::any::type_name::<T>(),
             scope: ProviderScope::Singleton,
             factory: factory::<T>,
@@ -399,13 +399,15 @@ where
     }
 }
 
+type RegistryOverrideFn = Box<dyn FnOnce(&mut ProviderRegistry) + Send>;
+
 /// Builds a [`DynamicModule`] from a static module graph, optionally applying provider overrides
 /// before controllers are registered (useful for configurable modules and testing-like setups).
 pub struct DynamicModuleBuilder<M>
 where
     M: Module + ModuleGraph,
 {
-    overrides: Vec<Box<dyn FnOnce(&mut ProviderRegistry) + Send>>,
+    overrides: Vec<RegistryOverrideFn>,
     _marker: std::marker::PhantomData<M>,
 }
 
@@ -440,6 +442,15 @@ where
     }
 }
 
+impl<M> Default for DynamicModuleBuilder<M>
+where
+    M: Module + ModuleGraph,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Convenience builder for NestJS-like configurable modules (`for_root`, `for_root_async`).
 pub struct ConfigurableModuleBuilder<O> {
     _marker: std::marker::PhantomData<O>,
@@ -471,7 +482,7 @@ where
 
 thread_local! {
     static MODULE_BUILD_STACK: std::cell::RefCell<Vec<(&'static str, TypeId)>> =
-        std::cell::RefCell::new(Vec::new());
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Internal module build/graph traversal guard (used by `#[module]`-generated code).
@@ -550,7 +561,7 @@ where
 
 thread_local! {
     static CONSTRUCTION_STACK: std::cell::RefCell<Vec<(&'static str, TypeId)>> =
-        std::cell::RefCell::new(Vec::new());
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 struct ConstructionGuard {

@@ -1,0 +1,4 @@
+# https://github.com/RustSec/rustsec/blob/main/cargo-audit/audit.toml.example
+[advisories]
+# Transitive `rsa` via `sqlx-mysql` when SQLx `any` unifies drivers; advisory lists no patched release.
+ignore = ["RUSTSEC-2023-0071"]

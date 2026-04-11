@@ -101,13 +101,17 @@ cargo publish -p nestrs-macros
 sleep 30
 cargo publish -p nestrs-core
 sleep 30
-cargo publish -p nestrs-microservices
+cargo publish -p nestrs-events
 sleep 30
 cargo publish -p nestrs-ws
 sleep 30
 cargo publish -p nestrs-graphql
 sleep 30
 cargo publish -p nestrs-openapi
+sleep 30
+cargo publish -p nestrs-cqrs
+sleep 30
+cargo publish -p nestrs-microservices
 sleep 30
 cargo publish -p nestrs
 sleep 30
@@ -116,15 +120,13 @@ sleep 30
 cargo publish -p nestrs-scaffold
 ```
 
-### Trusted Publishing (OIDC, no long-lived token)
+### crates.io authentication (GitHub Actions)
 
-After the first manual publish:
+The `publish-crates` workflow expects a repository secret **`CARGO_REGISTRY_TOKEN`** (a crates.io API token with publish scope). The publish job runs only after the workflow’s **preflight** job (`fmt`, `clippy`, `test`, `cargo audit`) succeeds.
 
-1. On crates.io, open each crate settings page and add this GitHub repository as a trusted publisher.
-2. Keep `.github/workflows/publish-crates.yml` enabled.
-3. Push a semver tag (`vX.Y.Z`) and GitHub Actions will publish in dependency order.
+### Optional: Trusted Publishing (OIDC)
 
-This setup removes the need for `CRATES_IO_TOKEN` repository secrets.
+If you configure this repository as a trusted publisher on crates.io for each crate, you can switch the workflow back to `rust-lang/crates-io-auth-action` and drop the long-lived token. Until that is configured, use `CARGO_REGISTRY_TOKEN` as above.
 
 ## Post-release checks
 

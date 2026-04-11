@@ -17,7 +17,7 @@ default = []
 sqlx = ["dep:sqlx", "dep:tokio"]
 
 [dependencies]
-nestrs = { version = "0.1.1", path = "../nestrs" }
+nestrs = { version = "0.1.2", path = "../nestrs" }
 axum.workspace = true
 tokio = { workspace = true, optional = true }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "sqlite", "postgres"], optional = true }

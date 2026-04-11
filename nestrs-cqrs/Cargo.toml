@@ -6,13 +6,13 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 description = "CQRS primitives for nestrs."
 keywords = ["cqrs", "commands", "queries", "events", "nest"]
 categories = ["asynchronous"]
 
 [dependencies]
-nestrs-core = { version = "0.1.1", path = "../nestrs-core" }
+nestrs-core = { version = "0.1.2", path = "../nestrs-core" }
 axum.workspace = true
 tokio.workspace = true
 async-trait = "0.1"

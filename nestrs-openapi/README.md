@@ -8,14 +8,14 @@
 
 ```toml
 [dependencies]
-nestrs-openapi = "0.1.2"
+nestrs-openapi = "0.1.3"
 axum = "0.7"
 ```
 
 Or:
 
 ```toml
-nestrs = { version = "0.1.2", features = ["openapi"] }
+nestrs = { version = "0.1.3", features = ["openapi"] }
 ```
 
 ## Example

@@ -261,7 +261,7 @@ fn canonical_kind(kind: &str) -> &str {
         "ms" => "microservice",
         "tr" => "transport",
         // Full names
-        "resource" | "resources" | "service" | "controller" | "module" | "dto" | "guard" | "pipe" | "filter"
+        "resource" | "service" | "controller" | "module" | "dto" | "guard" | "pipe" | "filter"
         | "interceptor" | "strategy" | "resolver" | "gateway" | "microservice" | "transport" => {
             kind
         }
@@ -363,7 +363,9 @@ fn generate_resource(
         Transport::Graphql => resource_templates::graphql_resolver(&snake, &pascal),
         Transport::Ws => resource_templates::ws_gateway(&snake, &pascal),
         Transport::Grpc => resource_templates::microservice_transport(&snake, &pascal, true),
-        Transport::Microservice => resource_templates::microservice_transport(&snake, &pascal, false),
+        Transport::Microservice => {
+            resource_templates::microservice_transport(&snake, &pascal, false)
+        }
     };
 
     write_if_absent(&service_path, &service_body, opts)?;

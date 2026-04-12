@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-11
+
+### Added
+
+- **`nestrs-scaffold`**: `generate resource` / `generate resources` scaffolds full **CRUD** examples per transport — **REST** (`#[routes]` + JSON), **GraphQL** (Query/Mutation + `SimpleObject` rows), **WebSockets** (`#[ws_routes]` / `subscribe_message`), **TCP microservice** and **gRPC** (`#[micro_routes]` / `message_pattern` + HTTP health). Shared in-memory `Service` + DTOs across transports.
+
 ## [0.1.2] - 2026-04-11
 
 ### Added

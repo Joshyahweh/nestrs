@@ -10,7 +10,7 @@ Macros in **`nestrs`** (`#[ws_routes]`, `#[subscribe_message]`) generate `WsGate
 
 ```toml
 [dependencies]
-nestrs-ws = "0.1.2"
+nestrs-ws = "0.1.3"
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
@@ -20,7 +20,7 @@ serde_json = "1"
 Or enable the feature on the umbrella crate:
 
 ```toml
-nestrs = { version = "0.1.2", features = ["ws"] }
+nestrs = { version = "0.1.3", features = ["ws"] }
 ```
 
 ## Example: manual `WsGateway`

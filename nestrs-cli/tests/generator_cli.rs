@@ -90,6 +90,19 @@ fn generate_resource_rest_nest_style() {
         mod_rs.contains("#[path = \"learner_stats.controller.rs\"]"),
         "expected #[path] mod mapping for dotted filename"
     );
+
+    let controller =
+        fs::read_to_string(feature.join("learner_stats.controller.rs")).expect("read controller");
+    assert!(
+        controller.contains("#[post(\"/\")]") && controller.contains("#[put(\"/:id\")]"),
+        "expected full REST CRUD route handlers in generated controller"
+    );
+    let service =
+        fs::read_to_string(feature.join("learner_stats.service.rs")).expect("read service");
+    assert!(
+        service.contains("pub async fn list") && service.contains("pub async fn delete"),
+        "expected CRUD methods on generated service"
+    );
 }
 
 #[test]
@@ -116,6 +129,12 @@ fn generate_resource_ws_rust_style() {
     assert_exists(&feature.join("create_chat_room_dto.rs"));
     assert_exists(&feature.join("update_chat_room_dto.rs"));
     assert_exists(&feature.join("mod.rs"));
+
+    let gateway = fs::read_to_string(feature.join("chat_room_gateway.rs")).expect("read gateway");
+    assert!(
+        gateway.contains("#[subscribe_message(") && gateway.contains(".list"),
+        "expected WebSocket subscribe_message handlers for CRUD-style events"
+    );
 }
 
 #[test]

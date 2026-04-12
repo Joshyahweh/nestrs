@@ -1,3 +1,5 @@
+mod resource_templates;
+
 use std::env;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
@@ -52,7 +54,7 @@ fn print_help() -> Result<(), String> {
     println!();
     println!("Usage:");
     println!("  nestrs new <name> [--no-git] [--strict] [--package-manager cargo]");
-    println!("  nestrs g|generate <resource|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
+    println!("  nestrs g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs g <res|s|co|mo|dto|gu|pi|fi|in|st|r|ga|ms|tr> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs g resource <name> [--transport rest|graphql|ws|grpc|microservice] [--style nest|rust] [--path <dir>] [--no-interactive] [--dry-run] [--force] [--quiet]");
     Ok(())
@@ -245,7 +247,7 @@ fn generate(args: &[String]) -> Result<(), String> {
 fn canonical_kind(kind: &str) -> &str {
     match kind {
         // Nest-style short aliases
-        "res" => "resource",
+        "res" | "resources" => "resource",
         "s" => "service",
         "co" => "controller",
         "mo" => "module",
@@ -346,29 +348,37 @@ fn generate_resource(
     let update_dto_path = feature_dir.join(file_name(&format!("update_{snake}"), "dto", style));
     let mod_rs_path = feature_dir.join("mod.rs");
 
-    write_if_absent(
-        &service_path,
-        &template_for("service", &snake, &pascal),
-        opts,
-    )?;
-    write_if_absent(
-        &module_path,
-        &resource_module_template(&pascal, controller_kind),
-        opts,
-    )?;
-    write_if_absent(
-        &controller_path,
-        &resource_entry_template(controller_kind, &pascal),
-        opts,
-    )?;
+    let rt = match transport {
+        Transport::Rest => resource_templates::ResourceTransport::Rest,
+        Transport::Graphql => resource_templates::ResourceTransport::Graphql,
+        Transport::Ws => resource_templates::ResourceTransport::Ws,
+        Transport::Grpc => resource_templates::ResourceTransport::Grpc,
+        Transport::Microservice => resource_templates::ResourceTransport::Microservice,
+    };
+
+    let service_body = resource_templates::crud_service(&pascal);
+    let module_body = resource_templates::resource_module(rt, &pascal);
+    let entry_body = match transport {
+        Transport::Rest => resource_templates::rest_controller(&snake, &pascal),
+        Transport::Graphql => resource_templates::graphql_resolver(&snake, &pascal),
+        Transport::Ws => resource_templates::ws_gateway(&snake, &pascal),
+        Transport::Grpc => resource_templates::microservice_transport(&snake, &pascal, true),
+        Transport::Microservice => {
+            resource_templates::microservice_transport(&snake, &pascal, false)
+        }
+    };
+
+    write_if_absent(&service_path, &service_body, opts)?;
+    write_if_absent(&module_path, &module_body, opts)?;
+    write_if_absent(&controller_path, &entry_body, opts)?;
     write_if_absent(
         &create_dto_path,
-        &dto_template(&format!("Create{pascal}Dto")),
+        &resource_templates::create_dto(&pascal),
         opts,
     )?;
     write_if_absent(
         &update_dto_path,
-        &dto_template(&format!("Update{pascal}Dto")),
+        &resource_templates::update_dto(&pascal),
         opts,
     )?;
     write_if_absent(
@@ -588,33 +598,6 @@ fn dto_template(type_name: &str) -> String {
     format!(
         "use nestrs::prelude::*;\n\n#[dto]\npub struct {type_name} {{\n    #[IsString]\n    #[Length(min = 1, max = 120)]\n    pub name: String,\n}}\n"
     )
-}
-
-fn resource_module_template(pascal: &str, controller_kind: &str) -> String {
-    let controller_type_suffix = match controller_kind {
-        "resolver" => "Resolver",
-        "gateway" => "Gateway",
-        "grpc" => "Grpc",
-        "transport" => "Transport",
-        _ => "Controller",
-    };
-    format!(
-        "use nestrs::prelude::*;\n\n#[module(\n    controllers = [{pascal}{controller_type_suffix}],\n    providers = [{pascal}Service],\n)]\npub struct {pascal}Module;\n"
-    )
-}
-
-fn resource_entry_template(controller_kind: &str, pascal: &str) -> String {
-    match controller_kind {
-        "resolver" => format!("pub struct {pascal}Resolver;\n"),
-        "gateway" => format!("pub struct {pascal}Gateway;\n"),
-        "grpc" => format!("pub struct {pascal}Grpc;\n"),
-        "transport" => format!("pub struct {pascal}Transport;\n"),
-        _ => format!(
-            "use nestrs::prelude::*;\n\n#[controller(prefix = \"/{0}\")]\npub struct {1}Controller;\n",
-            pascal.to_ascii_lowercase(),
-            pascal
-        ),
-    }
 }
 
 fn mod_file_template(stem: &str, controller_kind: &str, style: Style) -> String {

@@ -11,7 +11,7 @@ This crate is a **proc-macro** dependency of `nestrs`; you do not usually add it
 Prefer the umbrella crate:
 
 ```toml
-nestrs = "0.1.2"
+nestrs = "0.1.3"
 ```
 
 `nestrs` already depends on `nestrs-macros`.
@@ -20,7 +20,7 @@ nestrs = "0.1.2"
 
 ```toml
 [dependencies]
-nestrs-macros = "0.1.2"
+nestrs-macros = "0.1.3"
 ```
 
 ## What you get (surface sketch)

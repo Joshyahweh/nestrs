@@ -11,7 +11,7 @@ use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tower_cookies::Cookies;
 
-/// Configuration for [`csrf_double_submit_middleware`].
+/// Configuration for `csrf_double_submit_middleware`.
 #[derive(Clone, Debug)]
 pub struct CsrfProtectionConfig {
     /// Cookie that holds the CSRF secret (must also be sent by the client as a non-HttpOnly duplicate or mirrored header — typical double-submit).

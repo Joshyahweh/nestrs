@@ -36,7 +36,7 @@ async fn ws_guard_reads_upgrade_headers() {
     let mut map = axum::http::HeaderMap::new();
     map.insert("x-ws-token", HeaderValue::from_static("secret"));
     let hs = WsHandshake::new(map);
-    assert!(TokenHeaderGuard::default()
+    assert!(TokenHeaderGuard
         .can_activate_ws(&hs, "ping", &json!({}))
         .await
         .is_ok());

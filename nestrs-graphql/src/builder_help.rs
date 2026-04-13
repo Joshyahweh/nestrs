@@ -1,4 +1,4 @@
-//! Opinionated [`SchemaBuilder`](async_graphql::SchemaBuilder) chaining for production services.
+//! Opinionated [`SchemaBuilder`] chaining for production services.
 
 use async_graphql::extensions::Analyzer;
 use async_graphql::SchemaBuilder;

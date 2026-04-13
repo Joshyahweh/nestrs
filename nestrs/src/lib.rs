@@ -1440,7 +1440,7 @@ impl NestApplication {
     /// against the composed provider graph.
     ///
     /// Use [`ModuleRef::get`](crate::core::ModuleRef::get) for type-keyed resolution. Pair with
-    /// [`DiscoveryService`](crate::core::DiscoveryService) for introspection. **Docs:** mdBook
+    /// [`DiscoveryService`] for introspection. **Docs:** mdBook
     /// **Fundamentals** in the repository (`docs/src/fundamentals.md`).
     pub fn module_ref(&self) -> ModuleRef {
         ModuleRef::new(Arc::clone(&self.registry))

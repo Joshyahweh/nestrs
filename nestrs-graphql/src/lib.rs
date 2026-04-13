@@ -3,9 +3,11 @@
 //! ## Ecosystem (Nest chapter vs Rust)
 //!
 //! - **Federation**: use [`async_graphql`](https://docs.rs/async-graphql) federation / subgraph features, or place
-//!   [`export_schema_sdl`](crate::export_schema_sdl) output behind **Apollo Router** / **GraphOS** — there is no separate “nestrs federation” crate.
-//! - **Plugins**: implement [`Extension`](async_graphql::extensions::Extension) / [`ExtensionFactory`](async_graphql::extensions::ExtensionFactory)
-//!   and register with [`SchemaBuilder::extension`](async_graphql::SchemaBuilder::extension). [`Analyzer`] is wired by [`with_production_graphql_limits`].
+//!   [`export_schema_sdl`] output behind **Apollo Router** / **GraphOS** — there is no separate “nestrs federation” crate.
+//! - **Plugins**: implement [`async_graphql::extensions::Extension`] /
+//!   [`async_graphql::extensions::ExtensionFactory`] and register with
+//!   [`async_graphql::SchemaBuilder::extension`].
+//!   [`Analyzer`] is wired by [`with_production_graphql_limits`].
 //! - **SDL / codegen**: export with [`export_schema_sdl`] or [`export_schema_sdl_with_options`]; run **graphql-client**, **cynic**, or **async-graphql**’s own derives in your repo.
 //! - **Mapped / custom scalars**: use `#[Scalar]`, newtypes, and `Object`/`InputObject` as in the async-graphql book.
 //! - **Field middleware / guards**: use the `guard` argument on `#[graphql(guard = "...")]` / `FieldGuard` patterns from async-graphql (authorization lives in the schema layer).

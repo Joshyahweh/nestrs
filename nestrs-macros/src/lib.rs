@@ -1,5 +1,8 @@
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -89,9 +92,22 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
     let module_struct = parse_macro_input!(item as ItemStruct);
     let name = &module_struct.ident;
 
+    enum ImportKind {
+        Normal,
+        ForwardRef,
+        Lazy,
+    }
+
     struct ImportItem {
         ty: Type,
-        forward_ref: bool,
+        kind: ImportKind,
+    }
+
+    fn lazy_static_ident(ty: &Type) -> Ident {
+        let mut hasher = DefaultHasher::new();
+        quote!(#ty).to_string().hash(&mut hasher);
+        let h = hasher.finish();
+        format_ident!("__NESTRS_LAZY_{:016x}", h)
     }
 
     fn forward_ref_expr_to_type(expr: &Expr) -> Option<Type> {
@@ -137,6 +153,45 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(ty)
     }
 
+    fn lazy_module_expr_to_type(expr: &Expr) -> Option<Type> {
+        fn is_lazy_ident(ident: &Ident) -> bool {
+            ident == "lazy_module" || ident == "lazy"
+        }
+
+        let args = match expr {
+            Expr::Call(call) => {
+                let Expr::Path(p) = call.func.as_ref() else {
+                    return None;
+                };
+                if !call.args.is_empty() {
+                    return None;
+                }
+                let seg = p.path.segments.last()?;
+                if !is_lazy_ident(&seg.ident) {
+                    return None;
+                }
+                &seg.arguments
+            }
+            Expr::Path(p) => {
+                let seg = p.path.segments.last()?;
+                if !is_lazy_ident(&seg.ident) {
+                    return None;
+                }
+                &seg.arguments
+            }
+            _ => return None,
+        };
+
+        let syn::PathArguments::AngleBracketed(ab) = args else {
+            return None;
+        };
+
+        ab.args.iter().find_map(|arg| match arg {
+            syn::GenericArgument::Type(t) => Some(t.clone()),
+            _ => None,
+        })
+    }
+
     let imports_exprs = args.imports;
     let mut imports_static = Vec::<ImportItem>::new();
     let mut imports_dynamic = Vec::<Expr>::new();
@@ -144,7 +199,14 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
         if let Some(ty) = forward_ref_expr_to_type(&expr) {
             imports_static.push(ImportItem {
                 ty,
-                forward_ref: true,
+                kind: ImportKind::ForwardRef,
+            });
+            continue;
+        }
+        if let Some(ty) = lazy_module_expr_to_type(&expr) {
+            imports_static.push(ImportItem {
+                ty,
+                kind: ImportKind::Lazy,
             });
             continue;
         }
@@ -155,19 +217,37 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
                     qself: None,
                     path: p.path,
                 }),
-                forward_ref: false,
+                kind: ImportKind::Normal,
             }),
             other => imports_dynamic.push(other),
         };
     }
 
+    let mut lazy_seen: HashSet<String> = HashSet::new();
+    let mut lazy_unique: Vec<Type> = Vec::new();
+    for imp in &imports_static {
+        if matches!(imp.kind, ImportKind::Lazy) {
+            let ty = &imp.ty;
+            let key = quote!(#ty).to_string();
+            if lazy_seen.insert(key) {
+                lazy_unique.push(imp.ty.clone());
+            }
+        }
+    }
+    let lazy_static_items = lazy_unique.iter().map(|ty| {
+        let id = lazy_static_ident(ty);
+        quote! {
+            static #id: std::sync::OnceLock<nestrs::core::DynamicModule> =
+                std::sync::OnceLock::new();
+        }
+    });
+
     let import_builds = imports_static
         .iter()
         .map(|imp| {
             let ty = &imp.ty;
-            let is_forward_ref = imp.forward_ref;
-            if is_forward_ref {
-                quote! {
+            match imp.kind {
+                ImportKind::ForwardRef => quote! {
                     {
                         let __type_id = std::any::TypeId::of::<#ty>();
                         if nestrs::core::__nestrs_module_stack_contains(__type_id) {
@@ -180,9 +260,19 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
                             router = router.merge(child_router);
                         }
                     }
+                },
+                ImportKind::Lazy => {
+                    let lazy_ident = lazy_static_ident(ty);
+                    quote! {
+                        {
+                            let __dm_lazy = #lazy_ident
+                                .get_or_init(|| nestrs::core::DynamicModule::from_module::<#ty>());
+                            registry.absorb_exported(__dm_lazy.registry.clone(), &__dm_lazy.exports);
+                            router = router.merge(__dm_lazy.router.clone());
+                        }
+                    }
                 }
-            } else {
-                quote! {
+                ImportKind::Normal => quote! {
                     {
                         let __type_id = std::any::TypeId::of::<#ty>();
                         if nestrs::core::__nestrs_module_stack_contains(__type_id) {
@@ -193,7 +283,7 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
                         registry.absorb_exported(child_registry, &child_exports);
                         router = router.merge(child_router);
                     }
-                }
+                },
             }
         })
         .collect::<Vec<_>>();
@@ -202,9 +292,8 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
         .iter()
         .map(|imp| {
             let ty = &imp.ty;
-            let is_forward_ref = imp.forward_ref;
-            if is_forward_ref {
-                quote! {
+            match imp.kind {
+                ImportKind::ForwardRef => quote! {
                     {
                         let __type_id = std::any::TypeId::of::<#ty>();
                         if nestrs::core::__nestrs_module_stack_contains(__type_id) {
@@ -214,9 +303,18 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
                             <#ty as nestrs::core::ModuleGraph>::register_providers(registry);
                         }
                     }
+                },
+                ImportKind::Lazy => {
+                    let lazy_ident = lazy_static_ident(ty);
+                    quote! {
+                        {
+                            let __dm_lazy = #lazy_ident
+                                .get_or_init(|| nestrs::core::DynamicModule::from_module::<#ty>());
+                            registry.absorb_exported(__dm_lazy.registry.clone(), &__dm_lazy.exports);
+                        }
+                    }
                 }
-            } else {
-                quote! {
+                ImportKind::Normal => quote! {
                     {
                         let __type_id = std::any::TypeId::of::<#ty>();
                         if nestrs::core::__nestrs_module_stack_contains(__type_id) {
@@ -224,7 +322,7 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
                         }
                         <#ty as nestrs::core::ModuleGraph>::register_providers(registry);
                     }
-                }
+                },
             }
         })
         .collect::<Vec<_>>();
@@ -233,9 +331,8 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
         .iter()
         .map(|imp| {
             let ty = &imp.ty;
-            let is_forward_ref = imp.forward_ref;
-            if is_forward_ref {
-                quote! {
+            match imp.kind {
+                ImportKind::ForwardRef => quote! {
                     {
                         let __type_id = std::any::TypeId::of::<#ty>();
                         if nestrs::core::__nestrs_module_stack_contains(__type_id) {
@@ -245,9 +342,18 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
                             router = <#ty as nestrs::core::ModuleGraph>::register_controllers(router, registry);
                         }
                     }
+                },
+                ImportKind::Lazy => {
+                    let lazy_ident = lazy_static_ident(ty);
+                    quote! {
+                        {
+                            let __dm_lazy = #lazy_ident
+                                .get_or_init(|| nestrs::core::DynamicModule::from_module::<#ty>());
+                            router = router.merge(__dm_lazy.router.clone());
+                        }
+                    }
                 }
-            } else {
-                quote! {
+                ImportKind::Normal => quote! {
                     {
                         let __type_id = std::any::TypeId::of::<#ty>();
                         if nestrs::core::__nestrs_module_stack_contains(__type_id) {
@@ -255,7 +361,7 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
                         }
                         router = <#ty as nestrs::core::ModuleGraph>::register_controllers(router, registry);
                     }
-                }
+                },
             }
         })
         .collect::<Vec<_>>();
@@ -286,6 +392,8 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #module_struct
+
+        #(#lazy_static_items)*
 
         impl nestrs::core::Module for #name {
             fn build() -> (nestrs::core::ProviderRegistry, axum::Router) {
@@ -667,6 +775,11 @@ pub fn all(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
+pub fn openapi(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
 pub fn sse(attr: TokenStream, item: TokenStream) -> TokenStream {
     passthrough(attr, item)
 }
@@ -787,6 +900,8 @@ struct RouteDef {
     interceptors: Vec<Type>,
     filters: Vec<Type>,
     metadata: Vec<(LitStr, LitStr)>,
+    /// Empty, or `openapi <expr>` for `impl_routes!`.
+    openapi_line: proc_macro2::TokenStream,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1251,6 +1366,168 @@ fn parse_use_pipes(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
     Ok(Vec::new())
 }
 
+fn parse_use_ws_guards(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
+    for attr in attrs {
+        if !attr.path().is_ident("use_ws_guards") {
+            continue;
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "use_ws_guards expects types, e.g. #[use_ws_guards(MyWsGuard)]",
+            ));
+        };
+        if list.tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let guards: Punctuated<Type, Token![,]> = Punctuated::<Type, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())
+            .map_err(|_| {
+                syn::Error::new_spanned(
+                    list,
+                    "use_ws_guards expects types, e.g. #[use_ws_guards(MyWsGuard)]",
+                )
+            })?;
+        return Ok(guards.into_iter().collect());
+    }
+    Ok(Vec::new())
+}
+
+fn parse_use_ws_pipes(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
+    for attr in attrs {
+        if !attr.path().is_ident("use_ws_pipes") {
+            continue;
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "use_ws_pipes expects types, e.g. #[use_ws_pipes(MyWsPipe)]",
+            ));
+        };
+        if list.tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let values: Punctuated<Type, Token![,]> = Punctuated::<Type, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())
+            .map_err(|_| {
+                syn::Error::new_spanned(
+                    list,
+                    "use_ws_pipes expects types, e.g. #[use_ws_pipes(MyWsPipe)]",
+                )
+            })?;
+        return Ok(values.into_iter().collect());
+    }
+    Ok(Vec::new())
+}
+
+fn parse_use_ws_interceptors(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
+    for attr in attrs {
+        if !attr.path().is_ident("use_ws_interceptors") {
+            continue;
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "use_ws_interceptors expects types, e.g. #[use_ws_interceptors(LogWs)]",
+            ));
+        };
+        if list.tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let values: Punctuated<Type, Token![,]> = Punctuated::<Type, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())
+            .map_err(|_| {
+                syn::Error::new_spanned(
+                    list,
+                    "use_ws_interceptors expects types, e.g. #[use_ws_interceptors(LogWs)]",
+                )
+            })?;
+        return Ok(values.into_iter().collect());
+    }
+    Ok(Vec::new())
+}
+
+fn parse_use_micro_guards(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
+    for attr in attrs {
+        if !attr.path().is_ident("use_micro_guards") {
+            continue;
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "use_micro_guards expects types, e.g. #[use_micro_guards(MyMicroGuard)]",
+            ));
+        };
+        if list.tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let guards: Punctuated<Type, Token![,]> = Punctuated::<Type, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())
+            .map_err(|_| {
+                syn::Error::new_spanned(
+                    list,
+                    "use_micro_guards expects types, e.g. #[use_micro_guards(MyMicroGuard)]",
+                )
+            })?;
+        return Ok(guards.into_iter().collect());
+    }
+    Ok(Vec::new())
+}
+
+fn parse_use_micro_pipes(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
+    for attr in attrs {
+        if !attr.path().is_ident("use_micro_pipes") {
+            continue;
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "use_micro_pipes expects types, e.g. #[use_micro_pipes(MyMicroPipe)]",
+            ));
+        };
+        if list.tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let values: Punctuated<Type, Token![,]> = Punctuated::<Type, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())
+            .map_err(|_| {
+                syn::Error::new_spanned(
+                    list,
+                    "use_micro_pipes expects types, e.g. #[use_micro_pipes(MyMicroPipe)]",
+                )
+            })?;
+        return Ok(values.into_iter().collect());
+    }
+    Ok(Vec::new())
+}
+
+fn parse_use_micro_interceptors(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
+    for attr in attrs {
+        if !attr.path().is_ident("use_micro_interceptors") {
+            continue;
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "use_micro_interceptors expects types, e.g. #[use_micro_interceptors(LogMicro)]",
+            ));
+        };
+        if list.tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let values: Punctuated<Type, Token![,]> = Punctuated::<Type, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())
+            .map_err(|_| {
+                syn::Error::new_spanned(
+                    list,
+                    "use_micro_interceptors expects types, e.g. #[use_micro_interceptors(LogMicro)]",
+                )
+            })?;
+        return Ok(values.into_iter().collect());
+    }
+    Ok(Vec::new())
+}
+
 fn parse_use_interceptors(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
     for attr in attrs {
         if !attr.path().is_ident("use_interceptors") {
@@ -1371,6 +1648,143 @@ fn parse_roles(attrs: &[syn::Attribute]) -> Result<Vec<(LitStr, LitStr)>> {
         ));
     }
     Ok(out)
+}
+
+struct OpenApiResponsePair(LitInt, LitStr);
+
+impl Parse for OpenApiResponsePair {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let content;
+        syn::parenthesized!(content in input);
+        let status: LitInt = content.parse()?;
+        content.parse::<Token![,]>()?;
+        let desc: LitStr = content.parse()?;
+        Ok(Self(status, desc))
+    }
+}
+
+struct OpenApiAttrBody {
+    summary: Option<LitStr>,
+    tag: Option<LitStr>,
+    responses: Vec<(LitInt, LitStr)>,
+}
+
+impl Parse for OpenApiAttrBody {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut summary = None::<LitStr>;
+        let mut tag = None::<LitStr>;
+        let mut responses = Vec::<(LitInt, LitStr)>::new();
+
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            match key.to_string().as_str() {
+                "summary" => {
+                    if summary.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            key,
+                            "duplicate `summary` in #[openapi(...)]",
+                        ));
+                    }
+                    summary = Some(input.parse::<LitStr>()?);
+                }
+                "tag" => {
+                    if tag.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            key,
+                            "duplicate `tag` in #[openapi(...)]",
+                        ));
+                    }
+                    tag = Some(input.parse::<LitStr>()?);
+                }
+                "responses" => {
+                    if !responses.is_empty() {
+                        return Err(syn::Error::new_spanned(
+                            key,
+                            "duplicate `responses` in #[openapi(...)]",
+                        ));
+                    }
+                    let content;
+                    syn::parenthesized!(content in input);
+                    let pairs: Punctuated<OpenApiResponsePair, Token![,]> =
+                        content.parse_terminated(OpenApiResponsePair::parse, Token![,])?;
+                    for pair in pairs {
+                        let OpenApiResponsePair(st, ds) = pair;
+                        let v: u128 = st.base10_parse().map_err(|_| {
+                            syn::Error::new_spanned(&st, "response status must be a valid integer")
+                        })?;
+                        if v > u16::MAX as u128 {
+                            return Err(syn::Error::new_spanned(
+                                st,
+                                "HTTP status code must fit in u16",
+                            ));
+                        }
+                        responses.push((st, ds));
+                    }
+                }
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        key,
+                        "unknown #[openapi(...)] field (expected summary, tag, responses)",
+                    ));
+                }
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(OpenApiAttrBody {
+            summary,
+            tag,
+            responses,
+        })
+    }
+}
+
+fn parse_openapi(attrs: &[syn::Attribute]) -> Result<Option<OpenApiAttrBody>> {
+    let mut found = None::<OpenApiAttrBody>;
+    for attr in attrs {
+        if !attr.path().is_ident("openapi") {
+            continue;
+        }
+        if found.is_some() {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "#[openapi(...)] can only appear once per handler",
+            ));
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "#[openapi] expects parentheses, e.g. #[openapi(summary = \"...\")]",
+            ));
+        };
+        let parsed: OpenApiAttrBody = syn::parse2(list.tokens.clone())?;
+        found = Some(parsed);
+    }
+    Ok(found)
+}
+
+fn openapi_impl_line(body: &OpenApiAttrBody) -> proc_macro2::TokenStream {
+    if body.summary.is_none() && body.tag.is_none() && body.responses.is_empty() {
+        return quote! {};
+    }
+    let summary = match &body.summary {
+        Some(s) => quote! { ::core::option::Option::Some(#s) },
+        None => quote! { ::core::option::Option::None },
+    };
+    let tag = match &body.tag {
+        Some(s) => quote! { ::core::option::Option::Some(#s) },
+        None => quote! { ::core::option::Option::None },
+    };
+    let pairs = body
+        .responses
+        .iter()
+        .map(|(st, ds)| quote! { (#st as u16, #ds) });
+    quote! {
+        openapi ( nestrs::__nestrs_openapi_spec_leaked(#summary, #tag, &[ #(#pairs),* ]) )
+    }
 }
 
 #[proc_macro_attribute]
@@ -1516,6 +1930,13 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             Err(e) => return e.to_compile_error().into(),
         }
 
+        let openapi_line = match parse_openapi(&func.attrs) {
+            Ok(Some(body)) => openapi_impl_line(&body),
+            Ok(None) => quote! {},
+            Err(e) => return e.to_compile_error().into(),
+        };
+        func.attrs.retain(|a| !a.path().is_ident("openapi"));
+
         routes.push(RouteDef {
             method,
             path,
@@ -1526,6 +1947,7 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             interceptors,
             filters,
             metadata,
+            openapi_line,
         });
     }
 
@@ -1552,6 +1974,7 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             let interceptors = r.interceptors;
             let filters = r.filters;
             let metadata = r.metadata;
+            let openapi_line = r.openapi_line;
             let maybe_ver = r.version.map(|v| quote!(@ver(#v)));
             let interceptors_tokens = if interceptors.is_empty() {
                 quote! {}
@@ -1573,7 +1996,9 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             quote! {
                 #maybe_ver
-                    #method #path with ( #(#guards),* )
+                    #method #path
+                    #openapi_line
+                    with ( #(#guards),* )
                     #interceptors_tokens
                     #filters_tokens
                     #metadata_tokens
@@ -1626,6 +2051,9 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
         name: Ident,
         expects_client: bool,
         payload_ty: Option<Type>,
+        ws_interceptors: Vec<Type>,
+        ws_guards: Vec<Type>,
+        ws_pipes: Vec<Type>,
     }
 
     let mut handlers = Vec::<WsHandlerDef>::new();
@@ -1705,11 +2133,27 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         };
 
+        let ws_interceptors = match parse_use_ws_interceptors(&func.attrs) {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
+        let ws_guards = match parse_use_ws_guards(&func.attrs) {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
+        let ws_pipes = match parse_use_ws_pipes(&func.attrs) {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
+
         handlers.push(WsHandlerDef {
             event,
             name: func.sig.ident.clone(),
             expects_client,
             payload_ty,
+            ws_interceptors,
+            ws_guards,
+            ws_pipes,
         });
     }
 
@@ -1728,6 +2172,9 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
         let name = h.name;
         let expects_client = h.expects_client;
         let payload_ty = h.payload_ty;
+        let ws_interceptors = h.ws_interceptors;
+        let ws_guards = h.ws_guards;
+        let ws_pipes = h.ws_pipes;
 
         let call = match (expects_client, payload_ty) {
             (false, None) => quote! {
@@ -1739,17 +2186,17 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             (false, Some(payload_ty)) => {
                 if is_serde_json_value_type(&payload_ty) {
                     quote! {
-                        let payload = payload.clone();
-                        let _ = self.#name(payload).await;
+                        let __pl = __ws_payload.clone();
+                        let _ = self.#name(__pl).await;
                     }
                 } else {
                     quote! {
-                        let payload = payload.clone();
-                        let __value: #payload_ty = match nestrs::serde_json::from_value(payload) {
+                        let __pl = __ws_payload.clone();
+                        let __value: #payload_ty = match nestrs::serde_json::from_value(__pl) {
                             Ok(v) => v,
                             Err(e) => {
                                 let _ = client.emit(
-                                    "error",
+                                    nestrs::ws::WS_ERROR_EVENT,
                                     nestrs::serde_json::json!({
                                         "event": #event,
                                         "message": "invalid payload",
@@ -1766,17 +2213,17 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             (true, Some(payload_ty)) => {
                 if is_serde_json_value_type(&payload_ty) {
                     quote! {
-                        let payload = payload.clone();
-                        let _ = self.#name(client.clone(), payload).await;
+                        let __pl = __ws_payload.clone();
+                        let _ = self.#name(client.clone(), __pl).await;
                     }
                 } else {
                     quote! {
-                        let payload = payload.clone();
-                        let __value: #payload_ty = match nestrs::serde_json::from_value(payload) {
+                        let __pl = __ws_payload.clone();
+                        let __value: #payload_ty = match nestrs::serde_json::from_value(__pl) {
                             Ok(v) => v,
                             Err(e) => {
                                 let _ = client.emit(
-                                    "error",
+                                    nestrs::ws::WS_ERROR_EVENT,
                                     nestrs::serde_json::json!({
                                         "event": #event,
                                         "message": "invalid payload",
@@ -1792,8 +2239,58 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         };
 
+        let inter_ts: Vec<_> = ws_interceptors
+            .iter()
+            .map(|t| {
+                quote! {
+                    <#t as ::core::default::Default>::default()
+                        .before_handle(client.handshake(), #event, &__ws_payload)
+                        .await;
+                }
+            })
+            .collect();
+
+        let guard_ts: Vec<_> = ws_guards
+            .iter()
+            .map(|g| {
+                quote! {
+                    if let Err(__e) = <#g as ::core::default::Default>::default()
+                        .can_activate_ws(client.handshake(), #event, &__ws_payload)
+                        .await
+                    {
+                        let _ = client.emit(nestrs::ws::WS_ERROR_EVENT, __e.to_json());
+                        return;
+                    }
+                }
+            })
+            .collect();
+
+        let pipe_ts: Vec<_> = ws_pipes
+            .iter()
+            .map(|p| {
+                quote! {
+                    __ws_payload = match <#p as ::core::default::Default>::default()
+                        .transform(#event, __ws_payload)
+                        .await
+                    {
+                        Ok(__v) => __v,
+                        Err(__e) => {
+                            let _ = client.emit(nestrs::ws::WS_ERROR_EVENT, __e.to_json());
+                            return;
+                        }
+                    };
+                }
+            })
+            .collect();
+
         arms.push(quote! {
-            #event => { #call }
+            #event => {
+                let mut __ws_payload = payload.clone();
+                #(#inter_ts)*
+                #(#guard_ts)*
+                #(#pipe_ts)*
+                #call
+            }
         });
     }
 
@@ -1812,7 +2309,7 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     #(#arms,)*
                     _ => {
                         let _ = client.emit(
-                            "error",
+                            nestrs::ws::WS_ERROR_EVENT,
                             nestrs::serde_json::json!({
                                 "event": event,
                                 "message": "unknown event"
@@ -2218,6 +2715,9 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
         payload_ty: Option<Type>,
         ok_ty: Option<Type>,
         err_ty: Option<Type>,
+        micro_interceptors: Vec<Type>,
+        micro_guards: Vec<Type>,
+        micro_pipes: Vec<Type>,
     }
 
     let mut handlers = Vec::<MsHandlerDef>::new();
@@ -2331,6 +2831,19 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
+        let micro_interceptors = match parse_use_micro_interceptors(&func.attrs) {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
+        let micro_guards = match parse_use_micro_guards(&func.attrs) {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
+        let micro_pipes = match parse_use_micro_pipes(&func.attrs) {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
+
         handlers.push(MsHandlerDef {
             pattern,
             name: func.sig.ident.clone(),
@@ -2338,6 +2851,9 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             payload_ty,
             ok_ty,
             err_ty,
+            micro_interceptors,
+            micro_guards,
+            micro_pipes,
         });
     }
 
@@ -2351,13 +2867,56 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let payload_ty = h.payload_ty.clone();
             let ok_ty = h.ok_ty.clone();
             let err_ty = h.err_ty.clone();
+            let micro_interceptors = h.micro_interceptors.clone();
+            let micro_guards = h.micro_guards.clone();
+            let micro_pipes = h.micro_pipes.clone();
+
+            let micro_inter_ts: Vec<_> = micro_interceptors
+                .iter()
+                .map(|t| {
+                    quote! {
+                        <#t as ::core::default::Default>::default()
+                            .before_handle_micro(#pattern, &__ms_payload)
+                            .await;
+                    }
+                })
+                .collect();
+
+            let micro_guard_ts: Vec<_> = micro_guards
+                .iter()
+                .map(|g| {
+                    quote! {
+                        if let Err(__e) = <#g as ::core::default::Default>::default()
+                            .can_activate_micro(#pattern, &__ms_payload)
+                            .await
+                        {
+                            return Some(Err(__e));
+                        }
+                    }
+                })
+                .collect();
+
+            let micro_pipe_ts: Vec<_> = micro_pipes
+                .iter()
+                .map(|p| {
+                    quote! {
+                        __ms_payload = match <#p as ::core::default::Default>::default()
+                            .transform_micro(#pattern, __ms_payload)
+                            .await
+                        {
+                            Ok(__v) => __v,
+                            Err(__e) => return Some(Err(__e)),
+                        };
+                    }
+                })
+                .collect();
 
             let decode = if let Some(payload_ty) = payload_ty.clone() {
                 if is_serde_json_value_type(&payload_ty) {
-                    quote! { let __payload = payload.clone(); }
+                    quote! { let __payload = __ms_payload.clone(); }
                 } else {
                     quote! {
-                        let __payload: #payload_ty = match nestrs::serde_json::from_value(payload.clone()) {
+                        let __payload: #payload_ty = match nestrs::serde_json::from_value(__ms_payload.clone()) {
                             Ok(v) => v,
                             Err(e) => {
                                 return Some(Err(nestrs::microservices::TransportError::new(format!(
@@ -2457,6 +3016,10 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             message_arms.push(quote! {
                 #pattern => {
+                    let mut __ms_payload = payload.clone();
+                    #(#micro_inter_ts)*
+                    #(#micro_guard_ts)*
+                    #(#micro_pipe_ts)*
                     #decode
                     Some({
                         #call
@@ -2467,12 +3030,57 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let pattern = h.pattern;
             let name = h.name;
             let payload_ty = h.payload_ty.clone();
+            let micro_interceptors = h.micro_interceptors.clone();
+            let micro_guards = h.micro_guards.clone();
+            let micro_pipes = h.micro_pipes.clone();
+
+            let micro_inter_ts: Vec<_> = micro_interceptors
+                .iter()
+                .map(|t| {
+                    quote! {
+                        <#t as ::core::default::Default>::default()
+                            .before_handle_micro(#pattern, &__ms_payload)
+                            .await;
+                    }
+                })
+                .collect();
+
+            let micro_guard_ts: Vec<_> = micro_guards
+                .iter()
+                .map(|g| {
+                    quote! {
+                        if <#g as ::core::default::Default>::default()
+                            .can_activate_micro(#pattern, &__ms_payload)
+                            .await
+                            .is_err()
+                        {
+                            return true;
+                        }
+                    }
+                })
+                .collect();
+
+            let micro_pipe_ts: Vec<_> = micro_pipes
+                .iter()
+                .map(|p| {
+                    quote! {
+                        __ms_payload = match <#p as ::core::default::Default>::default()
+                            .transform_micro(#pattern, __ms_payload)
+                            .await
+                        {
+                            Ok(__v) => __v,
+                            Err(_) => return true,
+                        };
+                    }
+                })
+                .collect();
+
             let decode = if let Some(payload_ty) = payload_ty.clone() {
                 if is_serde_json_value_type(&payload_ty) {
-                    quote! { let __payload = payload.clone(); }
+                    quote! { let __payload = __ms_payload.clone(); }
                 } else {
                     quote! {
-                        let __payload: #payload_ty = match nestrs::serde_json::from_value(payload.clone()) {
+                        let __payload: #payload_ty = match nestrs::serde_json::from_value(__ms_payload.clone()) {
                             Ok(v) => v,
                             Err(_) => {
                                 return true;
@@ -2491,6 +3099,10 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             event_arms.push(quote! {
                 #pattern => {
+                    let mut __ms_payload = payload.clone();
+                    #(#micro_inter_ts)*
+                    #(#micro_guard_ts)*
+                    #(#micro_pipe_ts)*
                     #decode
                     #call
                     true
@@ -2553,6 +3165,36 @@ pub fn use_pipes(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn use_interceptors(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn use_ws_guards(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn use_ws_pipes(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn use_ws_interceptors(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn use_micro_guards(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn use_micro_pipes(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn use_micro_interceptors(attr: TokenStream, item: TokenStream) -> TokenStream {
     passthrough(attr, item)
 }
 
@@ -2623,13 +3265,47 @@ pub fn queue_processor(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Supports:
 /// - `async fn handler() -> T` where `T: serde::Serialize`
 /// - `async fn handler() -> Result<T, E>` where `T: serde::Serialize` and `E: IntoResponse`
+/// - `#[serialize(strip_null)]` — drop JSON `null` values after serialization (Nest `@Exclude` / transformer-style cleanup).
 #[proc_macro_attribute]
-pub fn serialize(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn serialize(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let strip_null = if attr.is_empty() {
+        false
+    } else {
+        let id = parse_macro_input!(attr as Ident);
+        if id != "strip_null" {
+            return syn::Error::new_spanned(
+                id,
+                "unknown serialize option (expected `strip_null` or empty)",
+            )
+            .to_compile_error()
+            .into();
+        }
+        true
+    };
+
     let mut method = parse_macro_input!(item as ImplItemFn);
     let output = method.sig.output.clone();
     let block = method.block;
 
     method.sig.output = syn::parse_quote!(-> axum::response::Response);
+
+    let ok_json = if strip_null {
+        quote! {
+            match serde_json::to_value(&__ok) {
+                Ok(__v) => {
+                    let __v = nestrs::strip_null_json_value(__v);
+                    axum::response::IntoResponse::into_response(axum::Json(__v))
+                }
+                Err(__e) => axum::response::IntoResponse::into_response(
+                    nestrs::InternalServerErrorException::new(__e.to_string()),
+                ),
+            }
+        }
+    } else {
+        quote! {
+            axum::response::IntoResponse::into_response(axum::Json(__ok))
+        }
+    };
 
     let body = match output {
         syn::ReturnType::Default => {
@@ -2643,8 +3319,21 @@ pub fn serialize(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 quote! {
                     let __value: #ty = (async move #block).await;
                     match __value {
-                        Ok(__ok) => axum::response::IntoResponse::into_response(axum::Json(__ok)),
+                        Ok(__ok) => { #ok_json }
                         Err(__err) => axum::response::IntoResponse::into_response(__err),
+                    }
+                }
+            } else if strip_null {
+                quote! {
+                    let __value: #ty = (async move #block).await;
+                    match serde_json::to_value(&__value) {
+                        Ok(__v) => {
+                            let __v = nestrs::strip_null_json_value(__v);
+                            axum::response::IntoResponse::into_response(axum::Json(__v))
+                        }
+                        Err(__e) => axum::response::IntoResponse::into_response(
+                            nestrs::InternalServerErrorException::new(__e.to_string()),
+                        ),
                     }
                 }
             } else {
@@ -2760,7 +3449,11 @@ pub fn redirect(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote!(#method).into()
 }
 
-fn convert_dto_field_attrs(field: &Field) -> Vec<syn::Attribute> {
+fn field_has_marker(field: &Field, marker: &str) -> bool {
+    field.attrs.iter().any(|a| a.path().is_ident(marker))
+}
+
+fn convert_dto_field_attrs(field: &Field, expose_only: bool) -> Vec<syn::Attribute> {
     let mut out = Vec::new();
 
     for attr in &field.attrs {
@@ -2770,11 +3463,19 @@ fn convert_dto_field_attrs(field: &Field) -> Vec<syn::Attribute> {
         };
 
         match name.as_str() {
+            "Exclude" => {
+                out.push(syn::parse_quote!(#[serde(skip_serializing)]));
+            }
+            "Expose" => {}
             "IsEmail" => out.push(syn::parse_quote!(#[validate(email)])),
             "IsNotEmpty" => out.push(syn::parse_quote!(#[validate(length(min = 1))])),
             "IsString" => {
                 // Type-level no-op in Rust, retained for Nest-like readability.
             }
+            "IsUUID" => out.push(syn::parse_quote!(#[validate(uuid)])),
+            "IsBoolean" => {}
+            "IsPositive" => out.push(syn::parse_quote!(#[validate(range(min = 1))])),
+            "IsNegative" => out.push(syn::parse_quote!(#[validate(range(max = -1))])),
             "MinLength" => {
                 if let Meta::List(list) = &attr.meta {
                     let tokens = list.tokens.clone();
@@ -2808,6 +3509,18 @@ fn convert_dto_field_attrs(field: &Field) -> Vec<syn::Attribute> {
             // Integer / number checks are expressed by Rust types (`i32`, `f64`, …) and `range` where needed.
             "IsInt" | "IsNumber" => {}
             "IsUrl" => out.push(syn::parse_quote!(#[validate(url)])),
+            "Matches" => {
+                if let Meta::List(list) = &attr.meta {
+                    let tokens = list.tokens.clone();
+                    out.push(syn::parse_quote!(#[validate(regex = #tokens)]));
+                }
+            }
+            "Contains" => {
+                if let Meta::List(list) = &attr.meta {
+                    let tokens = list.tokens.clone();
+                    out.push(syn::parse_quote!(#[validate(contains(#tokens))]));
+                }
+            }
             // Nest `@IsOptional()` maps to `Option<T>` in Rust; strip the marker attribute.
             "IsOptional" => {}
             "ValidateNested" => out.push(syn::parse_quote!(#[validate(nested)])),
@@ -2815,11 +3528,44 @@ fn convert_dto_field_attrs(field: &Field) -> Vec<syn::Attribute> {
         }
     }
 
+    if expose_only && !field_has_marker(field, "Expose") {
+        out.push(syn::parse_quote!(#[serde(skip_serializing)]));
+    }
+
     out
 }
 
+#[derive(Default)]
+struct DtoAttr {
+    expose_only: bool,
+}
+
+impl Parse for DtoAttr {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut out = DtoAttr::default();
+        if input.is_empty() {
+            return Ok(out);
+        }
+
+        let vars = Punctuated::<Ident, Token![,]>::parse_terminated(input)?;
+        for id in vars {
+            if id == "expose_only" {
+                out.expose_only = true;
+            } else {
+                return Err(syn::Error::new_spanned(
+                    id,
+                    "unknown dto option (expected `expose_only`)",
+                ));
+            }
+        }
+        Ok(out)
+    }
+}
+
 #[proc_macro_attribute]
-pub fn dto(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let opts = parse_macro_input!(attr as DtoAttr);
+    let expose_only = opts.expose_only;
     let item_struct = parse_macro_input!(item as ItemStruct);
     let vis = item_struct.vis;
     let ident = item_struct.ident;
@@ -2837,7 +3583,7 @@ pub fn dto(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let field_defs = fields.named.iter().map(|field| {
-        let attrs = convert_dto_field_attrs(field);
+        let attrs = convert_dto_field_attrs(field, expose_only);
         let field_ident = field.ident.clone();
         let ty = field.ty.clone();
         quote! {
@@ -2858,7 +3604,29 @@ pub fn dto(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_derive(
     NestDto,
-    attributes(IsString, IsEmail, IsNotEmpty, MinLength, MaxLength, Length)
+    attributes(
+        IsString,
+        IsEmail,
+        IsNotEmpty,
+        MinLength,
+        MaxLength,
+        Length,
+        Min,
+        Max,
+        IsInt,
+        IsNumber,
+        IsUrl,
+        IsOptional,
+        ValidateNested,
+        Exclude,
+        Expose,
+        IsUUID,
+        IsBoolean,
+        IsPositive,
+        IsNegative,
+        Matches,
+        Contains
+    )
 )]
 pub fn derive_nest_dto(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);

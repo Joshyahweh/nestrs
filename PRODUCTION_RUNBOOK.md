@@ -31,6 +31,26 @@ Use multi-stage Docker builds:
 3. Set `NESTRS_ENV=production`.
 4. Expose app + probe endpoints.
 
+## Graceful shutdown and connection handling
+
+- **`NestFactory::listen_graceful(port)`** uses **`listen_with_shutdown`** with a signal future: **Ctrl+C** on all platforms and **SIGTERM** on Unix (typical for containers, **systemd**, and **Kubernetes**). A log line is emitted when the signal is received (`tracing`, target `nestrs`).
+- That path calls **`axum::serve(...).with_graceful_shutdown(...)`** (see [Axum `Serve::with_graceful_shutdown`](https://docs.rs/axum/latest/axum/serve/struct.Serve.html#method.with_graceful_shutdown)): the server stops accepting **new** TCP connections; **in-flight** work follows **Hyper** behavior for the Axum version you compile against. For production, pair this with **load balancer / mesh draining** and a **`terminationGracePeriodSeconds`** (or equivalent) that matches your longest allowed request + cleanup.
+- Use **`listen_with_shutdown(port, future)`** when you need a **custom** shutdown trigger (tests, orchestration APIs, or a broadcast channel).
+
+### Backpressure and limits (same `Router` stack)
+
+These **`NestFactory`** helpers apply **Tower** layers on the application router (same stack as **`into_router()`**); tune them with your **p99 latency**, **upstream timeouts**, and **memory** budget (body size × concurrency):
+
+| Method | Purpose |
+|--------|---------|
+| `use_request_timeout(duration)` | Cap per-request wall time; excess returns a gateway-timeout style response. |
+| `use_concurrency_limit(max)` | Limit concurrent in-flight requests (additional requests wait unless you enable load shed). |
+| `use_load_shed()` | Use **with** `use_concurrency_limit` to return **503** quickly at capacity instead of queue growth. |
+| `use_body_limit(bytes)` | Reject oversized request bodies early. |
+| `RateLimitOptions` / `use_rate_limit` | Window or Redis-backed rate limiting (see crate docs). |
+
+**Kubernetes:** set **`terminationGracePeriodSeconds`** high enough for graceful drain; use **`preStop`** only if your platform needs extra delay after deregistration from the service mesh or LB.
+
 ## Observability baseline
 
 - Use `use_request_id()` for correlation IDs.
@@ -54,9 +74,20 @@ The `nestrs` crate includes a Criterion benchmark harness:
 ```bash
 cargo bench -p nestrs --bench router_hot_path
 cargo bench -p nestrs --bench router_middleware_stack
+cargo bench -p nestrs --bench di_resolution
+cargo bench -p nestrs --bench json_validation_hot_path
 ```
 
-Use these benchmarks as baselines when evaluating route/middleware performance changes.
+Use these benchmarks as baselines when evaluating route/middleware performance changes. **`di_resolution`** measures cached singleton **`ProviderRegistry::get`**; **`json_validation_hot_path`** measures a POST with JSON + **`validator`** on a **`#[dto]`** body (`ValidatedBody`). Gates live in **`benchmarks/thresholds.json`** and **`benchmarks/relative_thresholds.json`**; CI runs all four benches via **`scripts/load/run_bench_ci.sh`**.
+
+### Fuzzing (libFuzzer)
+
+Scheduled workflow **`.github/workflows/fuzz.yml`** (weekly + manual) runs **`cargo-fuzz`** targets:
+
+- **`nestrs-microservices/fuzz`**: `wire_json` — `WireRequest` / `WireResponse` / `WireError` JSON (protobuf/JSON boundary for gRPC and transporters).
+- **`nestrs/fuzz`**: `authorization_bearer` — `parse_authorization_bearer`; `uri_path_json` — `http::Uri` parse for path-shaped strings + `serde_json::Value` from arbitrary bytes.
+
+Local quick start: see **`nestrs/fuzz/README.md`** and **`nestrs-microservices/fuzz/README.md`** (requires **nightly** Rust). Any libFuzzer crash should be treated as a potential **panic or unsoundness** bug.
 
 ### External load testing
 
@@ -99,7 +130,7 @@ Suggested scenario progression:
 
 - CI workflow: `.github/workflows/performance.yml`
   - compiles benches
-  - runs stabilized criterion benches (`scripts/load/run_bench_ci.sh`)
+  - runs stabilized criterion benches (`scripts/load/run_bench_ci.sh`), including **DI** and **JSON validation** micro-benches
   - enforces benchmark regression thresholds
   - enforces relative regression checks using rolling baseline median from prior reports
   - exports benchmark report (`benchmarks/reports/latest.{json,md}`)

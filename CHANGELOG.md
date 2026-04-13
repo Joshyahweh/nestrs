@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-13
+
+### Added
+
+- Full documentation surface expansion across all sidebar entries with practical examples.
+- Next.js docs experience upgrades: unified shadcn-based UI primitives, improved theming, and polished navigation/search interactions.
+
 ## [0.1.3] - 2026-04-11
 
 ### Added

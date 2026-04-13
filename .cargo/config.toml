@@ -1,0 +1,5 @@
+# Run the nestrs CLI from the workspace without installing globally, e.g.:
+#   cargo nestrs doctor
+#   cargo nestrs generate resource users --transport rest
+[alias]
+nestrs = "run -p nestrs-scaffold --bin nestrs --"

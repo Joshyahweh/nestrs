@@ -1,3 +1,4 @@
+mod doctor;
 mod resource_templates;
 
 use std::env;
@@ -44,16 +45,21 @@ fn run() -> Result<(), String> {
     match args[0].as_str() {
         "g" | "generate" => generate(&args[1..]),
         "new" => create_new_project(&args[1..]),
+        "doctor" => doctor::run(),
         "--help" | "-h" | "help" => print_help(),
         other => Err(format!("unknown command `{other}`")),
     }
 }
 
 fn print_help() -> Result<(), String> {
-    println!("nestrs CLI");
+    println!("nestrs CLI (crate: nestrs-scaffold)");
+    println!();
+    println!("Codegen and project skeletons for https://crates.io/crates/nestrs");
+    println!("Not a Nest CLI clone: no workspace wizard, library packages, or npm-style scripts — use Cargo workspaces, `cargo new --lib`, and cargo-make/just/shell.");
     println!();
     println!("Usage:");
     println!("  nestrs new <name> [--no-git] [--strict] [--package-manager cargo]");
+    println!("  nestrs doctor   (toolchain + nestrs feature hints for the current crate)");
     println!("  nestrs g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs g <res|s|co|mo|dto|gu|pi|fi|in|st|r|ga|ms|tr> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs g resource <name> [--transport rest|graphql|ws|grpc|microservice] [--style nest|rust] [--path <dir>] [--no-interactive] [--dry-run] [--force] [--quiet]");
@@ -111,7 +117,7 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
         ""
     };
     let main_rs = format!(
-        "use nestrs::prelude::*;\n\n{strict_attr}#[dto]\npub struct PingDto {{\n    #[IsString]\n    pub message: String,\n}}\n\n#[controller(prefix = \"/\")]\npub struct AppController;\n\nimpl AppController {{\n    #[get(\"/\")]\n    pub async fn root() -> &'static str {{\n        \"Hello from nestrs\"\n    }}\n}}\n\n#[derive(Default)]\n#[injectable]\npub struct AppService;\n\nimpl_routes!(AppController, state AppService => [\n    GET \"/\" with () => AppController::root,\n]);\n\n#[module(\n    controllers = [AppController],\n    providers = [AppService],\n)]\npub struct AppModule;\n\n#[tokio::main]\nasync fn main() {{\n    let port = std::env::var(\"PORT\")\n        .ok()\n        .and_then(|v| v.parse::<u16>().ok())\n        .unwrap_or(3000);\n\n    NestFactory::create::<AppModule>()\n        .set_global_prefix(\"api\")\n        .use_request_id()\n        .use_request_tracing(RequestTracingOptions::builder().skip_paths([\"/metrics\"]))\n        .enable_metrics(\"/metrics\")\n        .enable_health_check(\"/health\")\n        .enable_production_errors_from_env()\n        .listen_graceful(port)\n        .await;\n}}\n"
+        "use nestrs::prelude::*;\n\n{strict_attr}#[dto]\npub struct PingDto {{\n    #[IsString]\n    pub message: String,\n}}\n\n#[controller(prefix = \"/\")]\npub struct AppController;\n\nimpl AppController {{\n    #[get(\"/\")]\n    pub async fn root() -> &'static str {{\n        \"Hello from nestrs\"\n    }}\n}}\n\n#[derive(Default)]\n#[injectable]\npub struct AppService;\n\nimpl_routes!(AppController, state AppService => [\n    GET \"/\" with () => AppController::root,\n]);\n\n#[module(\n    controllers = [AppController],\n    providers = [AppService],\n)]\npub struct AppModule;\n\n#[tokio::main]\nasync fn main() {{\n    let port = std::env::var(\"PORT\")\n        .ok()\n        .and_then(|v| v.parse::<u16>().ok())\n        .unwrap_or(3000);\n\n    NestFactory::create::<AppModule>()\n        .set_global_prefix(\"api\")\n        .use_request_id()\n        .use_request_tracing(RequestTracingOptions::builder().skip_paths([\"/metrics\"]))\n        .enable_metrics(\"/metrics\")\n        .enable_health_check(\"/health\")\n        // OpenAPI + Swagger UI (add `features = [\"openapi\"]` on `nestrs` in Cargo.toml):\n        // .enable_openapi()\n        .enable_production_errors_from_env()\n        .listen_graceful(port)\n        .await;\n}}\n"
     );
     fs::write(root.join("src/main.rs"), main_rs).map_err(|e| e.to_string())?;
 

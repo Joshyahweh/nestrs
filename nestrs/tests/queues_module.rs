@@ -13,7 +13,7 @@ struct EmailProcessor;
 #[async_trait]
 impl QueueHandler for EmailProcessor {
     async fn process(&self, job: QueueJob) -> Result<(), QueueError> {
-        assert_eq!(job.queue, "EMAIL");
+        assert_eq!(job.queue.as_str(), "EMAIL");
         assert_eq!(job.name, "send");
         assert_eq!(job.payload["to"], "a@b.com");
         PROCESSED.fetch_add(1, Ordering::Relaxed);

@@ -12,6 +12,9 @@ description = "CLI generator and scaffolding tooling for nestrs."
 keywords = ["cli", "scaffold", "nest", "generator", "axum"]
 categories = ["command-line-utilities", "development-tools"]
 
+[dependencies]
+serde_json = "1"
+
 [[bin]]
 name = "nestrs"
 path = "src/main.rs"

@@ -94,6 +94,10 @@ fn generate_resource_rest_nest_style() {
     let controller =
         fs::read_to_string(feature.join("learner_stats.controller.rs")).expect("read controller");
     assert!(
+        controller.contains("#[openapi("),
+        "expected #[openapi] on generated REST handlers"
+    );
+    assert!(
         controller.contains("#[post(\"/\")]") && controller.contains("#[put(\"/:id\")]"),
         "expected full REST CRUD route handlers in generated controller"
     );
@@ -451,6 +455,11 @@ fn new_project_scaffolds_files() {
     assert_exists(&project_dir.join("src/main.rs"));
     assert_exists(&project_dir.join(".env.example"));
     assert_exists(&project_dir.join(".gitignore"));
+    let main_rs = fs::read_to_string(project_dir.join("src/main.rs")).expect("read main");
+    assert!(
+        main_rs.contains(".enable_openapi()"),
+        "new project template should document optional OpenAPI (commented .enable_openapi())"
+    );
 }
 
 #[test]

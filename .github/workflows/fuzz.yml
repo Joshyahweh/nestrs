@@ -1,0 +1,33 @@
+name: Fuzz
+
+# libFuzzer smoke runs on microservice wire JSON, auth header parsing, and URI/JSON boundaries.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Fuzz wire JSON (nestrs-microservices)
+        run: |
+          cd nestrs-microservices/fuzz
+          cargo fuzz run wire_json -- -max_total_time=90 -timeout=2
+
+      - name: Fuzz authorization header + URI/JSON (nestrs)
+        run: |
+          cd nestrs/fuzz
+          cargo fuzz run authorization_bearer -- -max_total_time=60 -timeout=2
+          cargo fuzz run uri_path_json -- -max_total_time=60 -timeout=2

@@ -35,3 +35,19 @@ pnpm-debug.log*
 nestrs-plan*.md
 HARDENING_STATUS.md
 PHASE5_OPTIONAL_CLOSEOUT.md
+*STATUS*.md
+*status*.md
+*ROADMAP*.md
+*roadmap*.md
+
+# Node / Next.js artifacts
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+website/.next/
+website/node_modules/
+
+# cargo-fuzz
+**/fuzz/artifacts/
+**/fuzz/corpus/

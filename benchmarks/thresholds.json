@@ -4,5 +4,11 @@
   },
   "router_get_v1_bench_work_middleware_stack": {
     "max_point_estimate_ns": 300000
+  },
+  "provider_registry_get_cached_singleton": {
+    "max_point_estimate_ns": 50000
+  },
+  "router_post_v1_bench_signup_validated_json": {
+    "max_point_estimate_ns": 1000000
   }
 }

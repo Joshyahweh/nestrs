@@ -8,5 +8,15 @@
     "max_regression_percent": 3.0,
     "baseline_window": 3,
     "min_baseline_runs": 2
+  },
+  "provider_registry_get_cached_singleton": {
+    "max_regression_percent": 5.0,
+    "baseline_window": 3,
+    "min_baseline_runs": 2
+  },
+  "router_post_v1_bench_signup_validated_json": {
+    "max_regression_percent": 5.0,
+    "baseline_window": 3,
+    "min_baseline_runs": 2
   }
 }

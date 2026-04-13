@@ -20,5 +20,11 @@ run_bench router_hot_path
 echo "[bench-ci] running router_middleware_stack"
 run_bench router_middleware_stack
 
+echo "[bench-ci] running di_resolution"
+run_bench di_resolution
+
+echo "[bench-ci] running json_validation_hot_path"
+run_bench json_validation_hot_path
+
 echo "[bench-ci] checking thresholds"
 python3 scripts/load/check_benchmark_thresholds.py

@@ -8,7 +8,7 @@ This guide keeps contributions consistent, reviewable, and safe for production h
 
 ### Prerequisites
 
-- Rust stable toolchain
+- Rust toolchain `1.88+` (MSRV is `1.88`, edition is `2021`; CI also runs stable/beta)
 - Python 3 (for benchmark/report scripts)
 - Optional: `k6` and `wrk` for load testing
 
@@ -41,6 +41,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
 
+`--all-features` matches CI and enables **`test-hooks`** on `nestrs` (global registry clears for integration tests). See **`STABILITY.md`** for semver, public vs `#[doc(hidden)]` API, and when to use `test-hooks`.
+
 For performance-related changes, also run:
 
 ```bash
@@ -61,10 +63,12 @@ python3 scripts/load/check_benchmark_relative_regression.py
 Update relevant docs when changing behavior:
 
 - `README.md` for onboarding and quick start changes
+- `STABILITY.md` for semver, breaking-change policy, and test-only features
 - `PRODUCTION_RUNBOOK.md` for operational guidance
 - `SECURITY.md` for security controls/assumptions
 - `MICROSERVICES.md` for transport/event behavior
 - `benchmarks/BASELINE.md` for benchmarking workflow changes
+- `docs/src/adrs.md` for architecture decision records (Axum-only runtime, global registries, macro expansion strategy)
 
 ## Performance and benchmark contributions
 

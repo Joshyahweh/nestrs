@@ -1,6 +1,8 @@
+use async_trait::async_trait;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use nestrs::core::DatabasePing;
 use nestrs::prelude::*;
 
 #[cfg(feature = "sqlx")]
@@ -157,6 +159,20 @@ impl PrismaService {
 
     pub fn mapping_guidance(&self) -> &'static str {
         "Prefer `From<ModelData>` / `TryFrom<ModelData>` impls for response DTOs; avoid returning generated Prisma model types directly from controllers."
+    }
+}
+
+#[async_trait]
+impl DatabasePing for PrismaService {
+    async fn ping_database(&self) -> Result<(), String> {
+        #[cfg(feature = "sqlx")]
+        {
+            self.ping().await
+        }
+        #[cfg(not(feature = "sqlx"))]
+        {
+            Ok(())
+        }
     }
 }
 

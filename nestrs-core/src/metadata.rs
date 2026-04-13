@@ -24,4 +24,13 @@ impl MetadataRegistry {
         let guard = store().read().expect("metadata lock poisoned");
         guard.get(handler).and_then(|m| m.get(key)).cloned()
     }
+
+    /// Removes all handler metadata entries in this process.
+    ///
+    /// **Available only with the `test-hooks` feature.** For tests; see `STABILITY.md` in the repo root.
+    #[cfg(feature = "test-hooks")]
+    pub fn clear_for_tests() {
+        let mut guard = store().write().expect("metadata lock poisoned");
+        guard.clear();
+    }
 }

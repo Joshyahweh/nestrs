@@ -1,3 +1,13 @@
+//! gRPC transport using **tonic** with JSON payloads. Request/response bodies use the same
+//! [`crate::wire`] shapes as Redis/Kafka (serialized to bytes inside protobuf fields).
+//!
+//! ## Ergonomics
+//!
+//! - **Client:** [`GrpcTransportOptions::new`] + [`GrpcTransportOptions::with_request_timeout`].
+//! - **Server:** [`GrpcMicroserviceOptions::bind`] / [`GrpcMicroserviceOptions::new`] with
+//!   [`NestFactory::create_microservice_grpc`](https://docs.rs/nestrs/latest/nestrs/struct.NestFactory.html#method.create_microservice_grpc)
+//!   on the umbrella crate (feature **`microservices-grpc`**).
+
 use crate::{MicroserviceHandler, Transport, TransportError};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -22,6 +32,12 @@ impl GrpcTransportOptions {
             endpoint: endpoint.into(),
             request_timeout: std::time::Duration::from_secs(5),
         }
+    }
+
+    /// Overrides the default **5s** timeout used for `send` / `emit` RPCs.
+    pub fn with_request_timeout(mut self, request_timeout: std::time::Duration) -> Self {
+        self.request_timeout = request_timeout;
+        self
     }
 }
 
@@ -132,6 +148,11 @@ impl GrpcMicroserviceOptions {
     pub fn new(addr: SocketAddr) -> Self {
         Self { addr }
     }
+
+    /// Binds the gRPC microservice server; same as [`Self::new`], useful in fluent call chains.
+    pub fn bind(addr: SocketAddr) -> Self {
+        Self { addr }
+    }
 }
 
 pub struct GrpcMicroserviceServer {
@@ -185,7 +206,7 @@ impl proto::microservice_server::Microservice for ServiceImpl {
         let payload: Value = serde_json::from_slice(&req.payload_json)
             .map_err(|_| tonic::Status::invalid_argument("invalid json payload"))?;
 
-        let res = dispatch_send(&self.handlers, &req.pattern, payload).await;
+        let res = crate::wire::dispatch_send(&self.handlers[..], &req.pattern, payload).await;
         let out = match res {
             Ok(payload) => proto::SendResponse {
                 ok: true,
@@ -218,7 +239,7 @@ impl proto::microservice_server::Microservice for ServiceImpl {
         let payload: Value = serde_json::from_slice(&req.payload_json)
             .map_err(|_| tonic::Status::invalid_argument("invalid json payload"))?;
 
-        dispatch_emit(&self.handlers, &req.pattern, payload).await;
+        crate::wire::dispatch_emit(&self.handlers[..], &req.pattern, payload).await;
 
         Ok(tonic::Response::new(proto::EmitResponse {
             ok: true,
@@ -226,27 +247,6 @@ impl proto::microservice_server::Microservice for ServiceImpl {
             error_details_json: Vec::new(),
             has_error_details: false,
         }))
-    }
-}
-
-async fn dispatch_send(
-    handlers: &[Arc<dyn MicroserviceHandler>],
-    pattern: &str,
-    payload: Value,
-) -> Result<Value, TransportError> {
-    for h in handlers {
-        if let Some(res) = h.handle_message(pattern, payload.clone()).await {
-            return res;
-        }
-    }
-    Err(TransportError::new(format!(
-        "no microservice handler for pattern `{pattern}`"
-    )))
-}
-
-async fn dispatch_emit(handlers: &[Arc<dyn MicroserviceHandler>], pattern: &str, payload: Value) {
-    for h in handlers {
-        let _ = h.handle_event(pattern, payload.clone()).await;
     }
 }
 

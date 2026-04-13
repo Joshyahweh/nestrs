@@ -6,8 +6,8 @@ Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://crates.
 
 ```toml
 [dependencies]
-nestrs-prisma = { version = "0.1.3", features = ["sqlx"] }
-nestrs = "0.1.3"
+nestrs-prisma = { version = "0.2.0", features = ["sqlx"] }
+nestrs = "0.2.0"
 ```
 
 ## 1. Write models in Prisma

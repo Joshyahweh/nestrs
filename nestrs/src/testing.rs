@@ -1,4 +1,4 @@
-use crate::core::{ModuleGraph, ProviderRegistry};
+use crate::core::{ModuleGraph, ModuleRef, ProviderRegistry};
 use axum::body::Body;
 use axum::http::{HeaderMap, Method, Request, Uri};
 use axum::response::Response;
@@ -26,6 +26,10 @@ impl TestingModule {
         T: Send + Sync + 'static,
     {
         self.registry.get::<T>()
+    }
+
+    pub fn module_ref(&self) -> ModuleRef {
+        ModuleRef::new(Arc::clone(&self.registry))
     }
 
     pub fn http_client(&self) -> TestClient {
@@ -86,39 +90,7 @@ where
         let router = M::register_controllers(axum::Router::new(), &registry);
 
         let registry = Arc::new(registry);
-        let mut app = crate::NestApplication {
-            registry: registry.clone(),
-            router,
-            uri_version: None,
-            api_versioning: None,
-            global_prefix: None,
-            static_mounts: Vec::new(),
-            cors_options: None,
-            security_headers: None,
-            rate_limit_options: None,
-            request_timeout: None,
-            concurrency_limit: None,
-            load_shed: false,
-            body_limit_bytes: None,
-            production_errors: false,
-            request_id: false,
-            request_context: false,
-            request_scope: false,
-            i18n: false,
-            liveness_path: None,
-            readiness: None,
-            metrics_path: None,
-            #[cfg(feature = "openapi")]
-            openapi: None,
-            request_tracing: None,
-            global_layers: Vec::new(),
-            exception_filter: None,
-            default_404_fallback: false,
-            compression: false,
-            request_decompression: false,
-            listen_ip: None,
-            path_normalization: None,
-        };
+        let mut app = crate::NestApplication::from_parts(registry.clone(), router);
 
         if let Some(cfg) = self.configure_http {
             app = cfg(app);

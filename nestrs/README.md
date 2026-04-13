@@ -8,11 +8,11 @@ NestJS-style **modules, controllers, dependency injection, and HTTP routes** on 
 
 ```toml
 [dependencies]
-nestrs = "0.1.3"
+nestrs = "0.2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-Optional features (enable in `Cargo.toml`): `ws`, `graphql`, `openapi`, `microservices`, `microservices-nats`, `microservices-redis`, `microservices-kafka`, `microservices-mqtt`, `microservices-grpc`, `cache-redis`, `schedule`, `queues`, `otel`.
+Optional features (enable in `Cargo.toml`): `ws`, `graphql`, `openapi`, `microservices`, `microservices-nats`, `microservices-redis`, `microservices-kafka`, `microservices-mqtt`, `microservices-rabbitmq`, `microservices-grpc`, `cache-redis`, `schedule`, `queues`, `cookies`, `session`, `csrf` (requires `cookies`), `otel`, and others — see `Cargo.toml`.
 
 ## Minimal app
 
@@ -58,7 +58,7 @@ async fn main() {
 | [`nestrs-ws`](https://crates.io/crates/nestrs-ws) | WebSocket gateway helpers |
 | [`nestrs-graphql`](https://crates.io/crates/nestrs-graphql) | async-graphql router |
 | [`nestrs-openapi`](https://crates.io/crates/nestrs-openapi) | OpenAPI + Swagger UI |
-| [`nestrs-microservices`](https://crates.io/crates/nestrs-microservices) | Transports (NATS, Redis, Kafka, …) |
+| [`nestrs-microservices`](https://crates.io/crates/nestrs-microservices) | Transports (NATS, Redis, Kafka, MQTT, RabbitMQ, …) |
 | [`nestrs-prisma`](https://crates.io/crates/nestrs-prisma) | Prisma-oriented DB module |
 | [`nestrs-scaffold`](https://crates.io/crates/nestrs-scaffold) | CLI (`cargo install nestrs-scaffold`, binary `nestrs`) |
 

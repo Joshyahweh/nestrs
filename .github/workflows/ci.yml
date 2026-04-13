@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["${{ env.MSRV }}", stable, beta]
+        toolchain: ["1.88.0", stable, beta]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -40,6 +40,25 @@ struct UserCreatedEvent {
 }
 
 #[derive(Default)]
+struct RejectFortyTwoGuard;
+
+#[nestrs::async_trait]
+impl nestrs::microservices::MicroCanActivate for RejectFortyTwoGuard {
+    async fn can_activate_micro(
+        &self,
+        _pattern: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), nestrs::microservices::TransportError> {
+        if payload.get("id").and_then(|v| v.as_i64()) == Some(42) {
+            return Err(nestrs::microservices::TransportError::new(
+                "blocked-by-guard",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
 #[injectable]
 struct UserHandler;
 
@@ -61,10 +80,25 @@ impl UserHandler {
     }
 }
 
+#[derive(Default)]
+#[injectable]
+struct GuardedHandler;
+
+#[micro_routes]
+impl GuardedHandler {
+    #[message_pattern("guard.probe")]
+    #[use_micro_guards(RejectFortyTwoGuard)]
+    async fn probe(&self, req: GetUserReq) -> UserRes {
+        UserRes {
+            name: format!("p-{}", req.id),
+        }
+    }
+}
+
 #[module(
     controllers = [HttpController],
-    providers = [AppState, UserHandler],
-    microservices = [UserHandler]
+    providers = [AppState, UserHandler, GuardedHandler],
+    microservices = [UserHandler, GuardedHandler]
 )]
 struct AppModule;
 
@@ -122,6 +156,18 @@ async fn tcp_microservice_send_round_trips_and_http_exception_serializes_details
         .await
         .expect("send ok");
     assert_eq!(res.name, "user-7");
+
+    // #[use_micro_guards] on #[message_pattern]
+    let res: UserRes = proxy
+        .send("guard.probe", &GetUserReq { id: 2 })
+        .await
+        .expect("guard.probe ok");
+    assert_eq!(res.name, "p-2");
+    let err = proxy
+        .send::<GetUserReq, UserRes>("guard.probe", &GetUserReq { id: 42 })
+        .await
+        .expect_err("guard should block");
+    assert_eq!(err.message, "blocked-by-guard");
 
     // Microservice send error: HttpException ⇒ TransportError details.
     let err = proxy

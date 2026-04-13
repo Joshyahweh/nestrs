@@ -7,14 +7,16 @@ use axum::body::{to_bytes, Body};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 pub use nestrs_macros::{
     all, controller, cron, delete, dto, event_pattern, event_routes, get, head, http_code,
-    injectable, interval, message_pattern, micro_routes, module, on_event, options, patch, post,
-    put, queue_processor, raw_body, redirect, response_header, roles, routes, schedule_routes,
-    serialize, set_metadata, sse, subscribe_message, use_filters, use_guards, use_interceptors,
-    use_pipes, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
+    injectable, interval, message_pattern, micro_routes, module, on_event, openapi, options, patch,
+    post, put, queue_processor, raw_body, redirect, response_header, roles, routes,
+    schedule_routes, serialize, set_metadata, sse, subscribe_message, use_filters, use_guards,
+    use_interceptors, use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes,
+    use_ws_guards, use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes,
+    NestConfig, NestDto,
 };
 #[doc(hidden)]
 pub use serde_json;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use validator::Validate;
 
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
@@ -47,6 +49,11 @@ pub mod core {
     pub use nestrs_core::*;
 }
 
+pub use crate::core::{
+    AxumHttpEngine, DiscoveryService, ExecutionContext, HostType, HttpExecutionArguments,
+    HttpServerEngine, ModuleRef,
+};
+
 #[cfg(feature = "microservices")]
 pub use nestrs_events::EventBus;
 #[cfg(feature = "graphql")]
@@ -62,17 +69,28 @@ pub use microservice_health::NatsBrokerHealth;
 #[cfg(all(feature = "microservices", feature = "microservices-redis"))]
 pub use microservice_health::RedisBrokerHealth;
 #[cfg(feature = "openapi")]
-pub use nestrs_openapi as openapi;
+pub use nestrs_openapi;
 #[cfg(feature = "ws")]
 pub use nestrs_ws as ws;
 
 mod cache;
 mod client_ip;
 mod config;
+#[cfg(feature = "database-sqlx")]
+mod database_sqlx;
 mod exception_filter;
+#[cfg(feature = "files")]
+mod files;
+#[cfg(feature = "http-client")]
+mod http_client;
+mod http_execution_context;
 mod i18n;
 mod interceptor;
-pub mod multipart;
+#[cfg(feature = "mongo")]
+mod mongo;
+mod multipart;
+#[cfg(feature = "mvc")]
+mod mvc;
 #[cfg(feature = "otel")]
 pub mod otel;
 mod pipes;
@@ -84,6 +102,8 @@ mod request_context;
 mod request_scoped;
 #[cfg(feature = "schedule")]
 pub mod schedule;
+mod security;
+mod serialization;
 pub mod sse;
 mod testing;
 mod versioning;
@@ -93,9 +113,20 @@ pub use cache::RedisCacheOptions;
 pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
 pub use client_ip::{ClientIp, ClientIpMissing};
 pub use config::{load_config, ConfigError, ConfigModule};
+#[cfg(feature = "database-sqlx")]
+pub use database_sqlx::{SqlxDatabaseModule, SqlxDatabaseService};
 pub use exception_filter::ExceptionFilter;
+#[cfg(feature = "files")]
+pub use files::{stream_file_octet_stream, stream_file_or_response, stream_file_with_content_type};
+#[cfg(feature = "http-client")]
+pub use http_client::{HttpModule, HttpService};
+pub use http_execution_context::{ExecutionContextMissing, HttpExecutionContext};
 pub use i18n::{I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale};
 pub use interceptor::{Interceptor, LoggingInterceptor};
+#[cfg(feature = "mongo")]
+pub use mongo::{MongoModule, MongoService};
+#[cfg(feature = "mvc")]
+pub use mvc::{MvcModule, MvcService};
 #[cfg(feature = "otel")]
 pub use otel::{OpenTelemetryConfig, OtlpProtocol};
 pub use pipes::ParseIntPipe;
@@ -111,6 +142,13 @@ pub use request_context::{RequestContext, RequestContextMissing};
 pub use request_scoped::{RequestScoped, RequestScopedMissing};
 #[cfg(feature = "schedule")]
 pub use schedule::{ScheduleModule, ScheduleRuntime};
+#[cfg(feature = "csrf")]
+pub use security::CsrfProtectionConfig;
+pub use security::{
+    parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
+    OptionalBearerToken, XRoleMetadataGuard,
+};
+pub use serialization::strip_null_json_value;
 pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
 pub use versioning::{
     host_restriction_middleware, ApiVersioningPolicy, NestApiVersion, VersioningType,
@@ -131,9 +169,11 @@ macro_rules! interceptor_layer {
 
 pub mod prelude {
     pub use crate::core::{
-        AuthError, AuthStrategy, CanActivate, ConfigurableModuleBuilder, Controller, DynamicModule,
-        DynamicModuleBuilder, GuardError, Injectable, MetadataRegistry, Module, ModuleOptions,
-        PipeTransform, ProviderRegistry, ProviderScope,
+        AuthError, AuthStrategy, AxumHttpEngine, CanActivate, ConfigurableModuleBuilder,
+        Controller, DatabasePing, DiscoveryService, DynamicModule, DynamicModuleBuilder,
+        ExecutionContext, GuardError, HostType, HttpExecutionArguments, HttpServerEngine,
+        Injectable, MetadataRegistry, Module, ModuleOptions, ModuleRef, PipeTransform,
+        ProviderRegistry, ProviderScope,
     };
     #[cfg(feature = "graphql")]
     pub use crate::graphql;
@@ -148,25 +188,32 @@ pub mod prelude {
     #[cfg(feature = "microservices")]
     pub use crate::microservices::{
         ClientConfig, ClientProxy, ClientsModule, ClientsService, EventBus, KafkaTransport,
-        MqttTransport, Transport, TransportError,
+        MicroCanActivate, MicroIncomingInterceptor, MicroPipeTransform, MqttTransport,
+        RabbitMqTransport, Transport, TransportError,
     };
     #[cfg(all(feature = "microservices", feature = "microservices-mqtt"))]
     pub use crate::microservices::{
         MqttMicroserviceOptions, MqttMicroserviceServer, MqttSocketOptions, MqttTlsMode,
         MqttTransportOptions,
     };
-    #[cfg(feature = "openapi")]
-    pub use crate::openapi;
+    #[cfg(all(feature = "microservices", feature = "microservices-rabbitmq"))]
+    pub use crate::microservices::{
+        RabbitMqMicroserviceOptions, RabbitMqMicroserviceServer, RabbitMqTransportOptions,
+    };
+    pub use crate::multipart::{Field, MultipartError};
     #[cfg(feature = "otel")]
     pub use crate::otel;
     #[cfg(feature = "queues")]
     pub use crate::queues;
+    pub use crate::strip_null_json_value;
     #[cfg(feature = "otel")]
     pub use crate::try_init_tracing_opentelemetry;
     #[cfg(feature = "ws")]
     pub use crate::ws;
     #[cfg(feature = "microservices")]
     pub use crate::BrokerHealthStub;
+    #[cfg(feature = "csrf")]
+    pub use crate::CsrfProtectionConfig;
     #[cfg(all(feature = "microservices", feature = "microservices-nats"))]
     pub use crate::NatsBrokerHealth;
     #[cfg(all(feature = "microservices", feature = "microservices-redis"))]
@@ -174,36 +221,56 @@ pub mod prelude {
     pub use crate::{
         all, async_trait, controller, cron, delete, dto, event_pattern, event_routes, get, head,
         http_code, impl_routes, injectable, interval, load_config, message_pattern, micro_routes,
-        module, nestrs_default_not_found_handler, on_event, options, patch, post, put,
+        module, nestrs_default_not_found_handler, on_event, openapi, options, patch, post, put,
         queue_processor, raw_body, redirect, response_header, roles, routes, runtime_is_production,
         schedule_routes, serialize, set_metadata, sse, subscribe_message, try_init_tracing,
-        use_filters, use_guards, use_interceptors, use_pipes, ver, version, ws_gateway, ws_routes,
-        ApiVersioningPolicy, BadGatewayException, BadRequestException, CacheError, CacheModule,
-        CacheOptions, CacheService, ClientIp, ClientIpMissing, ConfigError, ConfigModule,
-        ConflictException, CorsOptions, ExceptionFilter, ForbiddenException,
-        GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus, HttpException, I18n,
-        I18nMissing, I18nModule, I18nOptions, I18nService, Interceptor,
-        InternalServerErrorException, Locale, LoggingInterceptor, MethodNotAllowedException,
-        NestApiVersion, NestApplication, NestConfig, NestDto, NestFactory, NotAcceptableException,
-        NotFoundException, NotImplementedException, ParseIntPipe, PathNormalization,
-        PayloadTooLargeException, PaymentRequiredException, ProblemDetails, RateLimitOptions,
-        RawBody, ReadinessContext, RequestContext, RequestContextMissing, RequestScoped,
-        RequestScopedMissing, RequestTimeoutException, RequestTracingOptions, SecurityHeaders,
-        ServiceUnavailableException, TestClient, TestRequest, TestingModule, TestingModuleBuilder,
-        TooManyRequestsException, TracingConfig, TracingFormat, UnauthorizedException,
-        UnprocessableEntityException, UnsupportedMediaTypeException, ValidatedBody, ValidatedPath,
-        ValidatedQuery, ValidationPipe, VersioningType,
+        use_filters, use_guards, use_interceptors, use_micro_guards, use_micro_interceptors,
+        use_micro_pipes, use_pipes, use_ws_guards, use_ws_interceptors, use_ws_pipes, ver, version,
+        ws_gateway, ws_routes, ApiVersioningPolicy, BadGatewayException, BadRequestException,
+        CacheError, CacheModule, CacheOptions, CacheService, ClientIp, ClientIpMissing,
+        ConfigError, ConfigModule, ConflictException, CorsOptions, ExceptionFilter,
+        ExecutionContextMissing, ForbiddenException, GatewayTimeoutException, GoneException,
+        HealthIndicator, HealthStatus, HttpException, HttpExecutionContext, I18n, I18nMissing,
+        I18nModule, I18nOptions, I18nService, Interceptor, InternalServerErrorException, Locale,
+        LoggingInterceptor, MethodNotAllowedException, NestApiVersion, NestApplication, NestConfig,
+        NestDto, NestFactory, NotAcceptableException, NotFoundException, NotImplementedException,
+        ParseIntPipe, PathNormalization, PayloadTooLargeException, PaymentRequiredException,
+        ProblemDetails, RateLimitOptions, RawBody, ReadinessContext, RequestContext,
+        RequestContextMissing, RequestScoped, RequestScopedMissing, RequestTimeoutException,
+        RequestTracingOptions, SecurityHeaders, ServiceUnavailableException, TestClient,
+        TestRequest, TestingModule, TestingModuleBuilder, TooManyRequestsException, TracingConfig,
+        TracingFormat, UnauthorizedException, UnprocessableEntityException,
+        UnsupportedMediaTypeException, ValidatedBody, ValidatedPath, ValidatedQuery,
+        ValidationPipe, VersioningType,
     };
+    pub use crate::{
+        parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
+        OptionalBearerToken, XRoleMetadataGuard,
+    };
+    #[cfg(feature = "files")]
+    pub use crate::{
+        stream_file_octet_stream, stream_file_or_response, stream_file_with_content_type,
+    };
+    #[cfg(feature = "http-client")]
+    pub use crate::{HttpModule, HttpService};
     #[cfg(feature = "queues")]
     pub use crate::{
         JobOptions, QueueConfig, QueueError, QueueHandle, QueueHandler, QueueJob, QueuesModule,
         QueuesRuntime, QueuesService,
     };
+    #[cfg(feature = "mongo")]
+    pub use crate::{MongoModule, MongoService};
+    #[cfg(feature = "mvc")]
+    pub use crate::{MvcModule, MvcService};
     #[cfg(feature = "otel")]
     pub use crate::{OpenTelemetryConfig, OtlpProtocol};
     #[cfg(feature = "schedule")]
     pub use crate::{ScheduleModule, ScheduleRuntime};
+    #[cfg(feature = "database-sqlx")]
+    pub use crate::{SqlxDatabaseModule, SqlxDatabaseService};
     pub use axum::{extract::Multipart, extract::State, response::IntoResponse, Json};
+    #[cfg(feature = "openapi")]
+    pub use nestrs_openapi;
 }
 
 /// Returns `true` when the process environment indicates a **production** deployment.
@@ -501,6 +568,20 @@ pub struct SecurityHeaders {
     permissions_policy: Option<String>,
     content_security_policy: Option<String>,
     hsts: Option<String>,
+    /// `Cross-Origin-Opener-Policy` (Helmet-style hardening; opt-in).
+    cross_origin_opener_policy: Option<String>,
+    /// `Cross-Origin-Resource-Policy`.
+    cross_origin_resource_policy: Option<String>,
+    /// `Cross-Origin-Embedder-Policy` (strong isolation; can break third-party embeds).
+    cross_origin_embedder_policy: Option<String>,
+    /// `Origin-Agent-Cluster`.
+    origin_agent_cluster: Option<String>,
+    /// `X-DNS-Prefetch-Control`.
+    x_dns_prefetch_control: Option<String>,
+    /// `X-Download-Options` (legacy IE; harmless elsewhere).
+    x_download_options: Option<String>,
+    /// `X-Permitted-Cross-Domain-Policies`.
+    x_permitted_cross_domain_policies: Option<String>,
 }
 
 impl Default for SecurityHeaders {
@@ -513,11 +594,31 @@ impl Default for SecurityHeaders {
             permissions_policy: Some("geolocation=(), microphone=(), camera=()".to_string()),
             content_security_policy: None,
             hsts: None,
+            cross_origin_opener_policy: None,
+            cross_origin_resource_policy: None,
+            cross_origin_embedder_policy: None,
+            origin_agent_cluster: None,
+            x_dns_prefetch_control: None,
+            x_download_options: None,
+            x_permitted_cross_domain_policies: None,
         }
     }
 }
 
 impl SecurityHeaders {
+    /// Additional headers commonly enabled by **[`helmet`](https://helmetjs.github.io/)** beyond [`Self::default()`].
+    /// Does **not** set CSP or HSTS — configure those explicitly for your deployment.
+    pub fn helmet_like() -> Self {
+        Self {
+            cross_origin_opener_policy: Some("same-origin".to_string()),
+            cross_origin_resource_policy: Some("same-origin".to_string()),
+            x_dns_prefetch_control: Some("off".to_string()),
+            x_download_options: Some("noopen".to_string()),
+            x_permitted_cross_domain_policies: Some("none".to_string()),
+            ..Self::default()
+        }
+    }
+
     pub fn content_security_policy(mut self, value: impl Into<String>) -> Self {
         self.content_security_policy = Some(value.into());
         self
@@ -525,6 +626,41 @@ impl SecurityHeaders {
 
     pub fn hsts(mut self, value: impl Into<String>) -> Self {
         self.hsts = Some(value.into());
+        self
+    }
+
+    pub fn cross_origin_opener_policy(mut self, value: impl Into<String>) -> Self {
+        self.cross_origin_opener_policy = Some(value.into());
+        self
+    }
+
+    pub fn cross_origin_resource_policy(mut self, value: impl Into<String>) -> Self {
+        self.cross_origin_resource_policy = Some(value.into());
+        self
+    }
+
+    pub fn cross_origin_embedder_policy(mut self, value: impl Into<String>) -> Self {
+        self.cross_origin_embedder_policy = Some(value.into());
+        self
+    }
+
+    pub fn origin_agent_cluster(mut self, value: impl Into<String>) -> Self {
+        self.origin_agent_cluster = Some(value.into());
+        self
+    }
+
+    pub fn x_dns_prefetch_control(mut self, value: impl Into<String>) -> Self {
+        self.x_dns_prefetch_control = Some(value.into());
+        self
+    }
+
+    pub fn x_download_options(mut self, value: impl Into<String>) -> Self {
+        self.x_download_options = Some(value.into());
+        self
+    }
+
+    pub fn x_permitted_cross_domain_policies(mut self, value: impl Into<String>) -> Self {
+        self.x_permitted_cross_domain_policies = Some(value.into());
         self
     }
 }
@@ -669,6 +805,8 @@ pub struct NestApplication {
     request_id: bool,
     /// Injects [`RequestContext`] into each request’s extensions (see [`Self::use_request_context`]).
     request_context: bool,
+    /// Injects [`ExecutionContext`] (Nest-style `ArgumentsHost` for HTTP) when enabled.
+    execution_context: bool,
     /// Enables request-scoped providers (`ProviderScope::Request`) via task-local cache + per-request registry injection.
     request_scope: bool,
     /// Resolves locale per request and installs [`crate::Locale`] / [`crate::I18n`] extractors (see [`Self::use_i18n`]).
@@ -697,15 +835,26 @@ pub struct NestApplication {
     /// Applied in [`Self::listen`] / [`Self::listen_graceful`] only (Axum 0.7: not via [`axum::Router::layer`]).
     /// Cleared for [`Self::into_router`]; wrap the router yourself if you call [`Self::into_router`] and need normalization.
     path_normalization: Option<PathNormalization>,
+    /// Enables [`tower_cookies::CookieManagerLayer`] (feature: **`cookies`**).
+    #[cfg(feature = "cookies")]
+    cookie_manager: bool,
+    /// Enables in-memory sessions via [`tower_sessions`] (implies cookie manager; feature: **`session`**).
+    #[cfg(feature = "session")]
+    session_memory: bool,
+    /// Double-submit CSRF for unsafe methods (feature: **`csrf`**); pair with [`Self::use_cookies`].
+    #[cfg(feature = "csrf")]
+    csrf: Option<std::sync::Arc<crate::security::CsrfProtectionConfig>>,
 }
 
 type GlobalLayerFn = Box<dyn Fn(axum::Router) -> axum::Router + Send + Sync + 'static>;
 
-impl NestFactory {
-    pub fn create<M: core::Module>() -> NestApplication {
-        let (registry, router) = M::build();
-        NestApplication {
-            registry: std::sync::Arc::new(registry),
+impl NestApplication {
+    pub(crate) fn from_parts(
+        registry: std::sync::Arc<crate::core::ProviderRegistry>,
+        router: axum::Router,
+    ) -> Self {
+        Self {
+            registry,
             router,
             uri_version: None,
             api_versioning: None,
@@ -721,6 +870,7 @@ impl NestFactory {
             production_errors: false,
             request_id: false,
             request_context: false,
+            execution_context: false,
             request_scope: false,
             i18n: false,
             liveness_path: None,
@@ -736,7 +886,20 @@ impl NestFactory {
             request_decompression: false,
             listen_ip: None,
             path_normalization: None,
+            #[cfg(feature = "cookies")]
+            cookie_manager: false,
+            #[cfg(feature = "session")]
+            session_memory: false,
+            #[cfg(feature = "csrf")]
+            csrf: None,
         }
+    }
+}
+
+impl NestFactory {
+    pub fn create<M: core::Module>() -> NestApplication {
+        let (registry, router) = M::build();
+        NestApplication::from_parts(std::sync::Arc::new(registry), router)
     }
 
     /// Creates an app from a root static module plus runtime-selected dynamic modules.
@@ -753,39 +916,7 @@ impl NestFactory {
             registry.absorb_exported(dm.registry, &dm.exports);
             router = router.merge(dm.router);
         }
-        NestApplication {
-            registry: std::sync::Arc::new(registry),
-            router,
-            uri_version: None,
-            api_versioning: None,
-            global_prefix: None,
-            static_mounts: Vec::new(),
-            cors_options: None,
-            security_headers: None,
-            rate_limit_options: None,
-            request_timeout: None,
-            concurrency_limit: None,
-            load_shed: false,
-            body_limit_bytes: None,
-            production_errors: false,
-            request_id: false,
-            request_context: false,
-            request_scope: false,
-            i18n: false,
-            liveness_path: None,
-            readiness: None,
-            metrics_path: None,
-            #[cfg(feature = "openapi")]
-            openapi: None,
-            request_tracing: None,
-            global_layers: Vec::new(),
-            exception_filter: None,
-            default_404_fallback: false,
-            compression: false,
-            request_decompression: false,
-            listen_ip: None,
-            path_normalization: None,
-        }
+        NestApplication::from_parts(std::sync::Arc::new(registry), router)
     }
 
     /// Creates a microservice app (feature: `microservices`) using the TCP transport adapter.
@@ -810,39 +941,7 @@ impl NestFactory {
             crate::microservices::TcpMicroserviceServer::new(options, handlers),
         );
 
-        let http = NestApplication {
-            registry: registry.clone(),
-            router,
-            uri_version: None,
-            api_versioning: None,
-            global_prefix: None,
-            static_mounts: Vec::new(),
-            cors_options: None,
-            security_headers: None,
-            rate_limit_options: None,
-            request_timeout: None,
-            concurrency_limit: None,
-            load_shed: false,
-            body_limit_bytes: None,
-            production_errors: false,
-            request_id: false,
-            request_context: false,
-            request_scope: false,
-            i18n: false,
-            liveness_path: None,
-            readiness: None,
-            metrics_path: None,
-            #[cfg(feature = "openapi")]
-            openapi: None,
-            request_tracing: None,
-            global_layers: Vec::new(),
-            exception_filter: None,
-            default_404_fallback: false,
-            compression: false,
-            request_decompression: false,
-            listen_ip: None,
-            path_normalization: None,
-        };
+        let http = NestApplication::from_parts(registry.clone(), router);
 
         MicroserviceApplication {
             registry,
@@ -872,39 +971,7 @@ impl NestFactory {
             crate::microservices::NatsMicroserviceServer::new(options, handlers),
         );
 
-        let http = NestApplication {
-            registry: registry.clone(),
-            router,
-            uri_version: None,
-            api_versioning: None,
-            global_prefix: None,
-            static_mounts: Vec::new(),
-            cors_options: None,
-            security_headers: None,
-            rate_limit_options: None,
-            request_timeout: None,
-            concurrency_limit: None,
-            load_shed: false,
-            body_limit_bytes: None,
-            production_errors: false,
-            request_id: false,
-            request_context: false,
-            request_scope: false,
-            i18n: false,
-            liveness_path: None,
-            readiness: None,
-            metrics_path: None,
-            #[cfg(feature = "openapi")]
-            openapi: None,
-            request_tracing: None,
-            global_layers: Vec::new(),
-            exception_filter: None,
-            default_404_fallback: false,
-            compression: false,
-            request_decompression: false,
-            listen_ip: None,
-            path_normalization: None,
-        };
+        let http = NestApplication::from_parts(registry.clone(), router);
 
         MicroserviceApplication {
             registry,
@@ -934,39 +1001,7 @@ impl NestFactory {
             crate::microservices::RedisMicroserviceServer::new(options, handlers),
         );
 
-        let http = NestApplication {
-            registry: registry.clone(),
-            router,
-            uri_version: None,
-            api_versioning: None,
-            global_prefix: None,
-            static_mounts: Vec::new(),
-            cors_options: None,
-            security_headers: None,
-            rate_limit_options: None,
-            request_timeout: None,
-            concurrency_limit: None,
-            load_shed: false,
-            body_limit_bytes: None,
-            production_errors: false,
-            request_id: false,
-            request_context: false,
-            request_scope: false,
-            i18n: false,
-            liveness_path: None,
-            readiness: None,
-            metrics_path: None,
-            #[cfg(feature = "openapi")]
-            openapi: None,
-            request_tracing: None,
-            global_layers: Vec::new(),
-            exception_filter: None,
-            default_404_fallback: false,
-            compression: false,
-            request_decompression: false,
-            listen_ip: None,
-            path_normalization: None,
-        };
+        let http = NestApplication::from_parts(registry.clone(), router);
 
         MicroserviceApplication {
             registry,
@@ -977,6 +1012,10 @@ impl NestFactory {
     }
 
     /// Creates a microservice app (feature: `microservices-grpc`) using the gRPC transport adapter.
+    ///
+    /// The tonic service carries **JSON** (`pattern` + `payload_json`) matching the [`crate::microservices::wire`]
+    /// module’s request/response shapes inside protobuf; use [`GrpcMicroserviceOptions::bind`](crate::microservices::GrpcMicroserviceOptions::bind)
+    /// and [`GrpcTransportOptions::with_request_timeout`](crate::microservices::GrpcTransportOptions::with_request_timeout) for clients.
     #[cfg(feature = "microservices-grpc")]
     pub fn create_microservice_grpc<M>(
         options: crate::microservices::GrpcMicroserviceOptions,
@@ -996,39 +1035,37 @@ impl NestFactory {
             crate::microservices::GrpcMicroserviceServer::new(options, handlers),
         );
 
-        let http = NestApplication {
-            registry: registry.clone(),
-            router,
-            uri_version: None,
-            api_versioning: None,
-            global_prefix: None,
-            static_mounts: Vec::new(),
-            cors_options: None,
-            security_headers: None,
-            rate_limit_options: None,
-            request_timeout: None,
-            concurrency_limit: None,
-            load_shed: false,
-            body_limit_bytes: None,
-            production_errors: false,
-            request_id: false,
-            request_context: false,
-            request_scope: false,
-            i18n: false,
-            liveness_path: None,
-            readiness: None,
-            metrics_path: None,
-            #[cfg(feature = "openapi")]
-            openapi: None,
-            request_tracing: None,
-            global_layers: Vec::new(),
-            exception_filter: None,
-            default_404_fallback: false,
-            compression: false,
-            request_decompression: false,
-            listen_ip: None,
-            path_normalization: None,
-        };
+        let http = NestApplication::from_parts(registry.clone(), router);
+
+        MicroserviceApplication {
+            registry,
+            http,
+            server,
+            http_port: None,
+        }
+    }
+
+    /// Creates a microservice app (feature: `microservices-rabbitmq`) using the RabbitMQ transport adapter.
+    #[cfg(feature = "microservices-rabbitmq")]
+    pub fn create_microservice_rabbitmq<M>(
+        options: crate::microservices::RabbitMqMicroserviceOptions,
+    ) -> MicroserviceApplication
+    where
+        M: core::Module + crate::microservices::MicroserviceModule,
+    {
+        let (registry, router) = M::build();
+        let registry = std::sync::Arc::new(registry);
+
+        let handlers = M::microservice_handlers()
+            .into_iter()
+            .map(|f| f(&registry))
+            .collect::<Vec<_>>();
+
+        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
+            crate::microservices::RabbitMqMicroserviceServer::new(options, handlers),
+        );
+
+        let http = NestApplication::from_parts(registry.clone(), router);
 
         MicroserviceApplication {
             registry,
@@ -1232,6 +1269,29 @@ impl NestApplication {
         self
     }
 
+    /// Enables signed cookie handling via [`tower_cookies`] (feature: **`cookies`**).
+    #[cfg(feature = "cookies")]
+    pub fn use_cookies(mut self) -> Self {
+        self.cookie_manager = true;
+        self
+    }
+
+    /// Enables in-memory server-side sessions (feature: **`session`**). Installs cookie + session layers.
+    #[cfg(feature = "session")]
+    pub fn use_session_memory(mut self) -> Self {
+        self.session_memory = true;
+        self
+    }
+
+    /// Enables double-submit CSRF checks on POST/PUT/PATCH/DELETE (feature: **`csrf`**).
+    ///
+    /// Requires [`Self::use_cookies`] so [`tower_cookies::Cookies`] is available to the middleware.
+    #[cfg(feature = "csrf")]
+    pub fn use_csrf_protection(mut self, config: crate::security::CsrfProtectionConfig) -> Self {
+        self.csrf = Some(std::sync::Arc::new(config));
+        self
+    }
+
     pub fn enable_uri_versioning(mut self, version: impl Into<String>) -> Self {
         self.uri_version = Some(Self::normalize_segment(version.into()));
         self
@@ -1368,6 +1428,24 @@ impl NestApplication {
         self
     }
 
+    /// Attaches an [`ExecutionContext`] snapshot per request (NestJS `ArgumentsHost` / execution-context analogue).
+    ///
+    /// Handlers read it with the [`HttpExecutionContext`] extractor (from the crate root or [`crate::prelude`]).
+    pub fn use_execution_context(mut self) -> Self {
+        self.execution_context = true;
+        self
+    }
+
+    /// NestJS [`ModuleRef`](https://docs.nestjs.com/fundamentals/module-ref) analogue for dynamic lookups
+    /// against the composed provider graph.
+    ///
+    /// Use [`ModuleRef::get`](crate::core::ModuleRef::get) for type-keyed resolution. Pair with
+    /// [`DiscoveryService`] for introspection. **Docs:** mdBook
+    /// **Fundamentals** in the repository (`docs/src/fundamentals.md`).
+    pub fn module_ref(&self) -> ModuleRef {
+        ModuleRef::new(Arc::clone(&self.registry))
+    }
+
     /// Resolves locale per request and installs [`Locale`] / [`I18n`] extractors.
     ///
     /// Requires `I18nService` to be registered (typically via `I18nModule` import).
@@ -1381,6 +1459,8 @@ impl NestApplication {
     /// This installs a middleware that:
     /// - injects the app's provider registry into request extensions
     /// - creates a task-local request-scope cache so repeated resolutions within one request share instances
+    ///
+    /// **Docs:** scopes and lifecycle are covered in mdBook **Fundamentals** (`docs/src/fundamentals.md`).
     pub fn use_request_scope(mut self) -> Self {
         self.request_scope = true;
         self
@@ -1430,8 +1510,13 @@ impl NestApplication {
     /// Enables OpenAPI JSON + Swagger UI (feature: `openapi`).
     ///
     /// Registers:
-    /// - `GET /openapi.json`
-    /// - `GET /docs`
+    /// - `GET /openapi.json` — paths from `RouteRegistry`, with inferred `summary` / `tags` per operation
+    /// - `GET /docs` — Swagger UI
+    ///
+    /// For `servers`, `components`, `security`, document-level `tags`, and optional
+    /// **`infer_route_security_from_roles`** (Swagger lock for `#[roles]` metadata), use
+    /// [`enable_openapi_with_options`](Self::enable_openapi_with_options). See mdBook **OpenAPI & HTTP**
+    /// (`docs/src/openapi-http.md`).
     #[cfg(feature = "openapi")]
     pub fn enable_openapi(mut self) -> Self {
         self.openapi = Some(nestrs_openapi::OpenApiOptions::default());
@@ -1477,6 +1562,27 @@ impl NestApplication {
         self.router = self
             .router
             .merge(crate::graphql::graphql_router(schema, path));
+        self
+    }
+
+    /// Like [`Self::enable_graphql_with_path`], with HTTP surface options (Playground on/off, etc.).
+    #[cfg(feature = "graphql")]
+    pub fn enable_graphql_with_options<Query, Mutation, Subscription>(
+        mut self,
+        schema: crate::graphql::Schema<Query, Mutation, Subscription>,
+        path: impl Into<String>,
+        options: crate::graphql::GraphQlHttpOptions,
+    ) -> Self
+    where
+        Query: crate::graphql::ObjectType + Send + Sync + 'static,
+        Mutation: crate::graphql::ObjectType + Send + Sync + 'static,
+        Subscription: crate::graphql::SubscriptionType + Send + Sync + 'static,
+    {
+        self.router = self
+            .router
+            .merge(crate::graphql::graphql_router_with_options(
+                schema, path, options,
+            ));
         self
     }
 
@@ -1559,6 +1665,7 @@ impl NestApplication {
     fn build_router(self) -> axum::Router {
         let production_errors = self.production_errors;
         let request_context = self.request_context;
+        let execution_context = self.execution_context;
         let request_scope = self.request_scope;
         let i18n = self.i18n;
         let request_id = self.request_id;
@@ -1573,6 +1680,12 @@ impl NestApplication {
         let request_decompression = self.request_decompression;
         let concurrency_limit = self.concurrency_limit;
         let load_shed = self.load_shed;
+        #[cfg(feature = "cookies")]
+        let cookie_manager = self.cookie_manager;
+        #[cfg(feature = "session")]
+        let session_memory = self.session_memory;
+        #[cfg(feature = "csrf")]
+        let csrf = self.csrf.clone();
         let registry = self.registry;
         let uri_version = self.uri_version;
         let api_versioning = self.api_versioning.clone();
@@ -1726,6 +1839,12 @@ impl NestApplication {
             ));
         }
 
+        if execution_context {
+            router = router.layer(axum::middleware::from_fn(
+                http_execution_context::install_execution_context_middleware,
+            ));
+        }
+
         if i18n {
             let svc = registry.get::<crate::I18nService>();
             router = router.layer(axum::middleware::from_fn_with_state(
@@ -1765,6 +1884,41 @@ impl NestApplication {
 
         if compression {
             router = router.layer(tower_http::compression::CompressionLayer::new());
+        }
+
+        // CSRF runs **inside** cookie parsing: register these layers before cookies so
+        // `CookieManagerLayer` stays outermost and `Cookies` is populated before the check.
+        #[cfg(feature = "csrf")]
+        if let Some(csrf_cfg) = csrf {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                csrf_cfg,
+                crate::security::csrf_double_submit_middleware,
+            ));
+        }
+
+        #[cfg(feature = "cookies")]
+        {
+            #[cfg(feature = "session")]
+            {
+                if session_memory {
+                    router = router
+                        .layer(
+                            tower_sessions::SessionManagerLayer::new(
+                                tower_sessions::MemoryStore::default(),
+                            )
+                            .with_secure(false),
+                        )
+                        .layer(tower_cookies::CookieManagerLayer::new());
+                } else if cookie_manager {
+                    router = router.layer(tower_cookies::CookieManagerLayer::new());
+                }
+            }
+            #[cfg(not(feature = "session"))]
+            {
+                if cookie_manager {
+                    router = router.layer(tower_cookies::CookieManagerLayer::new());
+                }
+            }
         }
 
         for apply in global_layers {
@@ -1853,7 +2007,8 @@ impl NestApplication {
     }
 
     /// [`Self::listen_with_shutdown`] with **Ctrl+C** on all platforms and **SIGTERM** on Unix
-    /// (containers / process managers).
+    /// (containers / process managers). Operational notes (draining, Kubernetes grace period,
+    /// backpressure helpers) are in **`PRODUCTION_RUNBOOK.md`** at the repo root.
     pub async fn listen_graceful(self, port: u16) {
         self.listen_with_shutdown(port, nestrs_shutdown_signal())
             .await;
@@ -2026,6 +2181,69 @@ impl SecurityHeaders {
                 ),
             );
         }
+        if let Some(v) = self.cross_origin_opener_policy {
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::HeaderName::from_static("cross-origin-opener-policy"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("same-origin")),
+                ),
+            );
+        }
+        if let Some(v) = self.cross_origin_resource_policy {
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::HeaderName::from_static("cross-origin-resource-policy"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("same-origin")),
+                ),
+            );
+        }
+        if let Some(v) = self.cross_origin_embedder_policy {
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::HeaderName::from_static("cross-origin-embedder-policy"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("require-corp")),
+                ),
+            );
+        }
+        if let Some(v) = self.origin_agent_cluster {
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::HeaderName::from_static("origin-agent-cluster"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("?1")),
+                ),
+            );
+        }
+        if let Some(v) = self.x_dns_prefetch_control {
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::HeaderName::from_static("x-dns-prefetch-control"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("off")),
+                ),
+            );
+        }
+        if let Some(v) = self.x_download_options {
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::HeaderName::from_static("x-download-options"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("noopen")),
+                ),
+            );
+        }
+        if let Some(v) = self.x_permitted_cross_domain_policies {
+            router = router.layer(
+                tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+                    axum::http::HeaderName::from_static("x-permitted-cross-domain-policies"),
+                    axum::http::HeaderValue::from_str(&v)
+                        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("none")),
+                ),
+            );
+        }
         router
     }
 }
@@ -2071,6 +2289,8 @@ async fn request_tracing_middleware(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
+    use tracing::Instrument;
+
     let path = req.uri().path().to_string();
     if options.skip_paths.iter().any(|p| p == &path) {
         return next.run(req).await;
@@ -2078,25 +2298,38 @@ async fn request_tracing_middleware(
 
     let method = req.method().to_string();
     let started = std::time::Instant::now();
-    let response = next.run(req).await;
-    let status = response.status().as_u16();
-    let duration_ms = started.elapsed().as_millis() as u64;
-    let request_id = response
-        .headers()
-        .get("x-request-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("-");
 
-    tracing::info!(
-        method = %method,
-        path = %path,
-        status = status,
-        duration_ms = duration_ms,
-        request_id = %request_id,
-        "http request completed"
+    // Span name aligns with OpenTelemetry HTTP server conventions; `http.route` uses the matched path
+    // (Axum template not available here — literal path documents the request line in traces).
+    let span = tracing::info_span!(
+        "http.server.request",
+        http.request.method = %method,
+        http.route = %path,
     );
 
-    response
+    async move {
+        let response = next.run(req).await;
+        let status = response.status().as_u16();
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("-");
+
+        tracing::info!(
+            method = %method,
+            path = %path,
+            status = status,
+            duration_ms = duration_ms,
+            request_id = %request_id,
+            "http request completed"
+        );
+
+        response
+    }
+    .instrument(span)
+    .await
 }
 
 async fn request_scope_middleware(
@@ -2681,8 +2914,46 @@ where
     G::default().can_activate(parts).await
 }
 
+/// Builds a leaked [`crate::core::OpenApiRouteSpec`] for [`impl_routes!`] / route registration.
+/// Returns [`None`] when there is nothing to attach (no summary, tag, or responses).
+/// If summary or tag is set but `responses` is empty, defaults to a single **200** `"OK"` response.
+#[doc(hidden)]
+pub fn __nestrs_openapi_spec_leaked(
+    summary: Option<&'static str>,
+    tag: Option<&'static str>,
+    responses: &[(u16, &'static str)],
+) -> Option<&'static crate::core::OpenApiRouteSpec> {
+    if summary.is_none() && tag.is_none() && responses.is_empty() {
+        return None;
+    }
+    let responses_sl: &'static [crate::core::OpenApiResponseDesc] = if responses.is_empty() {
+        Box::leak(Box::new([crate::core::OpenApiResponseDesc {
+            status: 200,
+            description: "OK",
+        }]))
+    } else {
+        let v: Vec<crate::core::OpenApiResponseDesc> = responses
+            .iter()
+            .map(|(status, description)| crate::core::OpenApiResponseDesc {
+                status: *status,
+                description,
+            })
+            .collect();
+        Box::leak(v.into_boxed_slice())
+    };
+    let spec = Box::leak(Box::new(crate::core::OpenApiRouteSpec {
+        summary,
+        tag,
+        responses: responses_sl,
+    }));
+    Some(spec)
+}
+
 /// Registers HTTP routes for a `#[controller]` type. Each line: `METHOD "path" with (RouteGuards...) => Handler,`.
 /// Use `with ()` when a route has no route-level guards. Route guards run **inside** (after) controller guards.
+///
+/// Optional OpenAPI metadata (for `nestrs-openapi`): between the path and `with`, add
+/// `openapi ( nestrs::__nestrs_openapi_spec_leaked(...) )` — `#[routes]` emits this from `#[openapi(...)]`.
 ///
 /// Optional **controller** guard (one type; compose multiple checks inside that type if needed):
 /// `impl_routes!(MyCtl, state S, controller_guards(MyCtrlGuard) => [ ... ])`
@@ -2693,6 +2964,7 @@ macro_rules! impl_routes {
             $(
                 $(@ver($route_version:literal))?
                 $method:ident $path:literal
+                $( openapi ( $openapi:expr ) )?
                 with ( $($guard:ty),* )
                 $( interceptors ( $($interceptor:ty),* ) )?
                 $( filters ( $($filter:ty),* ) )?
@@ -2724,10 +2996,11 @@ macro_rules! impl_routes {
                                     prefix,
                                     $path
                                 );
-                                $crate::core::RouteRegistry::register(
+                                $crate::core::RouteRegistry::register_spec(
                                     stringify!($method),
                                     __path,
                                     concat!(module_path!(), "::", stringify!($handler)),
+                                    $crate::impl_routes!(@maybe_openapi $($openapi)?),
                                 );
                                 __path
                             },
@@ -2785,6 +3058,7 @@ macro_rules! impl_routes {
             $(
                 $(@ver($route_version:literal))?
                 $method:ident $path:literal
+                $( openapi ( $openapi:expr ) )?
                 with ( $($guard:ty),* )
                 $( interceptors ( $($interceptor:ty),* ) )?
                 $( filters ( $($filter:ty),* ) )?
@@ -2816,10 +3090,11 @@ macro_rules! impl_routes {
                                     prefix,
                                     $path
                                 );
-                                $crate::core::RouteRegistry::register(
+                                $crate::core::RouteRegistry::register_spec(
                                     stringify!($method),
                                     __path,
                                     concat!(module_path!(), "::", stringify!($handler)),
+                                    $crate::impl_routes!(@maybe_openapi $($openapi)?),
                                 );
                                 __path
                             },
@@ -2885,6 +3160,12 @@ macro_rules! impl_routes {
                 $crate::impl_routes!(@maybe_host_wrap $controller, __nestrs_router)
             }
         }
+    };
+    (@maybe_openapi) => {
+        ::core::option::Option::None
+    };
+    (@maybe_openapi $e:expr) => {
+        $e
     };
     (@maybe_host_wrap $controller:ty, $inner:expr) => {
         match <$controller>::__nestrs_host() {

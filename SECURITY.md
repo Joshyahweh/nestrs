@@ -26,12 +26,18 @@ Please report security vulnerabilities privately.
 ## Current platform controls
 
 - **CORS**: configurable through `NestApplication::enable_cors(CorsOptions::...)`.
-- **Security headers**: configurable through `NestApplication::use_security_headers(SecurityHeaders::default()...)`.
+- **Security headers**: configurable through `NestApplication::use_security_headers(SecurityHeaders::default()...)`; opt-in **`SecurityHeaders::helmet_like()`** adds Cross-Origin-Opener-Policy, Cross-Origin-Resource-Policy, `X-DNS-Prefetch-Control`, and related Helmet-style headers (still configure CSP/HSTS yourself).
 - **Rate limiting hooks**: configurable through `NestApplication::use_rate_limit(RateLimitOptions::...)`.
 - **Body limits**: configurable through `NestApplication::use_body_limit(...)`.
 - **Timeouts**: configurable through `NestApplication::use_request_timeout(...)`.
 - **Secure 5xx responses**: `NestApplication::enable_production_errors()` sanitizes internal details.
 - **Environment-based secure errors**: `enable_production_errors_from_env()` uses `NESTRS_ENV`/`APP_ENV`/`RUST_ENV`.
+- **Authentication building blocks**: `CanActivate` guards, `AuthStrategy`, `#[roles(...)]` metadata, `XRoleMetadataGuard`, `AuthStrategyGuard`, and Axum extractors `BearerToken` / `OptionalBearerToken` (no bundled Passport/JWT — use your crates of choice).
+- **CSRF (opt-in)**: feature **`csrf`** + `NestApplication::use_csrf_protection` with **`use_cookies()`** — double-submit check on POST/PUT/PATCH/DELETE (`CsrfProtectionConfig`).
+
+## Encryption and hashing
+
+- nestrs does **not** ship password hashing, AEAD, or key management. Use well-vetted crates (for example `argon2`, `bcrypt`, `ring`, or `aes-gcm`) and your platform’s secret stores.
 
 ## Production recommendations
 
@@ -51,7 +57,7 @@ Please report security vulnerabilities privately.
 
 - **Bearer token in `Authorization` header**: CSRF is generally not applicable.
 - **Cookie-based session auth**: CSRF protection is required (token-based anti-CSRF pattern recommended).
-- nestrs does not currently auto-enable a CSRF middleware by default; apply one when using cookie sessions.
+- nestrs does **not** enable CSRF by default. When you need it, enable feature **`csrf`**, call **`use_cookies()`**, then **`use_csrf_protection(CsrfProtectionConfig::...)`** — your app must issue the token (e.g. set the cookie on a safe request and require the same value in `X-CSRF-Token` on mutations).
 
 ## Secrets and config
 

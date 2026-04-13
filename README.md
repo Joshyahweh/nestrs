@@ -7,6 +7,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 [![Security](https://github.com/Joshyahweh/nestrs/actions/workflows/security.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/security.yml)
 [![CI](https://github.com/Joshyahweh/nestrs/actions/workflows/ci.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/ci.yml)
 [![Performance](https://github.com/Joshyahweh/nestrs/actions/workflows/performance.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/performance.yml)
+[![Fuzz](https://github.com/Joshyahweh/nestrs/actions/workflows/fuzz.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/fuzz.yml)
 [![Release Version Check](https://github.com/Joshyahweh/nestrs/actions/workflows/release-version-check.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/release-version-check.yml)
 [![Publish Crates](https://github.com/Joshyahweh/nestrs/actions/workflows/publish-crates.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/publish-crates.yml)
 [![Benchmark Storage Sync Template](https://github.com/Joshyahweh/nestrs/actions/workflows/benchmark-storage-sync.yml/badge.svg)](https://github.com/Joshyahweh/nestrs/actions/workflows/benchmark-storage-sync.yml)
@@ -19,12 +20,12 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - DTO validation pipeline and class-validator-style ergonomics
 - Cross-cutting pipeline: guards, pipes, interceptors, exception filters, strategies
 - Production controls: backpressure, metrics, request tracing, security runbooks
-- Performance hardening workflows: benchmark gating, history tracking, dashboard artifacts
+- Performance hardening workflows: benchmark gating (HTTP, DI, validated JSON), history tracking, dashboard artifacts; scheduled libFuzzer smoke runs
 
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `0.1.3` (from `VERSION` and workspace package settings)
+- Current workspace version: `0.2.0` (from `VERSION` and workspace package settings)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
@@ -32,6 +33,14 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - Code of conduct: `CODE_OF_CONDUCT.md`
 - Security disclosure policy: `SECURITY.md`
 - Licenses: `LICENSE-MIT` and `LICENSE-APACHE`
+
+## Toolchain policy
+
+- Rust edition: `2021` (workspace-level)
+- MSRV: `1.88` (tested in CI as `1.88.0`)
+- CI matrix: MSRV + `stable` + `beta`
+- Contributor note: keep new crates on `edition.workspace = true` and `rust-version.workspace = true` unless there is a documented exception
+
 
 ## Project Layout
 
@@ -82,6 +91,7 @@ Then open:
 
 - `website/docs.html` - docs portal entrypoint
 - `CHANGELOG.md` - release history
+- `STABILITY.md` - semver, public vs `#[doc(hidden)]` API, **`test-hooks`** / global registries
 
 ### Platform/operations
 
@@ -93,6 +103,7 @@ Then open:
 
 - `benchmarks/BASELINE.md` - how to run, compare, and track benchmarks
 - `benchmarks/relative_thresholds.json` - active relative regression gate config
+- `nestrs/fuzz/` and `nestrs-microservices/fuzz/` - `cargo-fuzz` targets (see `PRODUCTION_RUNBOOK.md`)
 
 ### Storage + publishing
 
@@ -120,6 +131,7 @@ python3 scripts/load/evaluate_threshold_reassessment.py
 - `.github/workflows/security.yml` - security checks
 - `.github/workflows/ci.yml` - PR/push checks on MSRV + stable + beta, plus fmt/clippy/docs/audit
 - `.github/workflows/performance.yml` - performance benches, gating, reporting, optional publishing
+- `.github/workflows/fuzz.yml` - weekly libFuzzer smoke (wire JSON, auth header, URI/JSON)
 - `.github/workflows/benchmark-storage-sync.yml` - storage sync template for S3/GCS/Azure
 - `.github/workflows/release-version-check.yml` - enforces `VERSION` and latest `CHANGELOG.md` release heading stay in sync
 - `.github/workflows/publish-crates.yml` - tag-driven crates.io publish after preflight; uses `CARGO_REGISTRY_TOKEN` (optional OIDC/trusted publishing can replace this)

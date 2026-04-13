@@ -7,36 +7,6 @@ use tower::util::ServiceExt;
 #[injectable]
 struct AppState;
 
-#[derive(Default)]
-struct RolesGuard;
-
-#[async_trait]
-impl CanActivate for RolesGuard {
-    async fn can_activate(&self, parts: &axum::http::request::Parts) -> Result<(), GuardError> {
-        let handler = parts
-            .extensions
-            .get::<nestrs::core::HandlerKey>()
-            .map(|h| h.0)
-            .ok_or_else(|| GuardError::forbidden("missing handler key"))?;
-
-        let allowed = MetadataRegistry::get(handler, "roles")
-            .ok_or_else(|| GuardError::forbidden("missing roles metadata"))?;
-
-        let role = parts
-            .headers
-            .get("x-role")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-
-        let is_allowed = allowed.split(',').any(|r| r.trim() == role);
-        if is_allowed {
-            Ok(())
-        } else {
-            Err(GuardError::forbidden("forbidden"))
-        }
-    }
-}
-
 #[controller(prefix = "/m", version = "v1")]
 struct MetaController;
 
@@ -44,14 +14,14 @@ struct MetaController;
 impl MetaController {
     #[get("/admin")]
     #[roles("admin")]
-    #[use_guards(RolesGuard)]
+    #[use_guards(XRoleMetadataGuard)]
     async fn admin() -> &'static str {
         "admin"
     }
 
     #[get("/user")]
     #[roles("user")]
-    #[use_guards(RolesGuard)]
+    #[use_guards(XRoleMetadataGuard)]
     async fn user() -> &'static str {
         "user"
     }

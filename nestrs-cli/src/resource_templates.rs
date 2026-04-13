@@ -1,5 +1,8 @@
 //! Full CRUD-oriented scaffolds for `nestrs generate resource <name> --transport ...`.
 
+/// Workspace / scaffold package version — keep `nestrs` dependency version aligned in generated hints.
+pub const SCAFFOLD_NESTRS_VERSION_HINT: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Clone, Copy)]
 pub enum ResourceTransport {
     Rest,
@@ -83,13 +86,21 @@ impl {pascal}Service {{
 }
 
 pub fn rest_controller(snake: &str, pascal: &str) -> String {
+    let ver = SCAFFOLD_NESTRS_VERSION_HINT;
     let use_service = format!(
         "use super::{}_service::{{{pascal}Response, {pascal}Service}};",
         snake,
         pascal = pascal
     );
     format!(
-        r#"use nestrs::prelude::*;
+        r#"//! REST CRUD for `{pascal}`.
+//! ## OpenAPI (optional)
+//! Add **`openapi`** to **`nestrs`** in **Cargo.toml** (pulls **`nestrs-openapi`**):  
+//! `nestrs = {{ version = "{ver}", features = ["openapi"] }}`  
+//! Then chain **`.enable_openapi()`** (or **`.enable_openapi_with_options(nestrs::nestrs_openapi::OpenApiOptions {{ ... }})`**) on **`NestFactory`**.  
+//! The **`#[openapi(...)]`** attributes below register summaries/tags/responses for **`/openapi.json`**.
+
+use nestrs::prelude::*;
 use std::sync::Arc;
 {use_service}
 
@@ -104,12 +115,18 @@ pub struct {pascal}Controller;
 
 #[routes(state = {pascal}Service)]
 impl {pascal}Controller {{
+    #[openapi(summary = "List {pascal} rows", tag = "{snake}", responses = ((200, "OK")))]
     #[get("/")]
     #[serialize]
     async fn list(State(s): State<Arc<{pascal}Service>>) -> Vec<{pascal}Response> {{
         s.list().await
     }}
 
+    #[openapi(
+        summary = "Get {pascal} by id",
+        tag = "{snake}",
+        responses = ((200, "Found"), (404, "Not found"))
+    )]
     #[get("/:id")]
     #[serialize]
     #[use_pipes(ValidationPipe)]
@@ -122,6 +139,7 @@ impl {pascal}Controller {{
             .ok_or_else(|| NotFoundException::new("not found"))
     }}
 
+    #[openapi(summary = "Create {pascal}", tag = "{snake}", responses = ((200, "Created")))]
     #[post("/")]
     #[serialize]
     #[use_pipes(ValidationPipe)]
@@ -132,6 +150,11 @@ impl {pascal}Controller {{
         s.create(body.name).await
     }}
 
+    #[openapi(
+        summary = "Update {pascal}",
+        tag = "{snake}",
+        responses = ((200, "Updated"), (404, "Not found"))
+    )]
     #[put("/:id")]
     #[serialize]
     #[use_pipes(ValidationPipe)]
@@ -143,6 +166,11 @@ impl {pascal}Controller {{
         s.update(p.id, body.name).await
     }}
 
+    #[openapi(
+        summary = "Delete {pascal}",
+        tag = "{snake}",
+        responses = ((200, "Deleted"), (404, "Not found"))
+    )]
     #[delete("/:id")]
     #[serialize]
     #[use_pipes(ValidationPipe)]
@@ -158,6 +186,7 @@ impl {pascal}Controller {{
         snake = snake,
         pascal = pascal,
         use_service = use_service,
+        ver = ver,
     )
 }
 
@@ -170,7 +199,7 @@ pub fn graphql_resolver(snake: &str, pascal: &str) -> String {
     format!(
         r#"//! GraphQL CRUD scaffold for `{pascal}`.
 //! Enable in `Cargo.toml`:
-//!   nestrs = {{ version = "0.1.3", features = ["graphql"] }}
+//!   nestrs = {{ version = "0.2.0", features = ["graphql"] }}
 //!   async-graphql = "=7.0.17"
 //!
 //! In `main`, resolve `Arc<{pascal}Service>` from your module graph, then:
@@ -259,7 +288,7 @@ pub fn ws_gateway(snake: &str, pascal: &str) -> String {
     );
     format!(
         r#"//! WebSocket CRUD-style messages for `{pascal}` (JSON payloads).
-//! Enable: `nestrs = {{ version = "0.1.3", features = ["ws"] }}`
+//! Enable: `nestrs = {{ version = "0.2.0", features = ["ws"] }}`
 //!
 //! Client frames use `{{ "event": "...", "data": {{ ... }} }}` (see `nestrs_ws::WsEvent`).
 

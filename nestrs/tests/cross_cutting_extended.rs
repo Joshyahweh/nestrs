@@ -1,4 +1,5 @@
 use axum::http::request::Parts;
+use nestrs::parse_authorization_bearer;
 use nestrs::prelude::*;
 
 #[roles("admin")]
@@ -25,6 +26,18 @@ impl AuthStrategy for TestJwtStrategy {
             Err(AuthError::unauthorized("invalid auth"))
         }
     }
+}
+
+#[test]
+fn parse_bearer_accepts_standard_scheme() {
+    assert_eq!(
+        parse_authorization_bearer("Bearer alpha.beta"),
+        Some("alpha.beta")
+    );
+    assert_eq!(parse_authorization_bearer("bearer  tok  "), Some("tok"));
+    assert_eq!(parse_authorization_bearer("Basic x"), None);
+    assert_eq!(parse_authorization_bearer("Bearer"), None);
+    assert_eq!(parse_authorization_bearer("Bearer "), None);
 }
 
 #[tokio::test]

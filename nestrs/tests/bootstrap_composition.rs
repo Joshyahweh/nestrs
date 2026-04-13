@@ -454,6 +454,37 @@ async fn security_headers_default_are_applied() {
 }
 
 #[tokio::test]
+async fn security_headers_helmet_like_adds_cross_origin_headers() {
+    let router = NestFactory::create::<AppModule>()
+        .use_security_headers(SecurityHeaders::helmet_like())
+        .into_router();
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request");
+
+    assert_eq!(
+        response.headers().get("cross-origin-opener-policy"),
+        Some(&HeaderValue::from_static("same-origin"))
+    );
+    assert_eq!(
+        response.headers().get("cross-origin-resource-policy"),
+        Some(&HeaderValue::from_static("same-origin"))
+    );
+    assert_eq!(
+        response.headers().get("x-dns-prefetch-control"),
+        Some(&HeaderValue::from_static("off"))
+    );
+}
+
+#[tokio::test]
 async fn security_headers_custom_values_are_applied() {
     let router = NestFactory::create::<AppModule>()
         .use_security_headers(

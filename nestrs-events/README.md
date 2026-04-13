@@ -10,7 +10,7 @@ Kept **separate** from `nestrs-microservices` so HTTP-only apps can use domain e
 
 ```toml
 [dependencies]
-nestrs-events = "0.1.3"
+nestrs-events = "0.2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```

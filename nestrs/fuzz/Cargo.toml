@@ -1,0 +1,33 @@
+[package]
+name = "nestrs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+http = "1"
+libfuzzer-sys = "0.4"
+serde_json = "1"
+nestrs = { path = ".." }
+
+[[bin]]
+name = "authorization_bearer"
+path = "fuzz_targets/authorization_bearer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "uri_path_json"
+path = "fuzz_targets/uri_path_json.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+
+[profile.release]
+debug = 1

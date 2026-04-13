@@ -2,6 +2,20 @@
 //!
 //! This crate intentionally starts with a tiny, stable interface so transports (NATS/Redis/gRPC)
 //! can be added incrementally without blocking core HTTP framework progress.
+//!
+//! ## Cross-cutting on message handlers
+//!
+//! On `#[micro_routes]` impl blocks, per-handler attributes **`#[use_micro_interceptors(...)]`**,
+//! **`#[use_micro_guards(...)]`**, and **`#[use_micro_pipes(...)]`** run before your
+//! `#[message_pattern]` / `#[event_pattern]` body (order: interceptors → guards → pipes). This is
+//! the closest analogue to Nest’s microservice pipes/guards/interceptors; there is no separate
+//! exception-filter pipeline — return [`TransportError`] from handlers (the `nestrs` crate maps
+//! `HttpException` into [`TransportError`] with JSON details in generated `#[micro_routes]` code).
+
+pub mod custom;
+pub mod wire;
+
+pub use wire::WIRE_FORMAT_DOC_REVISION;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -17,10 +31,10 @@ mod kafka;
 mod mqtt;
 #[cfg(feature = "nats")]
 mod nats;
+mod rabbitmq;
 #[cfg(feature = "redis")]
 mod redis;
 mod tcp;
-mod wire;
 
 #[cfg(feature = "grpc")]
 pub use grpc::{
@@ -44,6 +58,11 @@ pub use nats::{
     NatsMicroserviceOptions, NatsMicroserviceServer, NatsTransport, NatsTransportOptions,
 };
 pub use nestrs_events::EventBus;
+pub use rabbitmq::RabbitMqTransport;
+#[cfg(feature = "rabbitmq")]
+pub use rabbitmq::{
+    RabbitMqMicroserviceOptions, RabbitMqMicroserviceServer, RabbitMqTransportOptions,
+};
 #[cfg(feature = "redis")]
 pub use redis::{
     RedisMicroserviceOptions, RedisMicroserviceServer, RedisTransport, RedisTransportOptions,
@@ -78,6 +97,32 @@ impl TransportError {
         self.details = Some(details);
         self
     }
+}
+
+/// Authorization / policy hook before a microservice handler runs (Nest microservice guard analogue).
+#[async_trait]
+pub trait MicroCanActivate: Default + Send + Sync + 'static {
+    async fn can_activate_micro(
+        &self,
+        pattern: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), TransportError>;
+}
+
+/// Transform inbound JSON after guards (Nest microservice pipe analogue).
+#[async_trait]
+pub trait MicroPipeTransform: Default + Send + Sync + 'static {
+    async fn transform_micro(
+        &self,
+        pattern: &str,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, TransportError>;
+}
+
+/// Observe inbound patterns (logging / metrics); does not fail the pipeline.
+#[async_trait]
+pub trait MicroIncomingInterceptor: Default + Send + Sync + 'static {
+    async fn before_handle_micro(&self, pattern: &str, payload: &serde_json::Value);
 }
 
 #[async_trait]
@@ -243,6 +288,16 @@ impl ClientConfig {
     #[cfg(not(feature = "mqtt"))]
     pub fn mqtt(name: &'static str) -> Self {
         Self::new(name, Arc::new(MqttTransport::new()))
+    }
+
+    #[cfg(feature = "rabbitmq")]
+    pub fn rabbitmq(name: &'static str, options: RabbitMqTransportOptions) -> Self {
+        Self::new(name, Arc::new(RabbitMqTransport::new(options)))
+    }
+
+    #[cfg(not(feature = "rabbitmq"))]
+    pub fn rabbitmq(name: &'static str) -> Self {
+        Self::new(name, Arc::new(RabbitMqTransport::new()))
     }
 }
 

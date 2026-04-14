@@ -4,7 +4,9 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use nestrs::prelude::*;
 use nestrs_prisma::{
-    prisma_generate_command, PrismaModule, PrismaOptions, PrismaService, DEFAULT_SCHEMA_PATH,
+    deployment::{github_actions_deploy_workflow, DatabaseKind, PackageManager, PgfenceOptions},
+    prisma_db_push_command, prisma_generate_command, prisma_migrate_deploy_command, PrismaModule,
+    PrismaOptions, PrismaService, DEFAULT_SCHEMA_PATH,
 };
 use tower::util::ServiceExt;
 
@@ -73,4 +75,40 @@ async fn prisma_module_exports_service_to_importing_module() {
 fn prisma_generation_command_uses_schema_path() {
     let cmd = prisma_generate_command("prisma/schema.prisma");
     assert_eq!(cmd, "cargo prisma generate --schema prisma/schema.prisma");
+}
+
+#[test]
+fn prisma_deploy_commands_are_exposed() {
+    assert_eq!(prisma_migrate_deploy_command(), "npx prisma migrate deploy");
+    assert_eq!(prisma_db_push_command(), "npx prisma db push");
+    assert_eq!(
+        PrismaModule::deploy_command_hint(),
+        "npx prisma migrate deploy"
+    );
+}
+
+#[test]
+fn github_actions_workflow_generation_covers_relational_and_mongo() {
+    let relational = github_actions_deploy_workflow(
+        PackageManager::Npm,
+        DatabaseKind::PostgreSql,
+        PgfenceOptions {
+            enabled: true,
+            max_risk: "medium",
+        },
+    );
+    assert!(relational.contains("prisma/migrations/**"));
+    assert!(relational.contains("npx prisma migrate deploy"));
+    assert!(relational.contains("@flvmnt/pgfence analyze"));
+
+    let mongo = github_actions_deploy_workflow(
+        PackageManager::Npm,
+        DatabaseKind::MongoDb,
+        PgfenceOptions {
+            enabled: true,
+            max_risk: "medium",
+        },
+    );
+    assert!(mongo.contains("npx prisma db push"));
+    assert!(!mongo.contains("@flvmnt/pgfence analyze"));
 }

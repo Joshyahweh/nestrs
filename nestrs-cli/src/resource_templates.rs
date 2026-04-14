@@ -199,7 +199,7 @@ pub fn graphql_resolver(snake: &str, pascal: &str) -> String {
     format!(
         r#"//! GraphQL CRUD scaffold for `{pascal}`.
 //! Enable in `Cargo.toml`:
-//!   nestrs = {{ version = "0.2.0", features = ["graphql"] }}
+//!   nestrs = {{ version = "0.3.0", features = ["graphql"] }}
 //!   async-graphql = "=7.0.17"
 //!
 //! In `main`, resolve `Arc<{pascal}Service>` from your module graph, then:
@@ -288,7 +288,7 @@ pub fn ws_gateway(snake: &str, pascal: &str) -> String {
     );
     format!(
         r#"//! WebSocket CRUD-style messages for `{pascal}` (JSON payloads).
-//! Enable: `nestrs = {{ version = "0.2.0", features = ["ws"] }}`
+//! Enable: `nestrs = {{ version = "0.3.0", features = ["ws"] }}`
 //!
 //! Client frames use `{{ "event": "...", "data": {{ ... }} }}` (see `nestrs_ws::WsEvent`).
 

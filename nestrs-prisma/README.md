@@ -6,9 +6,12 @@ Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://crates.
 
 ```toml
 [dependencies]
-nestrs-prisma = { version = "0.2.0", features = ["sqlx"] }
-nestrs = "0.2.0"
+async-trait = "0.1"
+nestrs-prisma = { version = "0.3.0", features = ["sqlx"] }
+nestrs = "0.3.0"
 ```
+
+The **`async-trait`** crate must be a direct dependency of any crate that invokes **`prisma_model!`**, because the generated repository trait uses `#[async_trait::async_trait]`.
 
 ## 1. Write models in Prisma
 
@@ -48,7 +51,48 @@ let users: Vec<UserRow> = prisma
 
 Use [`PrismaService::execute`](https://docs.rs/nestrs-prisma) for DDL/DML without a row mapper (e.g. migration scripts).
 
-## 3. Optional: Prisma Client Rust (`cargo prisma generate`)
+## 3. Declarative `prisma_model!` (NestJS / Prisma-shaped repository)
+
+With **`sqlx`** enabled, you can declare a table-bound model once. The macro expands to:
+
+- A `#[derive(sqlx::FromRow)]` struct for the row shape.
+- `UserWhere` (per model) with `And` / `Or` / `Not`, per-field **`equals`** / **`not`**, and helpers under a lowercase module (e.g. `user::id::equals(1)`).
+- `UserUpdate` with `Option` fields and `user::email::set("…")`-style builders.
+- `UserCreateInput`: if the first field is `id: i64`, it is omitted from create input (auto-increment inserts).
+- `UserOrderBy` and `user::id::order(SortOrder::Desc)`.
+- **`PrismaUserRepository`** (async trait) implemented for [`ModelRepository<User>`](https://docs.rs/nestrs-prisma) with:
+  `find_unique`, `find_first`, `find_many`, `find_many_with_options`, `count`, `create`, `create_many`, `update`, `update_many`, `upsert`, `delete`, `delete_many`.
+- **`PrismaUserClientExt`** on [`Arc<PrismaService>`](https://docs.rs/nestrs-prisma) so you can write `prisma.user().find_unique(…)`.
+
+**Errors:** [`PrismaError`](https://docs.rs/nestrs-prisma) maps to [`nestrs::HttpException`](https://docs.rs/nestrs) via `impl From<PrismaError> for HttpException` (404 for missing rows, 409 for unique violations, 503-style for pool issues).
+
+**Example:**
+
+```rust
+nestrs_prisma::prisma_model!(User => "users", {
+    id: i64,
+    email: String,
+    name: String,
+});
+
+// `PrismaUserRepository` + `PrismaUserClientExt` live in this module after the macro expands.
+async fn demo(prisma: std::sync::Arc<nestrs_prisma::PrismaService>) -> Result<(), nestrs_prisma::PrismaError> {
+    let _ = prisma
+        .user()
+        .create(UserCreateInput {
+            email: "a@b.c".into(),
+            name: "Ada".into(),
+        })
+        .await?;
+    Ok(())
+}
+```
+
+**Supported field types today:** `i64`, `String`, `bool` (extend the macro for more as needed).
+
+**Note:** In-memory SQLite with SQLx `Any` works most reliably with a **single-connection** pool (`pool_max(1)`) so DDL and queries share one database. File-backed URLs avoid that limitation.
+
+## 4. Optional: Prisma Client Rust (`cargo prisma generate`)
 
 For generated model APIs, add [prisma-client-rust](https://github.com/Brendonovich/prisma-client-rust) to your app, run:
 
@@ -58,7 +102,7 @@ cargo prisma generate --schema prisma/schema.prisma
 
 Register the generated client as an extra **`#[injectable]`** / module provider alongside `PrismaService`. This crate does not embed the codegen CLI; it focuses on connectivity and a **`PrismaService`** shape familiar to Nest users.
 
-## Generate command hint
+## 5. Generate command hint
 
 After `PrismaModule::for_root`, you can surface the documented generate line with:
 

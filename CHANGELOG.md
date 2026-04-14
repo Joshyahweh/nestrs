@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-14
+
+### Fixed
+
+- `nestrs-prisma` schema bridge now generates a valid `relation_schema()` function instead of an invalid top-level `let` binding in generated bindings.
+- `nestrs-prisma` quickstart/readme guidance improved for crate consumers running examples outside this monorepo.
+
 ## [0.3.0] - 2026-04-14
 
 ### Added

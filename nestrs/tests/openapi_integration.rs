@@ -130,10 +130,7 @@ async fn openapi_infers_operation_security_when_roles_metadata_present() {
 
     let public_path = "/v1/sec/public";
     let admin_path = "/v1/sec/admin";
-    if let Some(pub_op) = doc["paths"]
-        .get(public_path)
-        .and_then(|p| p.get("get"))
-    {
+    if let Some(pub_op) = doc["paths"].get(public_path).and_then(|p| p.get("get")) {
         assert!(
             pub_op.get("security").is_none(),
             "public route should not have operation security: {pub_op:?}"

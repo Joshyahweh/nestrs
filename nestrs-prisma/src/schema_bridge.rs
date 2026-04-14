@@ -18,6 +18,7 @@ pub struct ParsedSchema {
     pub relation_mode: Option<String>,
     pub models: Vec<ParsedModel>,
     pub enums: Vec<ParsedEnum>,
+    pub composites: Vec<ParsedComposite>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,12 @@ pub struct ParsedModel {
     pub name: String,
     pub fields: Vec<ParsedField>,
     pub model_attributes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedComposite {
+    pub name: String,
+    pub fields: Vec<ParsedField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +196,7 @@ pub fn parse_prisma_schema(schema: &str) -> Result<ParsedSchema, SchemaBridgeErr
     let mut relation_mode = None;
     let mut models = Vec::new();
     let mut enums = Vec::new();
+    let mut composites = Vec::new();
 
     let lines: Vec<String> = schema
         .lines()
@@ -274,6 +282,27 @@ pub fn parse_prisma_schema(schema: &str) -> Result<ParsedSchema, SchemaBridgeErr
                 i += 1;
             }
             enums.push(ParsedEnum { name, values });
+        } else if let Some(rest) = line.strip_prefix("type ") {
+            let name = rest
+                .split_whitespace()
+                .next()
+                .ok_or_else(|| SchemaBridgeError::Parse("missing composite type name".to_string()))?
+                .to_string();
+            let mut fields = Vec::new();
+            i += 1;
+            while i < lines.len() {
+                let l = lines[i].trim();
+                if l == "}" {
+                    break;
+                }
+                if !l.is_empty() && !l.starts_with("@@") {
+                    if let Some(f) = parse_field_line(l) {
+                        fields.push(f);
+                    }
+                }
+                i += 1;
+            }
+            composites.push(ParsedComposite { name, fields });
         }
         i += 1;
     }
@@ -283,6 +312,7 @@ pub fn parse_prisma_schema(schema: &str) -> Result<ParsedSchema, SchemaBridgeErr
         relation_mode,
         models,
         enums,
+        composites,
     })
 }
 
@@ -601,23 +631,114 @@ fn infer_explicit_many_to_many_relations(
     schema
 }
 
-fn to_rust_type(field: &ParsedField) -> Option<String> {
+fn parse_native_db_type(attrs: &str) -> Option<&str> {
+    let pos = attrs.find("@db.")?;
+    let rest = &attrs[pos + 4..];
+    let end = rest
+        .find(|c: char| c == '(' || c == ')' || c.is_whitespace() || c == '@')
+        .unwrap_or(rest.len());
+    let t = &rest[..end];
+    if t.is_empty() {
+        None
+    } else {
+        Some(t)
+    }
+}
+
+fn provider_supports_scalar_lists(provider: Option<&str>) -> bool {
+    matches!(
+        provider.map(|p| p.to_ascii_lowercase()),
+        Some(p) if p == "postgresql" || p == "cockroachdb" || p == "mongodb"
+    )
+}
+
+fn resolve_base_rust_type(
+    field: &ParsedField,
+    enum_types: &HashMap<String, String>,
+    composite_types: &HashMap<String, String>,
+) -> Option<String> {
+    if let Some(ty) = enum_types.get(&field.type_name) {
+        return Some(ty.clone());
+    }
+    if let Some(ty) = composite_types.get(&field.type_name) {
+        return Some(ty.clone());
+    }
+    if let Some(native) = parse_native_db_type(&field.attributes) {
+        return Some(match native {
+            // PostgreSQL/SQL Server UUID-like native types.
+            "Uuid" | "UniqueIdentifier" => "uuid::Uuid".to_string(),
+            // String-like native types.
+            "Xml" | "Inet" | "Citext" | "LongText" | "VarChar" | "NVarChar" => "String".to_string(),
+            // Integer-like native types.
+            "TinyInt" => "i64".to_string(),
+            // Fallback to scalar mapping below.
+            _ => match field.type_name.as_str() {
+                "Int" => "i64".to_string(),
+                "BigInt" => "i64".to_string(),
+                "String" => "String".to_string(),
+                "Boolean" => "bool".to_string(),
+                "Float" => "f64".to_string(),
+                "Decimal" => "f64".to_string(),
+                "DateTime" => "chrono::DateTime<chrono::Utc>".to_string(),
+                "Json" => "serde_json::Value".to_string(),
+                "Bytes" => "Vec<u8>".to_string(),
+                _ => return None,
+            },
+        });
+    }
+
+    match field.type_name.as_str() {
+        "Int" => Some("i64".to_string()),
+        "BigInt" => Some("i64".to_string()),
+        "String" => Some("String".to_string()),
+        "Boolean" => Some("bool".to_string()),
+        "Float" => Some("f64".to_string()),
+        "Decimal" => Some("f64".to_string()),
+        "DateTime" => Some("chrono::DateTime<chrono::Utc>".to_string()),
+        "Json" => Some("serde_json::Value".to_string()),
+        "Bytes" => Some("Vec<u8>".to_string()),
+        _ => None,
+    }
+}
+
+fn field_skip_reason(
+    field: &ParsedField,
+    provider: Option<&str>,
+    enum_types: &HashMap<String, String>,
+    composite_types: &HashMap<String, String>,
+) -> Option<String> {
+    if field.list && !provider_supports_scalar_lists(provider) {
+        return Some(format!(
+            "list type `{}` is unsupported for provider `{}`",
+            field.type_name,
+            provider.unwrap_or("unknown")
+        ));
+    }
+    if resolve_base_rust_type(field, enum_types, composite_types).is_none() {
+        return Some(format!("unsupported Prisma type `{}`", field.type_name));
+    }
+    None
+}
+
+fn to_rust_type(
+    field: &ParsedField,
+    provider: Option<&str>,
+    enum_types: &HashMap<String, String>,
+    composite_types: &HashMap<String, String>,
+) -> Option<String> {
+    let base = resolve_base_rust_type(field, enum_types, composite_types)?;
+
     if field.list {
+        if provider_supports_scalar_lists(provider) {
+            return Some(format!("Vec<{base}>"));
+        }
         return None;
     }
-    let base = match field.type_name.as_str() {
-        "Int" => "i64",
-        "BigInt" => "i64",
-        "String" => "String",
-        "Boolean" => "bool",
-        "Float" => "f64",
-        "Decimal" => "f64",
-        _ => return None,
-    };
+
     if field.optional {
         Some(format!("Option<{base}>"))
     } else {
-        Some(base.to_string())
+        Some(base)
     }
 }
 
@@ -645,6 +766,61 @@ pub fn generate_rust_bindings(parsed: &ParsedSchema) -> String {
     out.push_str("// Generated from schema.prisma via schema_bridge\n");
     out.push_str("use nestrs_prisma::{prisma_model, prisma_relation, prisma_relation_schema};\n\n");
 
+    for en in &parsed.enums {
+        let enum_name = to_struct_name(&en.name);
+        out.push_str(
+            "#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\n",
+        );
+        out.push_str(&format!("pub enum {enum_name} {{\n"));
+        for v in &en.values {
+            let variant = to_struct_name(v);
+            if variant != *v {
+                out.push_str(&format!("    #[serde(rename = \"{v}\")]\n"));
+            }
+            out.push_str(&format!("    {variant},\n"));
+        }
+        out.push_str("}\n\n");
+    }
+
+    for comp in &parsed.composites {
+        let composite_name = to_struct_name(&comp.name);
+        out.push_str("#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]\n");
+        out.push_str(&format!("pub struct {composite_name} {{\n"));
+        for f in &comp.fields {
+            if f.relation.is_some() {
+                continue;
+            }
+            // Composite types are MongoDB-only in Prisma, but keep generation provider-agnostic.
+            if let Some(rt) = to_rust_type(
+                f,
+                parsed.provider.as_deref(),
+                &HashMap::new(),
+                &HashMap::new(),
+            ) {
+                out.push_str(&format!("    pub {}: {},\n", f.name, rt));
+            } else if let Some(reason) = field_skip_reason(
+                f,
+                parsed.provider.as_deref(),
+                &HashMap::new(),
+                &HashMap::new(),
+            ) {
+                out.push_str(&format!("    // skipped field `{}`: {reason}\n", f.name));
+            }
+        }
+        out.push_str("}\n\n");
+    }
+
+    let enum_types: HashMap<String, String> = parsed
+        .enums
+        .iter()
+        .map(|e| (e.name.clone(), to_struct_name(&e.name)))
+        .collect();
+    let composite_types: HashMap<String, String> = parsed
+        .composites
+        .iter()
+        .map(|c| (c.name.clone(), to_struct_name(&c.name)))
+        .collect();
+
     for m in &parsed.models {
         let struct_name = to_struct_name(&m.name);
         out.push_str(&format!(
@@ -655,8 +831,14 @@ pub fn generate_rust_bindings(parsed: &ParsedSchema) -> String {
             if f.relation.is_some() {
                 continue;
             }
-            if let Some(rt) = to_rust_type(f) {
+            if let Some(rt) =
+                to_rust_type(f, parsed.provider.as_deref(), &enum_types, &composite_types)
+            {
                 out.push_str(&format!("    {}: {},\n", f.name, rt));
+            } else if let Some(reason) =
+                field_skip_reason(f, parsed.provider.as_deref(), &enum_types, &composite_types)
+            {
+                out.push_str(&format!("    // skipped field `{}`: {reason}\n", f.name));
             }
         }
         out.push_str("});\n\n");
@@ -843,6 +1025,7 @@ model posts_categories {
         let parsed = parse_prisma_schema(SAMPLE).unwrap();
         assert_eq!(parsed.provider.as_deref(), Some("postgresql"));
         assert_eq!(parsed.models.len(), 5);
+        assert_eq!(parsed.composites.len(), 0);
         let users = parsed.models.iter().find(|m| m.name == "users").unwrap();
         assert!(users.fields.iter().any(|f| f.relation.is_some()));
     }
@@ -877,6 +1060,96 @@ model posts_categories {
         );
         assert!(!code
             .contains("\nlet relation_schema = nestrs_prisma::relations::RelationSchema::new("));
+    }
+
+    #[test]
+    fn generate_bindings_maps_common_prisma_scalars() {
+        let schema = r#"
+datasource db {
+  provider = "postgresql"
+}
+
+model event_log {
+  id        String   @id
+  createdAt DateTime
+  payload   Json?
+  blob      Bytes?
+  score     Float?
+  enabled   Boolean
+}
+"#;
+        let parsed = parse_prisma_schema(schema).unwrap();
+        let code = generate_rust_bindings(&parsed);
+        assert!(code.contains("createdAt: chrono::DateTime<chrono::Utc>"));
+        assert!(code.contains("payload: Option<serde_json::Value>"));
+        assert!(code.contains("blob: Option<Vec<u8>>"));
+        assert!(code.contains("score: Option<f64>"));
+        assert!(code.contains("enabled: bool"));
+    }
+
+    #[test]
+    fn generate_bindings_supports_enums_lists_composites_and_native_types() {
+        let schema = r#"
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+type Address {
+  line1 String
+  city  String
+}
+
+model account {
+  id         String @id @db.Uuid
+  role       Role
+  tags       String[]
+  metadata   Json?
+  avatar     Bytes?
+  created_at DateTime
+  address    Address?
+}
+"#;
+        let parsed = parse_prisma_schema(schema).unwrap();
+        assert_eq!(parsed.enums.len(), 1);
+        assert_eq!(parsed.composites.len(), 1);
+        let code = generate_rust_bindings(&parsed);
+        assert!(code.contains("pub enum Role"));
+        assert!(code.contains("USER"));
+        assert!(code.contains("pub struct Address"));
+        assert!(code.contains("line1: String"));
+        assert!(code.contains("id: uuid::Uuid"));
+        assert!(code.contains("role: Role"));
+        assert!(code.contains("tags: Vec<String>"));
+        assert!(code.contains("metadata: Option<serde_json::Value>"));
+        assert!(code.contains("avatar: Option<Vec<u8>>"));
+        assert!(code.contains("created_at: chrono::DateTime<chrono::Utc>"));
+        assert!(code.contains("address: Option<Address>"));
+    }
+
+    #[test]
+    fn generate_bindings_marks_skipped_fields_with_reason() {
+        let schema = r#"
+datasource db {
+  provider = "sqlite"
+}
+
+model note {
+  id    String @id
+  tags  String[]
+  crazy UnsupportedType
+}
+"#;
+        let parsed = parse_prisma_schema(schema).unwrap();
+        let code = generate_rust_bindings(&parsed);
+        assert!(code.contains(
+            "skipped field `tags`: list type `String` is unsupported for provider `sqlite`"
+        ));
+        assert!(code.contains("skipped field `crazy`: unsupported Prisma type `UnsupportedType`"));
     }
 
     #[test]

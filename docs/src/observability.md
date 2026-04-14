@@ -64,7 +64,7 @@ Enable the **`otel`** feature and use [`configure_tracing_opentelemetry`](https:
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.1", features = ["otel"] }
+nestrs = { version = "0.3.2", features = ["otel"] }
 ```
 
 **`main`:**

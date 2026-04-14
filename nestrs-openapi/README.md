@@ -21,14 +21,14 @@
 
 ```toml
 [dependencies]
-nestrs-openapi = "0.3.1"
+nestrs-openapi = "0.3.2"
 axum = "0.7"
 ```
 
 Or:
 
 ```toml
-nestrs = { version = "0.3.1", features = ["openapi"] }
+nestrs = { version = "0.3.2", features = ["openapi"] }
 ```
 
 Use `NestFactory::create(..).enable_openapi()` or `enable_openapi_with_options(..)`; **`api_prefix`** is filled from your global prefix + URI version when applicable.

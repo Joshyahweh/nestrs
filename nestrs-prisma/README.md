@@ -7,11 +7,61 @@ Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://crates.
 ```toml
 [dependencies]
 async-trait = "0.1"
-nestrs-prisma = { version = "0.3.0", features = ["sqlx"] }
-nestrs = "0.3.0"
+nestrs-prisma = { version = "0.3.1", features = ["sqlx"] }
+nestrs = "0.3.1"
 ```
 
 The **`async-trait`** crate must be a direct dependency of any crate that invokes **`prisma_model!`**, because the generated repository trait uses `#[async_trait::async_trait]`.
+
+## Run the quickstart example
+
+There are two ways to run quickstart:
+
+### A) From this repository (maintainers/contributors)
+
+From the `nestrs` workspace root:
+
+```bash
+cargo run -p nestrs-prisma --example quickstart --features sqlx
+```
+
+### B) From your own app (crate consumers on `nestrs-prisma = "0.3.1"`)
+
+`cargo run -p nestrs-prisma ...` will not work in your app, because `-p` targets a package in your current workspace.
+Instead:
+
+1. Add dependency:
+
+```toml
+nestrs-prisma = { version = "0.3.1", features = ["sqlx"] }
+nestrs = "0.3.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+2. Fetch quickstart source into your app as `examples/quickstart.rs` (no manual copying):
+
+```bash
+mkdir -p examples
+curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v0.3.1/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
+```
+
+Alternative (fetch from crates.io source):
+
+```bash
+cargo install cargo-download
+cargo download nestrs-prisma==0.3.1 --extract
+mkdir -p examples
+cp nestrs-prisma-0.3.1/examples/quickstart.rs examples/quickstart.rs
+```
+
+3. Run from your app root:
+
+```bash
+cargo run --example quickstart
+```
+
+If `DATABASE_URL` is not set, the example defaults to `sqlite:quickstart.db`.
+With `prisma/schema.prisma` present, it also generates bindings and writes `src/models/prisma_generated.rs`.
 
 ## 1. Write models in Prisma
 

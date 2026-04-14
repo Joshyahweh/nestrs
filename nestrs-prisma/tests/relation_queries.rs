@@ -187,6 +187,7 @@ async fn include_connect_disconnect_helpers_work() {
         .unwrap();
     assert_eq!(posts.len(), 2);
     assert_eq!(posts[0].title, "P3");
+    assert!(posts[0].id > 0);
     assert_eq!(posts[0].author_id, 1);
 
     let profile = prisma
@@ -197,7 +198,10 @@ async fn include_connect_disconnect_helpers_work() {
         .await
         .unwrap();
     assert!(profile.is_some());
-    assert_eq!(profile.unwrap().user_id, 1);
+    let profile = profile.unwrap();
+    assert!(profile.id > 0);
+    assert_eq!(profile.user_id, 1);
+    assert_eq!(profile.bio.as_deref(), Some("hello"));
 
     // connect/disconnect FK
     prisma

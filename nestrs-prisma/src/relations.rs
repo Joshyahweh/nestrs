@@ -641,54 +641,61 @@ pub fn validate_relations(
 /// Render SQL `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ...` when applicable.
 ///
 /// Returns `Ok(None)` when relation mode is `prisma` (no DB foreign key DDL).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignKeyConstraintSqlInput<'a> {
+    pub relation_mode: RelationMode,
+    pub dialect: SqlDialect,
+    pub table: &'a str,
+    pub constraint_name: &'a str,
+    pub fk_columns: &'a [&'a str],
+    pub referenced_table: &'a str,
+    pub referenced_columns: &'a [&'a str],
+    pub on_delete: ReferentialAction,
+    pub on_update: ReferentialAction,
+}
+
 pub fn foreign_key_constraint_sql(
-    relation_mode: RelationMode,
-    dialect: SqlDialect,
-    table: &str,
-    constraint_name: &str,
-    fk_columns: &[&str],
-    referenced_table: &str,
-    referenced_columns: &[&str],
-    on_delete: ReferentialAction,
-    on_update: ReferentialAction,
+    input: ForeignKeyConstraintSqlInput<'_>,
 ) -> Result<Option<String>, RelationValidationError> {
-    if relation_mode == RelationMode::Prisma {
+    if input.relation_mode == RelationMode::Prisma {
         return Ok(None);
     }
-    if fk_columns.is_empty() || fk_columns.len() != referenced_columns.len() {
+    if input.fk_columns.is_empty() || input.fk_columns.len() != input.referenced_columns.len() {
         return Err(RelationValidationError::ScalarReferenceLengthMismatch(
-            constraint_name.to_string(),
+            input.constraint_name.to_string(),
         ));
     }
-    for a in [on_delete, on_update] {
-        if !supports_action(dialect, relation_mode, a) {
+    for a in [input.on_delete, input.on_update] {
+        if !supports_action(input.dialect, input.relation_mode, a) {
             return Err(RelationValidationError::UnsupportedReferentialAction {
-                relation: constraint_name.to_string(),
+                relation: input.constraint_name.to_string(),
                 action: a,
-                dialect,
-                mode: relation_mode,
+                dialect: input.dialect,
+                mode: input.relation_mode,
             });
         }
     }
 
-    let t = quote_ident(dialect, table);
-    let rt = quote_ident(dialect, referenced_table);
-    let cn = quote_ident(dialect, constraint_name);
-    let cols = fk_columns
+    let t = quote_ident(input.dialect, input.table);
+    let rt = quote_ident(input.dialect, input.referenced_table);
+    let cn = quote_ident(input.dialect, input.constraint_name);
+    let cols = input
+        .fk_columns
         .iter()
-        .map(|c| quote_ident(dialect, c))
+        .map(|c| quote_ident(input.dialect, c))
         .collect::<Vec<_>>()
         .join(", ");
-    let ref_cols = referenced_columns
+    let ref_cols = input
+        .referenced_columns
         .iter()
-        .map(|c| quote_ident(dialect, c))
+        .map(|c| quote_ident(input.dialect, c))
         .collect::<Vec<_>>()
         .join(", ");
 
     Ok(Some(format!(
         "ALTER TABLE {t} ADD CONSTRAINT {cn} FOREIGN KEY ({cols}) REFERENCES {rt} ({ref_cols}) ON DELETE {} ON UPDATE {}",
-        on_delete.as_sql(),
-        on_update.as_sql(),
+        input.on_delete.as_sql(),
+        input.on_update.as_sql(),
     )))
 }
 
@@ -745,17 +752,17 @@ pub fn build_relation_deployment_plan(
             .map(|n| format!("{n}_fkey"))
             .unwrap_or(default_constraint);
 
-        let sql = foreign_key_constraint_sql(
-            schema.relation_mode,
-            schema.dialect,
-            &fk_side.model,
-            &constraint_name,
-            &cols,
-            &referenced_side.model,
-            &refs,
-            rel.resolved_on_delete(fk_side.optional),
-            rel.resolved_on_update(fk_side.optional),
-        )?
+        let sql = foreign_key_constraint_sql(ForeignKeyConstraintSqlInput {
+            relation_mode: schema.relation_mode,
+            dialect: schema.dialect,
+            table: &fk_side.model,
+            constraint_name: &constraint_name,
+            fk_columns: &cols,
+            referenced_table: &referenced_side.model,
+            referenced_columns: &refs,
+            on_delete: rel.resolved_on_delete(fk_side.optional),
+            on_update: rel.resolved_on_update(fk_side.optional),
+        })?
         .ok_or_else(|| RelationValidationError::MissingAnnotatedSide(relation_name.clone()))?;
 
         foreign_key_sql.push(sql);
@@ -964,34 +971,34 @@ mod tests {
 
     #[test]
     fn fk_sql_is_skipped_in_prisma_mode() {
-        let sql = foreign_key_constraint_sql(
-            RelationMode::Prisma,
-            SqlDialect::PostgreSql,
-            "Post",
-            "Post_authorId_fkey",
-            &["authorId"],
-            "User",
-            &["id"],
-            ReferentialAction::Cascade,
-            ReferentialAction::Cascade,
-        )
+        let sql = foreign_key_constraint_sql(ForeignKeyConstraintSqlInput {
+            relation_mode: RelationMode::Prisma,
+            dialect: SqlDialect::PostgreSql,
+            table: "Post",
+            constraint_name: "Post_authorId_fkey",
+            fk_columns: &["authorId"],
+            referenced_table: "User",
+            referenced_columns: &["id"],
+            on_delete: ReferentialAction::Cascade,
+            on_update: ReferentialAction::Cascade,
+        })
         .unwrap();
         assert!(sql.is_none());
     }
 
     #[test]
     fn fk_sql_renders_foreign_keys_mode() {
-        let sql = foreign_key_constraint_sql(
-            RelationMode::ForeignKeys,
-            SqlDialect::PostgreSql,
-            "Post",
-            "Post_authorId_fkey",
-            &["authorId"],
-            "User",
-            &["id"],
-            ReferentialAction::Cascade,
-            ReferentialAction::Cascade,
-        )
+        let sql = foreign_key_constraint_sql(ForeignKeyConstraintSqlInput {
+            relation_mode: RelationMode::ForeignKeys,
+            dialect: SqlDialect::PostgreSql,
+            table: "Post",
+            constraint_name: "Post_authorId_fkey",
+            fk_columns: &["authorId"],
+            referenced_table: "User",
+            referenced_columns: &["id"],
+            on_delete: ReferentialAction::Cascade,
+            on_update: ReferentialAction::Cascade,
+        })
         .unwrap()
         .unwrap();
         assert!(sql.contains("ALTER TABLE"));

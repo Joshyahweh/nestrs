@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-04-14
+
+### Fixed
+
+- `nestrs-prisma` schema bridge now supports additional Prisma scalar generation (`DateTime`, `Json`, `Bytes`) and generates clearer skip-reason comments for unsupported fields.
+- `nestrs-prisma` schema bridge now emits Prisma enums/composite types and broader native type mappings in generated Rust bindings.
+
 ## [0.3.1] - 2026-04-14
 
 ### Fixed

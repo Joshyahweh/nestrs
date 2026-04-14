@@ -10,14 +10,14 @@ Also re-exports [`nestrs_events::EventBus`](https://crates.io/crates/nestrs-even
 
 ```toml
 [dependencies]
-nestrs-microservices = { version = "0.2.0", features = ["nats"] }
+nestrs-microservices = { version = "0.3.0", features = ["nats"] }
 # or: features = ["redis"], ["kafka"], ["mqtt"], ["rabbitmq"], ["grpc"], etc.
 ```
 
 From the umbrella crate you can use:
 
 ```toml
-nestrs = { version = "0.2.0", features = ["microservices", "microservices-nats"] }
+nestrs = { version = "0.3.0", features = ["microservices", "microservices-nats"] }
 ```
 
 ## Example: `ClientProxy` over a transport

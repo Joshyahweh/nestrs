@@ -101,7 +101,7 @@ static SQLX_POOL: OnceCell<sqlx::AnyPool> = OnceCell::const_new();
 #[cfg(feature = "sqlx")]
 static SQLX_ANY_DRIVERS: OnceLock<()> = OnceLock::new();
 
-/// Shared SQLx pool for [`PrismaService`] and generated [`ModelRepository`](client::ModelRepository) access.
+/// Shared SQLx pool for [`PrismaService`] and generated [`ModelRepository`] access.
 #[cfg(feature = "sqlx")]
 pub async fn sqlx_pool() -> Result<&'static sqlx::AnyPool, PrismaError> {
     ensure_sqlx_pool().await.map_err(PrismaError::PoolInit)

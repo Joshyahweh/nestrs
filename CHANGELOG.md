@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-04-14
+
+### Fixed
+
+- `nestrs-prisma` schema bridge maps Prisma `DateTime` to `String` in generated `prisma_model!` structs so bindings compile against `sqlx::Any` (chrono values only implement SQLx traits for concrete database drivers).
+
 ## [0.3.2] - 2026-04-14
 
 ### Fixed

@@ -7,8 +7,8 @@ Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://crates.
 ```toml
 [dependencies]
 async-trait = "0.1"
-nestrs-prisma = { version = "0.3.2", features = ["sqlx"] }
-nestrs = "0.3.2"
+nestrs-prisma = { version = "0.3.3", features = ["sqlx"] }
+nestrs = "0.3.3"
 ```
 
 The **`async-trait`** crate must be a direct dependency of any crate that invokes **`prisma_model!`**, because the generated repository trait uses `#[async_trait::async_trait]`.
@@ -25,7 +25,7 @@ From the `nestrs` workspace root:
 cargo run -p nestrs-prisma --example quickstart --features sqlx
 ```
 
-### B) From your own app (crate consumers on `nestrs-prisma = "0.3.2"`)
+### B) From your own app (crate consumers on `nestrs-prisma = "0.3.3"`)
 
 `cargo run -p nestrs-prisma ...` will not work in your app, because `-p` targets a package in your current workspace.
 Instead:
@@ -33,8 +33,8 @@ Instead:
 1. Add dependency:
 
 ```toml
-nestrs-prisma = { version = "0.3.2", features = ["sqlx"] }
-nestrs = "0.3.2"
+nestrs-prisma = { version = "0.3.3", features = ["sqlx"] }
+nestrs = "0.3.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -42,16 +42,16 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 ```bash
 mkdir -p examples
-curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v0.3.2/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
+curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v0.3.3/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
 ```
 
 Alternative (fetch from crates.io source):
 
 ```bash
 cargo install cargo-download
-cargo download nestrs-prisma==0.3.2 --extract
+cargo download nestrs-prisma==0.3.3 --extract
 mkdir -p examples
-cp nestrs-prisma-0.3.2/examples/quickstart.rs examples/quickstart.rs
+cp nestrs-prisma-0.3.3/examples/quickstart.rs examples/quickstart.rs
 ```
 
 3. Run from your app root:

@@ -61,11 +61,12 @@ export function TopNavbar({ searchIndex }: TopNavbarProps) {
             <kbd className="rounded border border-slate-300 px-1.5 text-xs dark:border-slate-800">CMD+K</kbd>
           </Button>
 
-          <Select defaultValue="v0.3.2">
+          <Select defaultValue="v0.3.3">
             <SelectTrigger className="h-9 w-[86px] border-slate-300 bg-white text-xs text-ink dark:border-slate-800 dark:bg-slate-900 dark:text-cloud">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="border-slate-200 dark:border-slate-800">
+              <SelectItem value="v0.3.3">v0.3.3</SelectItem>
               <SelectItem value="v0.3.2">v0.3.2</SelectItem>
             </SelectContent>
           </Select>

@@ -22,7 +22,7 @@ uuid = ["dep:uuid", "sqlx?/uuid"]
 [dependencies]
 async-trait = "0.1"
 chrono = { version = "0.4", optional = true, default-features = false, features = ["clock"] }
-nestrs = { version = "0.3.0", path = "../nestrs" }
+nestrs = { version = "0.3.1", path = "../nestrs" }
 axum.workspace = true
 paste = "1"
 serde = { version = "1", features = ["derive"] }

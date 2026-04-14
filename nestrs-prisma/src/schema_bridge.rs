@@ -666,9 +666,7 @@ pub fn generate_rust_bindings(parsed: &ParsedSchema) -> String {
     out.push_str(
         "// let parsed = nestrs_prisma::schema_bridge::parse_prisma_schema(schema_text)?;\n",
     );
-    out.push_str(
-        "// let relation_schema = nestrs_prisma::schema_bridge::build_relation_schema(&parsed);\n",
-    );
+    out.push_str("// let relation_schema = relation_schema();\n");
     out.push_str(&generate_relation_schema_snippet(parsed));
     out
 }
@@ -690,11 +688,11 @@ pub fn generate_relation_schema_snippet(parsed: &ParsedSchema) -> String {
 
     let mut out = String::new();
     out.push_str(&format!(
-        "\n// relation schema snippet\nlet relation_schema = nestrs_prisma::relations::RelationSchema::new(\n    nestrs_prisma::relations::RelationMode::{relation_mode},\n    nestrs_prisma::index_ddl::SqlDialect::{dialect},\n)\n"
+        "\n// relation schema snippet\n#[allow(dead_code)]\npub fn relation_schema() -> nestrs_prisma::relations::RelationSchema {{\n    nestrs_prisma::relations::RelationSchema::new(\n        nestrs_prisma::relations::RelationMode::{relation_mode},\n        nestrs_prisma::index_ddl::SqlDialect::{dialect},\n    )\n"
     ));
     for m in schema.models.values() {
         out.push_str(&format!(
-            "    .model(nestrs_prisma::relations::ModelMetadata {{ name: \"{}\".to_string(), single_id: {} }})\n",
+            "        .model(nestrs_prisma::relations::ModelMetadata {{ name: \"{}\".to_string(), single_id: {} }})\n",
             m.name, m.single_id
         ));
     }
@@ -705,7 +703,7 @@ pub fn generate_relation_schema_snippet(parsed: &ParsedSchema) -> String {
             RelationKind::ManyToManyImplicit => "ManyToManyImplicit",
             RelationKind::ManyToManyExplicit => "ManyToManyExplicit",
         };
-        out.push_str("    .relation(\n");
+        out.push_str("        .relation(\n");
         out.push_str(&format!(
             "        nestrs_prisma::relations::RelationDefinition::new(\n            nestrs_prisma::relations::RelationKind::{kind},\n            nestrs_prisma::relations::RelationEndpoint::new(\"{}\", \"{}\").list({}).optional({}),\n            nestrs_prisma::relations::RelationEndpoint::new(\"{}\", \"{}\").list({}).optional({}),\n        )",
             r.left.model,
@@ -720,9 +718,9 @@ pub fn generate_relation_schema_snippet(parsed: &ParsedSchema) -> String {
         if let Some(name) = &r.name {
             out.push_str(&format!(".name(\"{}\")", name));
         }
-        out.push_str("\n    )\n");
+        out.push_str("\n        )\n");
     }
-    out.push_str(";\n");
+    out.push_str("}\n");
     out
 }
 
@@ -874,6 +872,11 @@ model posts_categories {
         let code = generate_rust_bindings(&parsed);
         assert!(code.contains("prisma_model!(Users => \"users\""));
         assert!(code.contains("prisma_model!(Profiles => \"profiles\""));
+        assert!(
+            code.contains("pub fn relation_schema() -> nestrs_prisma::relations::RelationSchema")
+        );
+        assert!(!code
+            .contains("\nlet relation_schema = nestrs_prisma::relations::RelationSchema::new("));
     }
 
     #[test]

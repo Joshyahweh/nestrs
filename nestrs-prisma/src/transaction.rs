@@ -1,4 +1,4 @@
-//! Prisma-style transaction and batch helpers on top of SQLx `Any`.
+//! Prisma-style transaction and batch helpers on top of the configured SQLx backend.
 //!
 //! Supports:
 //! - Sequential transactional batches (`$transaction([])`-like)
@@ -115,7 +115,7 @@ fn retryable_conflict_error(msg: &str) -> bool {
 
 #[cfg(feature = "sqlx")]
 async fn apply_isolation(
-    tx: &mut sqlx::Transaction<'static, sqlx::Any>,
+    tx: &mut sqlx::Transaction<'static, crate::SqlxDb>,
     provider: DbProvider,
     iso: TransactionIsolationLevel,
 ) -> Result<(), String> {
@@ -138,7 +138,7 @@ async fn apply_isolation(
 
 #[cfg(feature = "sqlx")]
 pub struct PrismaTransaction {
-    tx: sqlx::Transaction<'static, sqlx::Any>,
+    tx: sqlx::Transaction<'static, crate::SqlxDb>,
 }
 
 #[cfg(feature = "sqlx")]
@@ -161,7 +161,7 @@ impl PrismaTransaction {
 
     pub async fn query_all_as<T>(&mut self, sql: &str) -> Result<Vec<T>, String>
     where
-        for<'r> T: sqlx::FromRow<'r, sqlx::any::AnyRow> + Send + Unpin,
+        for<'r> T: sqlx::FromRow<'r, <crate::SqlxDb as sqlx::Database>::Row> + Send + Unpin,
     {
         sqlx::query_as::<_, T>(sql)
             .fetch_all(self.tx.as_mut())

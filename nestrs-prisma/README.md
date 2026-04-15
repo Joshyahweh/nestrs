@@ -7,9 +7,11 @@ Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://crates.
 ```toml
 [dependencies]
 async-trait = "0.1"
-nestrs-prisma = { version = "0.3.3", features = ["sqlx"] }
-nestrs = "0.3.3"
+nestrs-prisma = { version = "0.3.4", features = ["sqlx", "sqlx-sqlite"] }
+nestrs = "0.3.4"
 ```
+
+When enabling `sqlx`, choose exactly one backend feature: `sqlx-sqlite`, `sqlx-postgres`, or `sqlx-mysql`.
 
 The **`async-trait`** crate must be a direct dependency of any crate that invokes **`prisma_model!`**, because the generated repository trait uses `#[async_trait::async_trait]`.
 
@@ -22,10 +24,10 @@ There are two ways to run quickstart:
 From the `nestrs` workspace root:
 
 ```bash
-cargo run -p nestrs-prisma --example quickstart --features sqlx
+cargo run -p nestrs-prisma --example quickstart --features "sqlx,sqlx-sqlite"
 ```
 
-### B) From your own app (crate consumers on `nestrs-prisma = "0.3.3"`)
+### B) From your own app (crate consumers on `nestrs-prisma = "0.3.4"`)
 
 `cargo run -p nestrs-prisma ...` will not work in your app, because `-p` targets a package in your current workspace.
 Instead:
@@ -33,8 +35,8 @@ Instead:
 1. Add dependency:
 
 ```toml
-nestrs-prisma = { version = "0.3.3", features = ["sqlx"] }
-nestrs = "0.3.3"
+nestrs-prisma = { version = "0.3.4", features = ["sqlx", "sqlx-postgres"] }
+nestrs = "0.3.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -42,16 +44,16 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 ```bash
 mkdir -p examples
-curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v0.3.3/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
+curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v0.3.4/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
 ```
 
 Alternative (fetch from crates.io source):
 
 ```bash
 cargo install cargo-download
-cargo download nestrs-prisma==0.3.3 --extract
+cargo download nestrs-prisma==0.3.4 --extract
 mkdir -p examples
-cp nestrs-prisma-0.3.3/examples/quickstart.rs examples/quickstart.rs
+cp nestrs-prisma-0.3.4/examples/quickstart.rs examples/quickstart.rs
 ```
 
 3. Run from your app root:

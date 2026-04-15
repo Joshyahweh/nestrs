@@ -178,7 +178,7 @@ fn quote_ident(provider: DbProvider, id: &str) -> String {
 }
 
 #[cfg(feature = "sqlx")]
-fn bind_relation_id<'a>(qb: &mut sqlx::QueryBuilder<'a, sqlx::Any>, value: &RelationIdValue) {
+fn bind_relation_id<'a>(qb: &mut sqlx::QueryBuilder<'a, crate::SqlxDb>, value: &RelationIdValue) {
     match value {
         RelationIdValue::Int(v) => {
             qb.push_bind(*v);
@@ -199,7 +199,7 @@ impl crate::PrismaService {
         opts: IncludeOptions,
     ) -> Result<Vec<T>, RelationQueryError>
     where
-        for<'r> T: sqlx::FromRow<'r, sqlx::any::AnyRow> + Send + Unpin,
+        for<'r> T: sqlx::FromRow<'r, <crate::SqlxDb as sqlx::Database>::Row> + Send + Unpin,
     {
         let pool = crate::sqlx_pool()
             .await
@@ -208,8 +208,9 @@ impl crate::PrismaService {
         let table = quote_ident(provider, &spec.child_table);
         let fk = quote_ident(provider, &spec.child_fk_column);
 
-        let mut qb =
-            sqlx::QueryBuilder::<sqlx::Any>::new(format!("SELECT * FROM {table} WHERE {fk} = "));
+        let mut qb = sqlx::QueryBuilder::<crate::SqlxDb>::new(format!(
+            "SELECT * FROM {table} WHERE {fk} = "
+        ));
         bind_relation_id(&mut qb, &parent_id);
 
         if let Some((ref col, ord)) = opts.order_by {
@@ -244,7 +245,7 @@ impl crate::PrismaService {
         owner_id: RelationIdValue,
     ) -> Result<Option<T>, RelationQueryError>
     where
-        for<'r> T: sqlx::FromRow<'r, sqlx::any::AnyRow> + Send + Unpin,
+        for<'r> T: sqlx::FromRow<'r, <crate::SqlxDb as sqlx::Database>::Row> + Send + Unpin,
     {
         let pool = crate::sqlx_pool()
             .await
@@ -253,8 +254,9 @@ impl crate::PrismaService {
         let table = quote_ident(provider, &spec.table);
         let fk = quote_ident(provider, &spec.fk_column);
 
-        let mut qb =
-            sqlx::QueryBuilder::<sqlx::Any>::new(format!("SELECT * FROM {table} WHERE {fk} = "));
+        let mut qb = sqlx::QueryBuilder::<crate::SqlxDb>::new(format!(
+            "SELECT * FROM {table} WHERE {fk} = "
+        ));
         bind_relation_id(&mut qb, &owner_id);
         qb.push(" LIMIT 1");
 
@@ -272,7 +274,7 @@ impl crate::PrismaService {
         opts: IncludeOptions,
     ) -> Result<Vec<T>, RelationQueryError>
     where
-        for<'r> T: sqlx::FromRow<'r, sqlx::any::AnyRow> + Send + Unpin,
+        for<'r> T: sqlx::FromRow<'r, <crate::SqlxDb as sqlx::Database>::Row> + Send + Unpin,
     {
         let pool = crate::sqlx_pool()
             .await
@@ -284,7 +286,7 @@ impl crate::PrismaService {
         let join_left = quote_ident(provider, &spec.join_left_column);
         let join_right = quote_ident(provider, &spec.join_right_column);
 
-        let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new(format!(
+        let mut qb = sqlx::QueryBuilder::<crate::SqlxDb>::new(format!(
             "SELECT r.* FROM {related_table} r INNER JOIN {join_table} j ON j.{join_right} = r.{related_pk} WHERE j.{join_left} = "
         ));
         bind_relation_id(&mut qb, &left_id);
@@ -328,7 +330,8 @@ impl crate::PrismaService {
         let pk = quote_ident(provider, &spec.record_pk_column);
         let fk = quote_ident(provider, &spec.fk_column);
 
-        let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new(format!("UPDATE {table} SET {fk} = "));
+        let mut qb =
+            sqlx::QueryBuilder::<crate::SqlxDb>::new(format!("UPDATE {table} SET {fk} = "));
         bind_relation_id(&mut qb, &target_id);
         qb.push(" WHERE ");
         qb.push(pk);
@@ -360,7 +363,7 @@ impl crate::PrismaService {
         let pk = quote_ident(provider, &spec.record_pk_column);
         let fk = quote_ident(provider, &spec.fk_column);
 
-        let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new(format!(
+        let mut qb = sqlx::QueryBuilder::<crate::SqlxDb>::new(format!(
             "UPDATE {table} SET {fk} = NULL WHERE {pk} = "
         ));
         bind_relation_id(&mut qb, &record_id);
@@ -387,7 +390,7 @@ impl crate::PrismaService {
         let left = quote_ident(provider, &spec.left_column);
         let right = quote_ident(provider, &spec.right_column);
 
-        let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new(format!(
+        let mut qb = sqlx::QueryBuilder::<crate::SqlxDb>::new(format!(
             "INSERT INTO {table} ({left}, {right}) VALUES ("
         ));
         bind_relation_id(&mut qb, &left_id);
@@ -417,8 +420,9 @@ impl crate::PrismaService {
         let left = quote_ident(provider, &spec.left_column);
         let right = quote_ident(provider, &spec.right_column);
 
-        let mut qb =
-            sqlx::QueryBuilder::<sqlx::Any>::new(format!("DELETE FROM {table} WHERE {left} = "));
+        let mut qb = sqlx::QueryBuilder::<crate::SqlxDb>::new(format!(
+            "DELETE FROM {table} WHERE {left} = "
+        ));
         bind_relation_id(&mut qb, &left_id);
         qb.push(" AND ");
         qb.push(right);

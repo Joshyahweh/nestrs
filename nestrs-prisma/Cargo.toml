@@ -13,8 +13,12 @@ categories = ["database", "web-programming"]
 
 [features]
 default = []
-# Real DB connectivity via SQLx (Postgres, SQLite, etc.) using `DATABASE_URL` / `PrismaOptions`.
+# Real DB connectivity via SQLx using `DATABASE_URL` / `PrismaOptions`.
 sqlx = ["dep:sqlx", "dep:tokio"]
+# Select a concrete SQLx database backend used by generated repositories.
+sqlx-sqlite = ["sqlx"]
+sqlx-postgres = ["sqlx"]
+sqlx-mysql = ["sqlx"]
 # Optional column types for `prisma_model!` (enable matching features on sqlx).
 chrono = ["dep:chrono", "sqlx?/chrono"]
 uuid = ["dep:uuid", "sqlx?/uuid"]
@@ -22,17 +26,17 @@ uuid = ["dep:uuid", "sqlx?/uuid"]
 [dependencies]
 async-trait = "0.1"
 chrono = { version = "0.4", optional = true, default-features = false, features = ["clock"] }
-nestrs = { version = "0.3.3", path = "../nestrs" }
+nestrs = { version = "0.3.4", path = "../nestrs" }
 axum.workspace = true
 paste = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 tokio = { workspace = true, optional = true }
 uuid = { version = "1", optional = true, features = ["v4"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "sqlite", "postgres", "derive"], optional = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "sqlite", "postgres", "mysql", "derive"], optional = true }
 
 [dev-dependencies]
 async-trait = "0.1"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "sqlite", "derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "sqlite", "postgres", "mysql", "derive"] }
 tokio.workspace = true
 tower = { version = "0.5", features = ["util"] }

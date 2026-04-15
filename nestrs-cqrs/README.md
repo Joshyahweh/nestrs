@@ -10,7 +10,7 @@ Handlers are registered **imperatively** (e.g. in `on_module_init` or bootstrap)
 
 ```toml
 [dependencies]
-nestrs-cqrs = "0.3.3"
+nestrs-cqrs = "0.3.4"
 async-trait = "0.1"
 ```
 

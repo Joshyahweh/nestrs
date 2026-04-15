@@ -7,11 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-04-15
+
+### Changed
+
+- Workspace and crate versions aligned to `0.3.4` for crates.io publish.
+
 ## [0.3.3] - 2026-04-14
 
 ### Fixed
 
-- `nestrs-prisma` schema bridge maps Prisma `DateTime` to `String` in generated `prisma_model!` structs so bindings compile against `sqlx::Any` (chrono values only implement SQLx traits for concrete database drivers).
+- `nestrs-prisma` now targets a concrete SQLx backend (`sqlx-sqlite` / `sqlx-postgres` / `sqlx-mysql`) instead of hardcoding `sqlx::Any`, restoring typed scalar compatibility for generated `DateTime`, `Json`, and similar fields.
 
 ## [0.3.2] - 2026-04-14
 

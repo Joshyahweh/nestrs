@@ -1,6 +1,6 @@
 name: publish-crates
 
-# Publishes only after preflight passes. Use a tag on `main` (e.g. `v0.3.3`) or manual dispatch.
+# Publishes only after preflight passes. Use a tag on `main` (e.g. `v0.3.4`) or manual dispatch.
 # After a successful tag-triggered publish, creates a GitHub Release (shows "Latest" on the repo).
 on:
   push:

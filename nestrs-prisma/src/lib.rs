@@ -28,18 +28,9 @@ pub use paste;
 #[doc(hidden)]
 pub use sqlx;
 
-// At most one backend marker may be enabled with `sqlx` (Postgres vs MySQL vs SQLite default).
-#[cfg(all(
-    feature = "sqlx",
-    any(
-        all(feature = "sqlx-postgres", feature = "sqlx-mysql"),
-        all(feature = "sqlx-postgres", feature = "sqlx-sqlite"),
-        all(feature = "sqlx-mysql", feature = "sqlx-sqlite"),
-    ),
-))]
-compile_error!(
-    "Enable at most one SQLx backend feature: `sqlx-postgres`, `sqlx-mysql`, or `sqlx-sqlite` (optional; SQLite is the default when only `sqlx` is enabled)."
-);
+// Backend selection when `sqlx` is enabled. Prefer enabling at most one of `sqlx-postgres`,
+// `sqlx-mysql`, or `sqlx-sqlite` in your own crate; if multiple are enabled (for example via
+// `cargo ... --all-features` in CI), precedence is Postgres, then MySQL, then SQLite.
 #[cfg(all(feature = "sqlx", feature = "sqlx-postgres"))]
 pub type SqlxDb = sqlx::Postgres;
 #[cfg(all(

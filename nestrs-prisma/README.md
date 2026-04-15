@@ -11,7 +11,7 @@ nestrs-prisma = { version = "0.3.4", features = ["sqlx", "sqlx-sqlite"] }
 nestrs = "0.3.4"
 ```
 
-When enabling `sqlx`, choose exactly one backend feature: `sqlx-sqlite`, `sqlx-postgres`, or `sqlx-mysql`.
+When enabling `sqlx`, choose exactly one backend feature in your app: `sqlx-sqlite`, `sqlx-postgres`, or `sqlx-mysql`. If more than one is enabled (for example through workspace `--all-features`), the concrete driver is selected in priority order: Postgres, then MySQL, then SQLite.
 
 The **`async-trait`** crate must be a direct dependency of any crate that invokes **`prisma_model!`**, because the generated repository trait uses `#[async_trait::async_trait]`.
 

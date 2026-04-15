@@ -39,7 +39,9 @@ jobs:
         run: cargo check --workspace --all-targets --all-features
 
       - name: Test
-        run: cargo test --workspace --all-features
+        run: |
+          cargo test --workspace --all-features
+          cargo test -p nestrs-prisma --features "sqlx,sqlx-sqlite" --test prisma_model_client
 
   lint-and-docs:
     runs-on: ubuntu-latest

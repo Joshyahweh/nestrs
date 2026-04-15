@@ -1,4 +1,12 @@
-#![cfg(feature = "sqlx")]
+// SQLite URLs require `SqlxDb = sqlx::Sqlite`. With `sqlx-postgres` / `sqlx-mysql` enabled
+// (e.g. `cargo test --all-features`), `SqlxDb` is Postgres/MySQL instead, so this test is
+// built only when those backend markers are off. CI runs it explicitly with
+// `--features sqlx,sqlx-sqlite`.
+#![cfg(all(
+    feature = "sqlx",
+    not(feature = "sqlx-postgres"),
+    not(feature = "sqlx-mysql"),
+))]
 
 use std::sync::Arc;
 

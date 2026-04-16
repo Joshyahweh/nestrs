@@ -1,4 +1,8 @@
-#![cfg(feature = "sqlx")]
+#![cfg(all(
+    feature = "sqlx",
+    not(feature = "sqlx-postgres"),
+    not(feature = "sqlx-mysql"),
+))]
 
 use std::sync::Arc;
 use std::sync::OnceLock;

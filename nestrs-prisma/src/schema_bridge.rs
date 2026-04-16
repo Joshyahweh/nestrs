@@ -679,8 +679,7 @@ fn resolve_base_rust_type(
                 "Boolean" => "bool".to_string(),
                 "Float" => "f64".to_string(),
                 "Decimal" => "f64".to_string(),
-                // `nestrs-prisma` runs against `sqlx::Any`; chrono types only implement sqlx traits for concrete drivers.
-                "DateTime" => "String".to_string(),
+                "DateTime" => "chrono::DateTime<chrono::Utc>".to_string(),
                 "Json" => "serde_json::Value".to_string(),
                 "Bytes" => "Vec<u8>".to_string(),
                 _ => return None,
@@ -695,7 +694,7 @@ fn resolve_base_rust_type(
         "Boolean" => Some("bool".to_string()),
         "Float" => Some("f64".to_string()),
         "Decimal" => Some("f64".to_string()),
-        "DateTime" => Some("String".to_string()),
+        "DateTime" => Some("chrono::DateTime<chrono::Utc>".to_string()),
         "Json" => Some("serde_json::Value".to_string()),
         "Bytes" => Some("Vec<u8>".to_string()),
         _ => None,
@@ -1081,7 +1080,7 @@ model event_log {
 "#;
         let parsed = parse_prisma_schema(schema).unwrap();
         let code = generate_rust_bindings(&parsed);
-        assert!(code.contains("createdAt: String"));
+        assert!(code.contains("createdAt: chrono::DateTime<chrono::Utc>"));
         assert!(code.contains("payload: Option<serde_json::Value>"));
         assert!(code.contains("blob: Option<Vec<u8>>"));
         assert!(code.contains("score: Option<f64>"));
@@ -1128,7 +1127,7 @@ model account {
         assert!(code.contains("tags: Vec<String>"));
         assert!(code.contains("metadata: Option<serde_json::Value>"));
         assert!(code.contains("avatar: Option<Vec<u8>>"));
-        assert!(code.contains("created_at: String"));
+        assert!(code.contains("created_at: chrono::DateTime<chrono::Utc>"));
         assert!(code.contains("address: Option<Address>"));
     }
 

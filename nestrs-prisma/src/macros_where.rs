@@ -929,7 +929,7 @@ macro_rules! __prisma_where_types {
 
                 fn __push_where(
                     &self,
-                    qb: &mut $crate::sqlx::QueryBuilder<'_, $crate::sqlx::Any>,
+                    qb: &mut $crate::sqlx::QueryBuilder<'_, $crate::SqlxDb>,
                 ) -> std::result::Result<(), $crate::PrismaError> {
                     match self {
                         Self::And(parts) => {

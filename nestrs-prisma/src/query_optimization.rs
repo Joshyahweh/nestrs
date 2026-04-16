@@ -197,7 +197,7 @@ impl crate::PrismaService {
         opts: QueryOptimizationOptions,
     ) -> Result<(Vec<T>, QueryExecutionReport), String>
     where
-        for<'r> T: sqlx::FromRow<'r, sqlx::any::AnyRow> + Send + Unpin,
+        for<'r> T: sqlx::FromRow<'r, <crate::SqlxDb as sqlx::Database>::Row> + Send + Unpin,
     {
         let pool = crate::sqlx_pool().await.map_err(|e| e.to_string())?;
         let attributed_sql = if let Some(ref attr) = opts.attribution {

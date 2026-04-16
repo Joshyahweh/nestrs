@@ -1,4 +1,4 @@
-//! Prisma-style enums mapped to SQL `TEXT` via SQLx `Any` (Postgres / SQLite).
+//! Prisma-style enums mapped to SQL `TEXT` via the configured concrete SQLx backend.
 
 #[cfg(not(feature = "sqlx"))]
 #[macro_export]
@@ -27,9 +27,9 @@ macro_rules! prisma_enum {
             $( $v ),*
         }
 
-        impl $crate::sqlx::Type<$crate::sqlx::Any> for $Name {
-            fn type_info() -> $crate::sqlx::any::AnyTypeInfo {
-                <str as $crate::sqlx::Type<$crate::sqlx::Any>>::type_info()
+        impl $crate::sqlx::Type<$crate::SqlxDb> for $Name {
+            fn type_info() -> <$crate::SqlxDb as $crate::sqlx::Database>::TypeInfo {
+                <str as $crate::sqlx::Type<$crate::SqlxDb>>::type_info()
             }
         }
 
@@ -52,22 +52,24 @@ macro_rules! prisma_enum {
             }
         }
 
-        impl<'q> $crate::sqlx::Encode<'q, $crate::sqlx::Any> for $Name {
+        impl<'q> $crate::sqlx::Encode<'q, $crate::SqlxDb> for $Name {
             fn encode_by_ref(
                 &self,
-                buf: &mut ::std::vec::Vec<$crate::sqlx::any::AnyArgumentBuffer<'q>>,
+                buf: &mut <$crate::SqlxDb as $crate::sqlx::Database>::ArgumentBuffer<'q>,
             ) -> $crate::sqlx::encode::IsNull {
-                <&str as $crate::sqlx::Encode<'q, $crate::sqlx::Any>>::encode(self.as_str(), buf)
+                <&str as $crate::sqlx::Encode<'q, $crate::SqlxDb>>::encode(self.as_str(), buf)
             }
 
             fn size_hint(&self) -> usize {
-                <&str as $crate::sqlx::Encode<'q, $crate::sqlx::Any>>::size_hint(&self.as_str())
+                <&str as $crate::sqlx::Encode<'q, $crate::SqlxDb>>::size_hint(&self.as_str())
             }
         }
 
-        impl<'r> $crate::sqlx::Decode<'r, $crate::sqlx::Any> for $Name {
-            fn decode(value: $crate::sqlx::any::AnyValueRef<'r>) -> ::std::result::Result<Self, $crate::sqlx::error::BoxDynError> {
-                let s = <&str as $crate::sqlx::Decode<'r, $crate::sqlx::Any>>::decode(value)?;
+        impl<'r> $crate::sqlx::Decode<'r, $crate::SqlxDb> for $Name {
+            fn decode(
+                value: <$crate::SqlxDb as $crate::sqlx::Database>::ValueRef<'r>,
+            ) -> ::std::result::Result<Self, $crate::sqlx::error::BoxDynError> {
+                let s = <&str as $crate::sqlx::Decode<'r, $crate::SqlxDb>>::decode(value)?;
                 s.parse::<$Name>().map_err(|e: ::std::string::String| e.into())
             }
         }

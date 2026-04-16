@@ -652,7 +652,10 @@ fn provider_supports_scalar_lists(provider: Option<&str>) -> bool {
     )
 }
 
-fn resolve_prisma_datetime_rust_type(native_db_type: Option<&str>) -> &'static str {
+fn resolve_prisma_datetime_rust_type(
+    native_db_type: Option<&str>,
+    provider: Option<&str>,
+) -> &'static str {
     match native_db_type {
         // Postgres/MySQL/SQLServer timestamp-like types without timezone.
         Some("Timestamp") | Some("DateTime") | Some("DateTime2") | Some("SmallDateTime") => {
@@ -668,7 +671,13 @@ fn resolve_prisma_datetime_rust_type(native_db_type: Option<&str>) -> &'static s
         // Interval has no first-class sqlx chrono type; use microseconds as i64.
         Some("Interval") => "i64",
         // Fallback for provider defaults and unknown native overrides.
-        _ => "chrono::DateTime<chrono::Utc>",
+        _ => match provider.map(|p| p.to_ascii_lowercase()) {
+            // Prisma DateTime defaults to timestamp-without-timezone on these providers.
+            Some(p) if p == "postgresql" || p == "postgres" || p == "mysql" || p == "sqlite" => {
+                "chrono::NaiveDateTime"
+            }
+            _ => "chrono::DateTime<chrono::Utc>",
+        },
     }
 }
 
@@ -728,6 +737,7 @@ fn resolve_prisma_string_rust_type(native_db_type: Option<&str>) -> &'static str
 
 fn resolve_base_rust_type(
     field: &ParsedField,
+    provider: Option<&str>,
     enum_types: &HashMap<String, String>,
     composite_types: &HashMap<String, String>,
 ) -> Option<String> {
@@ -746,7 +756,7 @@ fn resolve_base_rust_type(
         "Boolean" => Some("bool".to_string()),
         "Float" => Some(resolve_prisma_float_rust_type(native).to_string()),
         "Decimal" => Some(resolve_prisma_decimal_rust_type(native).to_string()),
-        "DateTime" => Some(resolve_prisma_datetime_rust_type(native).to_string()),
+        "DateTime" => Some(resolve_prisma_datetime_rust_type(native, provider).to_string()),
         "Json" => Some("serde_json::Value".to_string()),
         "Bytes" => Some("Vec<u8>".to_string()),
         _ => None,
@@ -766,7 +776,7 @@ fn field_skip_reason(
             provider.unwrap_or("unknown")
         ));
     }
-    if resolve_base_rust_type(field, enum_types, composite_types).is_none() {
+    if resolve_base_rust_type(field, provider, enum_types, composite_types).is_none() {
         return Some(format!("unsupported Prisma type `{}`", field.type_name));
     }
     None
@@ -778,7 +788,7 @@ fn to_rust_type(
     enum_types: &HashMap<String, String>,
     composite_types: &HashMap<String, String>,
 ) -> Option<String> {
-    let base = resolve_base_rust_type(field, enum_types, composite_types)?;
+    let base = resolve_base_rust_type(field, provider, enum_types, composite_types)?;
 
     if field.list {
         if provider_supports_scalar_lists(provider) {
@@ -1132,7 +1142,7 @@ model event_log {
 "#;
         let parsed = parse_prisma_schema(schema).unwrap();
         let code = generate_rust_bindings(&parsed);
-        assert!(code.contains("createdAt: chrono::DateTime<chrono::Utc>"));
+        assert!(code.contains("createdAt: chrono::NaiveDateTime"));
         assert!(code.contains("payload: Option<serde_json::Value>"));
         assert!(code.contains("blob: Option<Vec<u8>>"));
         assert!(code.contains("score: Option<f64>"));
@@ -1264,7 +1274,7 @@ model account {
         assert!(code.contains("tags: Vec<String>"));
         assert!(code.contains("metadata: Option<serde_json::Value>"));
         assert!(code.contains("avatar: Option<Vec<u8>>"));
-        assert!(code.contains("created_at: chrono::DateTime<chrono::Utc>"));
+        assert!(code.contains("created_at: chrono::NaiveDateTime"));
         assert!(code.contains("address: Option<Address>"));
     }
 

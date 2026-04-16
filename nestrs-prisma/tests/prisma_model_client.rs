@@ -13,7 +13,7 @@ use std::sync::Arc;
 use nestrs_prisma::{PrismaModule, PrismaOptions, PrismaService};
 
 nestrs_prisma::prisma_model!(User => "users", {
-    id: i64,
+    id: i32,
     email: String,
     name: String,
 });

@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-04-16
+
+### Changed
+
+- Workspace and crate versions aligned to `0.3.7` for crates.io publish.
+
+### Fixed
+
+- `nestrs-prisma` macro internals now treat integer primary keys (`id: i8/i16/i32/i64/u8/u16/u32/u64`) as auto-generated in create/createMany paths, avoiding insert-shape mismatches after widening native integer mappings beyond `i64`-only assumptions.
+- `nestrs-prisma` integration coverage now includes an `id: i32` CRUD path to guard against future Prisma/Postgres `INT4` model regressions.
+
 ## [0.3.6] - 2026-04-16
 
 ### Changed
@@ -16,6 +27,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - `nestrs-prisma` README now documents required optional app dependencies for generated native types (for example `rust_decimal`, `ipnetwork`, and `bit-vec`) so consumer apps can compile generated bindings without guesswork.
+- `nestrs-prisma` codegen now treats plain Prisma `DateTime` as provider-aware by default (`chrono::NaiveDateTime` for PostgreSQL/MySQL/SQLite), preventing `TIMESTAMP` vs `TIMESTAMPTZ` decode mismatches when native `@db.Timestamp(...)` is omitted.
 
 ## [0.3.5] - 2026-04-16
 

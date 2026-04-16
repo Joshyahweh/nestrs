@@ -528,7 +528,8 @@ macro_rules! __prisma_non_null_value {
 ///
 /// **Requires** the `sqlx` feature on `nestrs-prisma`.
 ///
-/// Supported field types today: `i64`, `String`, `bool`, `Option<…>` of those, `chrono::DateTime<Utc>` and
+/// Supported field types today: `i64`, `String`, `bool`, `Option<…>` of those, `chrono::DateTime<Utc>`,
+/// `chrono::NaiveDateTime`, and
 /// `uuid::Uuid` when crate features `chrono` / `uuid` are enabled.
 ///
 /// Generated models execute against the configured concrete SQLx backend (`Sqlite` by default, or

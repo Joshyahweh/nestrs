@@ -652,6 +652,19 @@ fn provider_supports_scalar_lists(provider: Option<&str>) -> bool {
     )
 }
 
+fn resolve_prisma_datetime_rust_type(native_db_type: Option<&str>) -> &'static str {
+    match native_db_type {
+        // Postgres/MySQL/SQLServer timestamp-like types without timezone.
+        Some("Timestamp") | Some("DateTime") | Some("DateTime2") | Some("SmallDateTime") => {
+            "chrono::NaiveDateTime"
+        }
+        // Postgres/SQLServer timezone-aware timestamp variants.
+        Some("Timestamptz") | Some("DateTimeOffset") => "chrono::DateTime<chrono::Utc>",
+        // Fallback for provider defaults and unknown native overrides.
+        _ => "chrono::DateTime<chrono::Utc>",
+    }
+}
+
 fn resolve_base_rust_type(
     field: &ParsedField,
     enum_types: &HashMap<String, String>,
@@ -679,7 +692,7 @@ fn resolve_base_rust_type(
                 "Boolean" => "bool".to_string(),
                 "Float" => "f64".to_string(),
                 "Decimal" => "f64".to_string(),
-                "DateTime" => "chrono::DateTime<chrono::Utc>".to_string(),
+                "DateTime" => resolve_prisma_datetime_rust_type(Some(native)).to_string(),
                 "Json" => "serde_json::Value".to_string(),
                 "Bytes" => "Vec<u8>".to_string(),
                 _ => return None,
@@ -694,7 +707,7 @@ fn resolve_base_rust_type(
         "Boolean" => Some("bool".to_string()),
         "Float" => Some("f64".to_string()),
         "Decimal" => Some("f64".to_string()),
-        "DateTime" => Some("chrono::DateTime<chrono::Utc>".to_string()),
+        "DateTime" => Some(resolve_prisma_datetime_rust_type(None).to_string()),
         "Json" => Some("serde_json::Value".to_string()),
         "Bytes" => Some("Vec<u8>".to_string()),
         _ => None,
@@ -1129,6 +1142,23 @@ model account {
         assert!(code.contains("avatar: Option<Vec<u8>>"));
         assert!(code.contains("created_at: chrono::DateTime<chrono::Utc>"));
         assert!(code.contains("address: Option<Address>"));
+    }
+
+    #[test]
+    fn generate_bindings_maps_native_timestamp_without_timezone_to_naive_datetime() {
+        let schema = r#"
+datasource db {
+  provider = "postgresql"
+}
+
+model event_log {
+  id         String   @id
+  created_at DateTime @db.Timestamp(3)
+}
+"#;
+        let parsed = parse_prisma_schema(schema).unwrap();
+        let code = generate_rust_bindings(&parsed);
+        assert!(code.contains("created_at: chrono::NaiveDateTime"));
     }
 
     #[test]

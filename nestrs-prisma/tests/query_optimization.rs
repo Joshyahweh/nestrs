@@ -1,4 +1,9 @@
-#![cfg(feature = "sqlx")]
+// Requires `SqlxDb = sqlx::Sqlite` — see `prisma_model_client.rs` / CI for `--all-features`.
+#![cfg(all(
+    feature = "sqlx",
+    not(feature = "sqlx-postgres"),
+    not(feature = "sqlx-mysql"),
+))]
 
 use std::sync::Arc;
 

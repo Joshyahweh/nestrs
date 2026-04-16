@@ -41,7 +41,12 @@ jobs:
       - name: Test
         run: |
           cargo test --workspace --all-features
-          cargo test -p nestrs-prisma --features "sqlx,sqlx-sqlite" --test prisma_model_client
+          cargo test -p nestrs-prisma --features "sqlx,sqlx-sqlite" \
+            --test prisma_model_client \
+            --test query_optimization \
+            --test transaction_batch \
+            --test relation_queries \
+            -- --test-threads=1
 
   lint-and-docs:
     runs-on: ubuntu-latest

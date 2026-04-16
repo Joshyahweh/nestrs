@@ -7,13 +7,30 @@ Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://crates.
 ```toml
 [dependencies]
 async-trait = "0.1"
-nestrs-prisma = { version = "0.3.5", features = ["sqlx", "sqlx-sqlite"] }
-nestrs = "0.3.5"
+nestrs-prisma = { version = "0.3.6", features = ["sqlx", "sqlx-sqlite"] }
+nestrs = "0.3.6"
 ```
 
 When enabling `sqlx`, choose exactly one backend feature in your app: `sqlx-sqlite`, `sqlx-postgres`, or `sqlx-mysql`. If more than one is enabled (for example through workspace `--all-features`), the concrete driver is selected in priority order: Postgres, then MySQL, then SQLite.
 
 The **`async-trait`** crate must be a direct dependency of any crate that invokes **`prisma_model!`**, because the generated repository trait uses `#[async_trait::async_trait]`.
+
+## Generated type dependencies
+
+Generated bindings can include native Rust types based on Prisma scalar/native DB type mapping.
+Add the crates your schema requires:
+
+```toml
+[dependencies]
+chrono = { version = "0.4", features = ["clock"] } # DateTime/Timestamp/Date/Time mappings
+uuid = { version = "1", features = ["v4"] }        # @db.Uuid
+serde_json = "1"                                    # Json/JsonB
+rust_decimal = "1"                                  # Decimal/Numeric
+ipnetwork = "0.21"                                  # @db.Cidr
+bit-vec = "0.6"                                     # @db.Bit/@db.VarBit
+```
+
+If your schema does not use a given type family, you can omit that dependency.
 
 ## Run the quickstart example
 
@@ -27,7 +44,7 @@ From the `nestrs` workspace root:
 cargo run -p nestrs-prisma --example quickstart --features "sqlx,sqlx-sqlite"
 ```
 
-### B) From your own app (crate consumers on `nestrs-prisma = "0.3.5"`)
+### B) From your own app (crate consumers on `nestrs-prisma = "0.3.6"`)
 
 `cargo run -p nestrs-prisma ...` will not work in your app, because `-p` targets a package in your current workspace.
 Instead:
@@ -35,8 +52,8 @@ Instead:
 1. Add dependency:
 
 ```toml
-nestrs-prisma = { version = "0.3.5", features = ["sqlx", "sqlx-postgres"] }
-nestrs = "0.3.5"
+nestrs-prisma = { version = "0.3.6", features = ["sqlx", "sqlx-postgres"] }
+nestrs = "0.3.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -44,16 +61,16 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 ```bash
 mkdir -p examples
-curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v0.3.5/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
+curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v0.3.6/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
 ```
 
 Alternative (fetch from crates.io source):
 
 ```bash
 cargo install cargo-download
-cargo download nestrs-prisma==0.3.5 --extract
+cargo download nestrs-prisma==0.3.6 --extract
 mkdir -p examples
-cp nestrs-prisma-0.3.5/examples/quickstart.rs examples/quickstart.rs
+cp nestrs-prisma-0.3.6/examples/quickstart.rs examples/quickstart.rs
 ```
 
 3. Run from your app root:
@@ -140,7 +157,7 @@ async fn demo(prisma: std::sync::Arc<nestrs_prisma::PrismaService>) -> Result<()
 }
 ```
 
-**Supported field types today:** `i64`, `String`, `bool` (extend the macro for more as needed).
+**Supported field types today:** integer scalars (`i8`..`i64`, `u8`..`u64`), `String`, `bool`, `chrono` date/time types, `uuid::Uuid`, `serde_json::Value`, `Vec<u8>`, `rust_decimal::Decimal`, and provider-native mappings like `std::net::IpAddr` / `ipnetwork::IpNetwork` / `bit_vec::BitVec` when your schema uses corresponding native DB types.
 
 **Note:** In-memory SQLite with SQLx `Any` works most reliably with a **single-connection** pool (`pool_max(1)`) so DDL and queries share one database. File-backed URLs avoid that limitation.
 

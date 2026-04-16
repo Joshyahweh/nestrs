@@ -28,6 +28,28 @@ pub use paste;
 #[doc(hidden)]
 pub use sqlx;
 
+// Backend selection when `sqlx` is enabled. Prefer enabling at most one of `sqlx-postgres`,
+// `sqlx-mysql`, or `sqlx-sqlite` in your own crate; if multiple are enabled (for example via
+// `cargo ... --all-features` in CI), precedence is Postgres, then MySQL, then SQLite.
+#[cfg(all(feature = "sqlx", feature = "sqlx-postgres"))]
+pub type SqlxDb = sqlx::Postgres;
+#[cfg(all(
+    feature = "sqlx",
+    not(feature = "sqlx-postgres"),
+    feature = "sqlx-mysql"
+))]
+pub type SqlxDb = sqlx::MySql;
+// SQLite when neither Postgres nor MySQL is selected: `sqlx` only, or `sqlx` + optional `sqlx-sqlite`.
+#[cfg(all(
+    feature = "sqlx",
+    not(feature = "sqlx-postgres"),
+    not(feature = "sqlx-mysql"),
+))]
+pub type SqlxDb = sqlx::Sqlite;
+
+#[cfg(feature = "sqlx")]
+pub type SqlxPool = sqlx::Pool<SqlxDb>;
+
 #[cfg(feature = "sqlx")]
 pub use client::ModelRepository;
 pub use client::SortOrder;
@@ -96,29 +118,23 @@ impl PrismaOptions {
 static PRISMA_OPTIONS: OnceLock<PrismaOptions> = OnceLock::new();
 
 #[cfg(feature = "sqlx")]
-static SQLX_POOL: OnceCell<sqlx::AnyPool> = OnceCell::const_new();
-
-#[cfg(feature = "sqlx")]
-static SQLX_ANY_DRIVERS: OnceLock<()> = OnceLock::new();
+static SQLX_POOL: OnceCell<SqlxPool> = OnceCell::const_new();
 
 /// Shared SQLx pool for [`PrismaService`] and generated [`ModelRepository`] access.
 #[cfg(feature = "sqlx")]
-pub async fn sqlx_pool() -> Result<&'static sqlx::AnyPool, PrismaError> {
+pub async fn sqlx_pool() -> Result<&'static SqlxPool, PrismaError> {
     ensure_sqlx_pool().await.map_err(PrismaError::PoolInit)
 }
 
 #[cfg(feature = "sqlx")]
-async fn ensure_sqlx_pool() -> Result<&'static sqlx::AnyPool, String> {
-    let _ = SQLX_ANY_DRIVERS.get_or_init(|| {
-        sqlx::any::install_default_drivers();
-    });
+async fn ensure_sqlx_pool() -> Result<&'static SqlxPool, String> {
     SQLX_POOL
         .get_or_try_init(|| async {
             let opts = PRISMA_OPTIONS.get().cloned().ok_or_else(|| {
                 "PrismaModule::for_root / for_root_with_options must be called before SQL connectivity"
                     .to_string()
             })?;
-            sqlx::any::AnyPoolOptions::new()
+            sqlx::pool::PoolOptions::<SqlxDb>::new()
                 .max_connections(opts.pool_max)
                 .min_connections(opts.pool_min)
                 .connect(&opts.database_url)
@@ -172,7 +188,7 @@ impl PrismaService {
     #[cfg(feature = "sqlx")]
     pub async fn query_all_as<T>(&self, sql: &str) -> Result<Vec<T>, String>
     where
-        for<'r> T: sqlx::FromRow<'r, sqlx::any::AnyRow> + Send + Unpin,
+        for<'r> T: sqlx::FromRow<'r, <SqlxDb as sqlx::Database>::Row> + Send + Unpin,
     {
         let pool = ensure_sqlx_pool().await?;
         sqlx::query_as::<_, T>(sql)

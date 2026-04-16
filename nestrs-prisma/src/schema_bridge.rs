@@ -659,9 +659,70 @@ fn resolve_prisma_datetime_rust_type(native_db_type: Option<&str>) -> &'static s
             "chrono::NaiveDateTime"
         }
         // Postgres/SQLServer timezone-aware timestamp variants.
-        Some("Timestamptz") | Some("DateTimeOffset") => "chrono::DateTime<chrono::Utc>",
+        Some("Timestamptz") | Some("DateTimeOffset") | Some("Timetz") => {
+            "chrono::DateTime<chrono::Utc>"
+        }
+        // Calendar/time-only variants.
+        Some("Date") => "chrono::NaiveDate",
+        Some("Time") => "chrono::NaiveTime",
+        // Interval has no first-class sqlx chrono type; use microseconds as i64.
+        Some("Interval") => "i64",
         // Fallback for provider defaults and unknown native overrides.
         _ => "chrono::DateTime<chrono::Utc>",
+    }
+}
+
+fn resolve_prisma_int_rust_type(native_db_type: Option<&str>) -> &'static str {
+    match native_db_type {
+        // Signed integer families across supported providers.
+        Some("TinyInt") => "i8",
+        Some("SmallInt") | Some("SmallSerial") => "i16",
+        Some("Int") | Some("Integer") | Some("MediumInt") | Some("Serial") | Some("Year") => "i32",
+        Some("Oid") => "u32",
+        Some("BigInt") | Some("BigSerial") => "i64",
+        // MySQL unsigned native types.
+        Some("UnsignedTinyInt") => "u8",
+        Some("UnsignedSmallInt") => "u16",
+        Some("UnsignedInt") | Some("UnsignedMediumInt") => "u32",
+        Some("UnsignedBigInt") => "u64",
+        // Prisma `Int` is 32-bit by default.
+        _ => "i32",
+    }
+}
+
+fn resolve_prisma_bigint_rust_type(native_db_type: Option<&str>) -> &'static str {
+    match native_db_type {
+        Some("UnsignedBigInt") => "u64",
+        _ => "i64",
+    }
+}
+
+fn resolve_prisma_float_rust_type(native_db_type: Option<&str>) -> &'static str {
+    match native_db_type {
+        Some("Real") | Some("Float4") => "f32",
+        Some("DoublePrecision") | Some("Float8") => "f64",
+        _ => "f64",
+    }
+}
+
+fn resolve_prisma_decimal_rust_type(_native_db_type: Option<&str>) -> &'static str {
+    // Keep exact precision for NUMERIC/DECIMAL-like mappings.
+    "rust_decimal::Decimal"
+}
+
+fn resolve_prisma_string_rust_type(native_db_type: Option<&str>) -> &'static str {
+    match native_db_type {
+        // PostgreSQL/SQL Server UUID-like native types.
+        Some("Uuid") | Some("UniqueIdentifier") => "uuid::Uuid",
+        // Network/system types.
+        Some("Inet") => "std::net::IpAddr",
+        Some("Cidr") => "ipnetwork::IpNetwork",
+        Some("MacAddr") => "[u8; 6]",
+        Some("Bit") | Some("VarBit") => "bit_vec::BitVec",
+        // String-like native types.
+        Some("Xml") | Some("Citext") | Some("LongText") | Some("VarChar") | Some("NVarChar")
+        | Some("Char") | Some("Text") | Some("Name") => "String",
+        _ => "String",
     }
 }
 
@@ -676,38 +737,16 @@ fn resolve_base_rust_type(
     if let Some(ty) = composite_types.get(&field.type_name) {
         return Some(ty.clone());
     }
-    if let Some(native) = parse_native_db_type(&field.attributes) {
-        return Some(match native {
-            // PostgreSQL/SQL Server UUID-like native types.
-            "Uuid" | "UniqueIdentifier" => "uuid::Uuid".to_string(),
-            // String-like native types.
-            "Xml" | "Inet" | "Citext" | "LongText" | "VarChar" | "NVarChar" => "String".to_string(),
-            // Integer-like native types.
-            "TinyInt" => "i64".to_string(),
-            // Fallback to scalar mapping below.
-            _ => match field.type_name.as_str() {
-                "Int" => "i64".to_string(),
-                "BigInt" => "i64".to_string(),
-                "String" => "String".to_string(),
-                "Boolean" => "bool".to_string(),
-                "Float" => "f64".to_string(),
-                "Decimal" => "f64".to_string(),
-                "DateTime" => resolve_prisma_datetime_rust_type(Some(native)).to_string(),
-                "Json" => "serde_json::Value".to_string(),
-                "Bytes" => "Vec<u8>".to_string(),
-                _ => return None,
-            },
-        });
-    }
+    let native = parse_native_db_type(&field.attributes);
 
     match field.type_name.as_str() {
-        "Int" => Some("i64".to_string()),
-        "BigInt" => Some("i64".to_string()),
-        "String" => Some("String".to_string()),
+        "Int" => Some(resolve_prisma_int_rust_type(native).to_string()),
+        "BigInt" => Some(resolve_prisma_bigint_rust_type(native).to_string()),
+        "String" => Some(resolve_prisma_string_rust_type(native).to_string()),
         "Boolean" => Some("bool".to_string()),
-        "Float" => Some("f64".to_string()),
-        "Decimal" => Some("f64".to_string()),
-        "DateTime" => Some(resolve_prisma_datetime_rust_type(None).to_string()),
+        "Float" => Some(resolve_prisma_float_rust_type(native).to_string()),
+        "Decimal" => Some(resolve_prisma_decimal_rust_type(native).to_string()),
+        "DateTime" => Some(resolve_prisma_datetime_rust_type(native).to_string()),
         "Json" => Some("serde_json::Value".to_string()),
         "Bytes" => Some("Vec<u8>".to_string()),
         _ => None,
@@ -1098,6 +1137,91 @@ model event_log {
         assert!(code.contains("blob: Option<Vec<u8>>"));
         assert!(code.contains("score: Option<f64>"));
         assert!(code.contains("enabled: bool"));
+    }
+
+    #[test]
+    fn generate_bindings_maps_int_and_bigint_to_sql_widths() {
+        let schema = r#"
+datasource db {
+  provider = "postgresql"
+}
+
+model numeric_widths {
+  id            Int    @id @default(autoincrement())
+  age           Int
+  external_id   BigInt
+  small_counter Int    @db.SmallInt
+  big_counter   BigInt @db.BigInt
+}
+"#;
+        let parsed = parse_prisma_schema(schema).unwrap();
+        let code = generate_rust_bindings(&parsed);
+        assert!(code.contains("id: i32"));
+        assert!(code.contains("age: i32"));
+        assert!(code.contains("external_id: i64"));
+        assert!(code.contains("small_counter: i16"));
+        assert!(code.contains("big_counter: i64"));
+    }
+
+    #[test]
+    fn generate_bindings_maps_postgres_native_type_matrix() {
+        let schema = r#"
+datasource db {
+  provider = "postgresql"
+}
+
+model pg_type_matrix {
+  id            Int      @id @default(autoincrement())
+  normal_int    Int
+  small_int     Int      @db.SmallInt
+  big_int       BigInt   @db.BigInt
+  float_real    Float    @db.Real
+  float_double  Float    @db.DoublePrecision
+  amount        Decimal  @db.Decimal(10,2)
+  ts_plain      DateTime @db.Timestamp(3)
+  ts_tz         DateTime @db.Timestamptz(6)
+  date_only     DateTime @db.Date
+  time_only     DateTime @db.Time(6)
+  time_tz       DateTime @db.Timetz(6)
+  interval_us   DateTime @db.Interval
+  net_ip        String   @db.Inet
+  net_cidr      String   @db.Cidr
+  mac           String   @db.MacAddr
+  bits          String   @db.VarBit(16)
+  oid_value     Int      @db.Oid
+  sys_name      String   @db.Name
+  xml_doc       String   @db.Xml
+  payload       Json     @db.JsonB
+  blob          Bytes    @db.ByteA
+  tags          String[]
+  scores        Int[]
+}
+"#;
+        let parsed = parse_prisma_schema(schema).unwrap();
+        let code = generate_rust_bindings(&parsed);
+        assert!(code.contains("normal_int: i32"));
+        assert!(code.contains("small_int: i16"));
+        assert!(code.contains("big_int: i64"));
+        assert!(code.contains("float_real: f32"));
+        assert!(code.contains("float_double: f64"));
+        assert!(code.contains("amount: rust_decimal::Decimal"));
+        assert!(code.contains("ts_plain: chrono::NaiveDateTime"));
+        assert!(code.contains("ts_tz: chrono::DateTime<chrono::Utc>"));
+        assert!(code.contains("date_only: chrono::NaiveDate"));
+        assert!(code.contains("time_only: chrono::NaiveTime"));
+        assert!(code.contains("time_tz: chrono::DateTime<chrono::Utc>"));
+        assert!(code.contains("interval_us: i64"));
+        assert!(code.contains("net_ip: std::net::IpAddr"));
+        assert!(code.contains("net_cidr: ipnetwork::IpNetwork"));
+        assert!(code.contains("mac: [u8; 6]"));
+        assert!(code.contains("bits: bit_vec::BitVec"));
+        assert!(code.contains("oid_value: u32"));
+        assert!(code.contains("sys_name: String"));
+        assert!(code.contains("xml_doc: String"));
+        assert!(code.contains("payload: serde_json::Value"));
+        assert!(code.contains("blob: Vec<u8>"));
+        assert!(code.contains("tags: Vec<String>"));
+        assert!(code.contains("scores: Vec<i32>"));
     }
 
     #[test]

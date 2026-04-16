@@ -495,13 +495,76 @@ macro_rules! __prisma_upsert_impl {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __prisma_to_f64_opt {
+    ($row:expr, $field:ident, i8) => {
+        Some($row.$field as f64)
+    };
+    ($row:expr, $field:ident, i16) => {
+        Some($row.$field as f64)
+    };
+    ($row:expr, $field:ident, i32) => {
+        Some($row.$field as f64)
+    };
     ($row:expr, $field:ident, i64) => {
         Some($row.$field as f64)
+    };
+    ($row:expr, $field:ident, u8) => {
+        Some($row.$field as f64)
+    };
+    ($row:expr, $field:ident, u16) => {
+        Some($row.$field as f64)
+    };
+    ($row:expr, $field:ident, u32) => {
+        Some($row.$field as f64)
+    };
+    ($row:expr, $field:ident, u64) => {
+        Some($row.$field as f64)
+    };
+    ($row:expr, $field:ident, Option<i8>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, Option<i16>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, Option<i32>) => {
+        $row.$field.map(|v| v as f64)
     };
     ($row:expr, $field:ident, Option<i64>) => {
         $row.$field.map(|v| v as f64)
     };
+    ($row:expr, $field:ident, Option<u8>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, Option<u16>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, Option<u32>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, Option<u64>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, ::std::option::Option<i8>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, ::std::option::Option<i16>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, ::std::option::Option<i32>) => {
+        $row.$field.map(|v| v as f64)
+    };
     ($row:expr, $field:ident, ::std::option::Option<i64>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, ::std::option::Option<u8>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, ::std::option::Option<u16>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, ::std::option::Option<u32>) => {
+        $row.$field.map(|v| v as f64)
+    };
+    ($row:expr, $field:ident, ::std::option::Option<u64>) => {
         $row.$field.map(|v| v as f64)
     };
     ($row:expr, $field:ident, $other:ty) => {
@@ -528,7 +591,7 @@ macro_rules! __prisma_non_null_value {
 ///
 /// **Requires** the `sqlx` feature on `nestrs-prisma`.
 ///
-/// Supported field types today: `i64`, `String`, `bool`, `Option<…>` of those, `chrono::DateTime<Utc>`,
+/// Supported field types today: integer/string/bool scalars (`i8`..`i64`, `u8`..`u64`, `String`, `bool`) and `Option<…>` of those, `chrono::DateTime<Utc>`,
 /// `chrono::NaiveDateTime`, and
 /// `uuid::Uuid` when crate features `chrono` / `uuid` are enabled.
 ///

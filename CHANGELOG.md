@@ -7,11 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-04-16
+
+### Changed
+
+- Workspace and crate versions aligned to `0.3.6` for crates.io publish.
+
+### Fixed
+
+- `nestrs-prisma` README now documents required optional app dependencies for generated native types (for example `rust_decimal`, `ipnetwork`, and `bit-vec`) so consumer apps can compile generated bindings without guesswork.
+
 ## [0.3.5] - 2026-04-16
 
 ### Fixed
 
 - `nestrs-prisma` codegen now maps Prisma `DateTime @db.Timestamp(...)` (timestamp without time zone) to `chrono::NaiveDateTime` to match Postgres `timestamp without time zone` columns.
+- `nestrs-prisma` codegen now maps Prisma/Postgres native scalar widths more accurately (including `Int`/`BigInt`, `Real`/`DoublePrecision`, `Decimal`, `DateTime` native variants, network/native string types, and scalar lists) to avoid SQLx decode mismatches between generated Rust types and database column types.
 
 ## [0.3.4] - 2026-04-15
 

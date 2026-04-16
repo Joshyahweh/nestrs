@@ -1910,7 +1910,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-app"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "axum 0.7.9",
  "nestrs",
@@ -2880,7 +2880,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "async-graphql",
  "async-nats",
@@ -2928,7 +2928,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-core"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -2938,7 +2938,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-cqrs"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -2948,7 +2948,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-events"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "async-trait",
  "nestrs-core",
@@ -2958,7 +2958,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-graphql"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "async-graphql",
  "async-graphql-derive",
@@ -2969,7 +2969,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-macros"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2978,7 +2978,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-microservices"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -3011,7 +3011,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-openapi"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -3020,7 +3020,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-prisma"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3037,14 +3037,14 @@ dependencies = [
 
 [[package]]
 name = "nestrs-scaffold"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "nestrs-ws"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3573,9 +3573,9 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plotters"
-version = "0.3.7"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747"
+checksum = "a15b6eccb8484002195a3e44fe65a4ce8e93a625797a063735536fd59cb01cf3"
 dependencies = [
  "num-traits",
  "plotters-backend",
@@ -3586,15 +3586,15 @@ dependencies = [
 
 [[package]]
 name = "plotters-backend"
-version = "0.3.7"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df42e13c12958a16b3f7f4386b9ab1f3e7933914ecea48da7139435263a4172a"
+checksum = "414cec62c6634ae900ea1c56128dfe87cf63e7caece0852ec76aba307cebadb7"
 
 [[package]]
 name = "plotters-svg"
-version = "0.3.7"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670"
+checksum = "81b30686a7d9c3e010b84284bdd26a29f2138574f52f5eb6f794fc0ad924e705"
 dependencies = [
  "plotters-backend",
 ]

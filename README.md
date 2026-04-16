@@ -25,7 +25,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `0.3.6` (from `VERSION` and workspace package settings)
+- Current workspace version: `0.3.7` (from `VERSION` and workspace package settings)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`

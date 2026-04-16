@@ -3,6 +3,27 @@
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __prisma_create_input {
+    ($Model:ident; id: i8, $( $f:ident : $t:ty ),+ $(,)?) => {
+        $crate::__prisma_create_input!($Model; id: i64, $( $f : $t ),+);
+    };
+    ($Model:ident; id: u8, $( $f:ident : $t:ty ),+ $(,)?) => {
+        $crate::__prisma_create_input!($Model; id: i64, $( $f : $t ),+);
+    };
+    ($Model:ident; id: i16, $( $f:ident : $t:ty ),+ $(,)?) => {
+        $crate::__prisma_create_input!($Model; id: i64, $( $f : $t ),+);
+    };
+    ($Model:ident; id: u16, $( $f:ident : $t:ty ),+ $(,)?) => {
+        $crate::__prisma_create_input!($Model; id: i64, $( $f : $t ),+);
+    };
+    ($Model:ident; id: i32, $( $f:ident : $t:ty ),+ $(,)?) => {
+        $crate::__prisma_create_input!($Model; id: i64, $( $f : $t ),+);
+    };
+    ($Model:ident; id: u32, $( $f:ident : $t:ty ),+ $(,)?) => {
+        $crate::__prisma_create_input!($Model; id: i64, $( $f : $t ),+);
+    };
+    ($Model:ident; id: u64, $( $f:ident : $t:ty ),+ $(,)?) => {
+        $crate::__prisma_create_input!($Model; id: i64, $( $f : $t ),+);
+    };
     ($Model:ident; id: i64, $( $f:ident : $t:ty ),+ $(,)?) => {
         $crate::paste::paste! {
             #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -24,6 +45,76 @@ macro_rules! __prisma_create_input {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __prisma_insert_returning {
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $data:ident;
+        id: i8,
+        $( $f:ident : $t:ty ),+
+    ) => {{
+        $crate::__prisma_insert_returning!($table; $Model; $pool; $data; id: i64, $( $f : $t ),+)
+    }};
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $data:ident;
+        id: u8,
+        $( $f:ident : $t:ty ),+
+    ) => {{
+        $crate::__prisma_insert_returning!($table; $Model; $pool; $data; id: i64, $( $f : $t ),+)
+    }};
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $data:ident;
+        id: i16,
+        $( $f:ident : $t:ty ),+
+    ) => {{
+        $crate::__prisma_insert_returning!($table; $Model; $pool; $data; id: i64, $( $f : $t ),+)
+    }};
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $data:ident;
+        id: u16,
+        $( $f:ident : $t:ty ),+
+    ) => {{
+        $crate::__prisma_insert_returning!($table; $Model; $pool; $data; id: i64, $( $f : $t ),+)
+    }};
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $data:ident;
+        id: i32,
+        $( $f:ident : $t:ty ),+
+    ) => {{
+        $crate::__prisma_insert_returning!($table; $Model; $pool; $data; id: i64, $( $f : $t ),+)
+    }};
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $data:ident;
+        id: u32,
+        $( $f:ident : $t:ty ),+
+    ) => {{
+        $crate::__prisma_insert_returning!($table; $Model; $pool; $data; id: i64, $( $f : $t ),+)
+    }};
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $data:ident;
+        id: u64,
+        $( $f:ident : $t:ty ),+
+    ) => {{
+        $crate::__prisma_insert_returning!($table; $Model; $pool; $data; id: i64, $( $f : $t ),+)
+    }};
     (
         $table:literal;
         $Model:ident;
@@ -144,6 +235,69 @@ macro_rules! __prisma_insert_many_dispatch {
         $table:literal;
         $pool:ident;
         $rows:ident;
+        id: i8,
+        $($f:ident : $t:ty),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many!($table; $pool; $rows; id: i64, $($f : $t),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        id: u8,
+        $($f:ident : $t:ty),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many!($table; $pool; $rows; id: i64, $($f : $t),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        id: i16,
+        $($f:ident : $t:ty),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many!($table; $pool; $rows; id: i64, $($f : $t),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        id: u16,
+        $($f:ident : $t:ty),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many!($table; $pool; $rows; id: i64, $($f : $t),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        id: i32,
+        $($f:ident : $t:ty),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many!($table; $pool; $rows; id: i64, $($f : $t),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        id: u32,
+        $($f:ident : $t:ty),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many!($table; $pool; $rows; id: i64, $($f : $t),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        id: u64,
+        $($f:ident : $t:ty),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many!($table; $pool; $rows; id: i64, $($f : $t),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
         id: i64,
         $($f:ident : $t:ty),+ $(,)?
     ) => {
@@ -232,6 +386,76 @@ macro_rules! __prisma_insert_many_with_options {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __prisma_insert_many_with_options_dispatch {
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: i8,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_with_options!($table; $pool; $rows; $skip_duplicates; id: i64, $( $f : $t ),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: u8,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_with_options!($table; $pool; $rows; $skip_duplicates; id: i64, $( $f : $t ),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: i16,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_with_options!($table; $pool; $rows; $skip_duplicates; id: i64, $( $f : $t ),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: u16,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_with_options!($table; $pool; $rows; $skip_duplicates; id: i64, $( $f : $t ),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: i32,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_with_options!($table; $pool; $rows; $skip_duplicates; id: i64, $( $f : $t ),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: u32,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_with_options!($table; $pool; $rows; $skip_duplicates; id: i64, $( $f : $t ),+)
+    };
+    (
+        $table:literal;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: u64,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_with_options!($table; $pool; $rows; $skip_duplicates; id: i64, $( $f : $t ),+)
+    };
     (
         $table:literal;
         $pool:ident;
@@ -328,6 +552,139 @@ macro_rules! __prisma_insert_many_returning {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __prisma_insert_many_returning_dispatch {
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: i8,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_returning!(
+            $table;
+            $Model;
+            $pool;
+            $rows;
+            $skip_duplicates;
+            id: i64,
+            $( $f : $t ),+
+        )
+    };
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: u8,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_returning!(
+            $table;
+            $Model;
+            $pool;
+            $rows;
+            $skip_duplicates;
+            id: i64,
+            $( $f : $t ),+
+        )
+    };
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: i16,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_returning!(
+            $table;
+            $Model;
+            $pool;
+            $rows;
+            $skip_duplicates;
+            id: i64,
+            $( $f : $t ),+
+        )
+    };
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: u16,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_returning!(
+            $table;
+            $Model;
+            $pool;
+            $rows;
+            $skip_duplicates;
+            id: i64,
+            $( $f : $t ),+
+        )
+    };
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: i32,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_returning!(
+            $table;
+            $Model;
+            $pool;
+            $rows;
+            $skip_duplicates;
+            id: i64,
+            $( $f : $t ),+
+        )
+    };
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: u32,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_returning!(
+            $table;
+            $Model;
+            $pool;
+            $rows;
+            $skip_duplicates;
+            id: i64,
+            $( $f : $t ),+
+        )
+    };
+    (
+        $table:literal;
+        $Model:ident;
+        $pool:ident;
+        $rows:ident;
+        $skip_duplicates:expr;
+        id: u64,
+        $( $f:ident : $t:ty ),+ $(,)?
+    ) => {
+        $crate::__prisma_insert_many_returning!(
+            $table;
+            $Model;
+            $pool;
+            $rows;
+            $skip_duplicates;
+            id: i64,
+            $( $f : $t ),+
+        )
+    };
     (
         $table:literal;
         $Model:ident;

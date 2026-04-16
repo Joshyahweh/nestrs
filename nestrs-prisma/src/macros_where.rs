@@ -127,10 +127,34 @@ macro_rules! __prisma_where_try_chrono_utc {
     ($field:ident, $other:ty) => {};
 }
 
+#[cfg(feature = "chrono")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __prisma_where_try_chrono_naive_datetime {
+    ($field:ident, chrono::NaiveDateTime) => {
+        $crate::paste::paste! {
+            [< $field:camel Eq >](chrono::NaiveDateTime),
+            [< $field:camel Ne >](chrono::NaiveDateTime),
+            [< $field:camel Gt >](chrono::NaiveDateTime),
+            [< $field:camel Gte >](chrono::NaiveDateTime),
+            [< $field:camel Lt >](chrono::NaiveDateTime),
+            [< $field:camel Lte >](chrono::NaiveDateTime),
+        }
+    };
+    ($field:ident, $other:ty) => {};
+}
+
 #[cfg(not(feature = "chrono"))]
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __prisma_where_try_chrono_utc {
+    ($field:ident, $t:ty) => {};
+}
+
+#[cfg(not(feature = "chrono"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __prisma_where_try_chrono_naive_datetime {
     ($field:ident, $t:ty) => {};
 }
 
@@ -588,10 +612,64 @@ macro_rules! __prisma_where_match_chrono_utc {
     ($Self:ident, $field:ident, $other:ty) => {};
 }
 
+#[cfg(feature = "chrono")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __prisma_where_match_chrono_naive_datetime {
+    ($Self:ident, $field:ident, chrono::NaiveDateTime) => {
+        $crate::paste::paste! {
+            $Self::[< $field:camel Eq >](v) => {
+                qb.push(concat!("\"", stringify!($field), "\""));
+                qb.push(" = ");
+                qb.push_bind(v.clone());
+                Ok(())
+            }
+            $Self::[< $field:camel Ne >](v) => {
+                qb.push(concat!("\"", stringify!($field), "\""));
+                qb.push(" <> ");
+                qb.push_bind(v.clone());
+                Ok(())
+            }
+            $Self::[< $field:camel Gt >](v) => {
+                qb.push(concat!("\"", stringify!($field), "\""));
+                qb.push(" > ");
+                qb.push_bind(v.clone());
+                Ok(())
+            }
+            $Self::[< $field:camel Gte >](v) => {
+                qb.push(concat!("\"", stringify!($field), "\""));
+                qb.push(" >= ");
+                qb.push_bind(v.clone());
+                Ok(())
+            }
+            $Self::[< $field:camel Lt >](v) => {
+                qb.push(concat!("\"", stringify!($field), "\""));
+                qb.push(" < ");
+                qb.push_bind(v.clone());
+                Ok(())
+            }
+            $Self::[< $field:camel Lte >](v) => {
+                qb.push(concat!("\"", stringify!($field), "\""));
+                qb.push(" <= ");
+                qb.push_bind(v.clone());
+                Ok(())
+            }
+        }
+    };
+    ($Self:ident, $field:ident, $other:ty) => {};
+}
+
 #[cfg(not(feature = "chrono"))]
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __prisma_where_match_chrono_utc {
+    ($Self:ident, $field:ident, $t:ty) => {};
+}
+
+#[cfg(not(feature = "chrono"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __prisma_where_match_chrono_naive_datetime {
     ($Self:ident, $field:ident, $t:ty) => {};
 }
 

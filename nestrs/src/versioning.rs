@@ -195,23 +195,6 @@ fn parse_version_from_accept(accept: &str) -> Option<String> {
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{apply_root_prefix, strip_root_prefix};
-
-    #[test]
-    fn slash_root_prefix_is_ignored_when_stripping() {
-        assert_eq!(strip_root_prefix("/items", "/"), Some("/items"));
-        assert_eq!(strip_root_prefix("/", "/"), Some("/"));
-    }
-
-    #[test]
-    fn slash_root_prefix_is_ignored_when_applying() {
-        assert_eq!(apply_root_prefix("/", "/v1/items"), "/v1/items");
-        assert_eq!(apply_root_prefix("/", "/"), "/");
-    }
-}
-
 /// Rejects requests whose `Host` header does not match `expected` (port suffix ignored).
 pub async fn host_restriction_middleware(
     axum::extract::State(expected): axum::extract::State<&'static str>,
@@ -241,4 +224,21 @@ fn strip_port(host: &str) -> &str {
         }
     }
     host.split(':').next().unwrap_or(host)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_root_prefix, strip_root_prefix};
+
+    #[test]
+    fn slash_root_prefix_is_ignored_when_stripping() {
+        assert_eq!(strip_root_prefix("/items", "/"), Some("/items"));
+        assert_eq!(strip_root_prefix("/", "/"), Some("/"));
+    }
+
+    #[test]
+    fn slash_root_prefix_is_ignored_when_applying() {
+        assert_eq!(apply_root_prefix("/", "/v1/items"), "/v1/items");
+        assert_eq!(apply_root_prefix("/", "/"), "/");
+    }
 }

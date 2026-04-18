@@ -10,18 +10,17 @@
     feature = "cookies"
 ))]
 
+mod common;
+
+use crate::common::RegistryResetGuard;
 use axum::body::{to_bytes, Body};
 use axum::http::request::Parts;
 use axum::http::{header, Request as HttpRequest, StatusCode};
 use nestrs::prelude::*;
+use serial_test::serial;
 use std::time::Duration;
 use tower::util::ServiceExt;
 use tower::Service;
-
-fn reset_global_registries() {
-    nestrs::core::RouteRegistry::clear_for_tests();
-    nestrs::core::MetadataRegistry::clear_for_tests();
-}
 
 #[derive(Default)]
 #[injectable]
@@ -79,9 +78,9 @@ fn matrix_router() -> axum::Router {
 }
 
 #[tokio::test]
+#[serial]
 async fn matrix_openapi_lists_versioned_route_under_prefix() {
-    reset_global_registries();
-
+    let _registry_guard = RegistryResetGuard::new();
     let router = matrix_router();
 
     let res = router
@@ -111,9 +110,9 @@ async fn matrix_openapi_lists_versioned_route_under_prefix() {
 }
 
 #[tokio::test]
+#[serial]
 async fn matrix_post_requires_csrf_and_guard_header() {
-    reset_global_registries();
-
+    let _registry_guard = RegistryResetGuard::new();
     let mut router = matrix_router();
     ServiceExt::<HttpRequest<Body>>::ready(&mut router)
         .await

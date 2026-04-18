@@ -25,7 +25,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `0.3.7` (from `VERSION` and workspace package settings)
+- Current workspace version: `0.3.8` (from `VERSION` and workspace package settings)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
@@ -90,6 +90,8 @@ Then open:
 ### Core docs
 
 - `website/docs.html` - docs portal entrypoint
+- **NestJS → nestrs** — mdBook: [`docs/src/nestjs-migration.md`](docs/src/nestjs-migration.md); website hub: [`website/docs/migration/nestjs-to-nestrs.md`](website/docs/migration/nestjs-to-nestrs.md)
+- **Security defaults & ordering** — mdBook: [`docs/src/secure-defaults.md`](docs/src/secure-defaults.md), [`docs/src/http-pipeline-order.md`](docs/src/http-pipeline-order.md)
 - `CHANGELOG.md` - release history
 - `STABILITY.md` - semver, public vs `#[doc(hidden)]` API, **`test-hooks`** / global registries
 

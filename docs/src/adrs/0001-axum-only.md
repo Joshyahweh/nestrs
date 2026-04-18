@@ -33,3 +33,9 @@ Core HTTP runtime remains Axum-only.
 
 - Do not introduce engine-agnostic abstractions in core unless there is a concrete maintenance win and an approved follow-up ADR.
 - Prefer Axum/Tower-native solutions in runtime code and examples.
+
+## See also
+
+- [HTTP pipeline order](../http-pipeline-order.md) — how Axum/Tower layers compose in nestrs.  
+- [NestJS migration guide](../nestjs-migration.md) — middleware mapping from Nest.  
+- Rustdoc: [`NestApplication::build_router`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html) (internal ordering comments in source when debugging).

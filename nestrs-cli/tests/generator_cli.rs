@@ -463,7 +463,7 @@ fn new_project_scaffolds_files() {
 }
 
 #[test]
-fn new_project_strict_adds_serde_deny_unknown_fields() {
+fn new_project_strict_adds_deny_unsafe_code() {
     let parent = unique_tmp_dir("new-project-strict");
     fs::create_dir_all(&parent).expect("create temp parent");
     let project_dir = parent.join("strict_app");
@@ -478,7 +478,11 @@ fn new_project_strict_adds_serde_deny_unknown_fields() {
     assert!(output.status.success(), "strict new command should succeed");
     let main_rs = fs::read_to_string(project_dir.join("src/main.rs")).expect("read main");
     assert!(
-        main_rs.contains("#[serde(deny_unknown_fields)]"),
-        "strict scaffold should include serde deny_unknown_fields"
+        main_rs.contains("#![deny(unsafe_code)]"),
+        "strict scaffold should include deny(unsafe_code)"
+    );
+    assert!(
+        main_rs.contains("#[dto]"),
+        "strict scaffold should still use #[dto] (unknown JSON keys rejected by default)"
     );
 }

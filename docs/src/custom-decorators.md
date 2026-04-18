@@ -37,18 +37,87 @@ Guards run with access to **`axum::http::request::Parts`**. nestrs inserts **`Ha
 
 See `nestrs::security` (e.g. `AuthStrategyGuard`, `XRoleMetadataGuard`) and `nestrs/tests/cross_cutting_extended.rs` for examples.
 
+### Worked example: `#[roles]` + `XRoleMetadataGuard`
+
+[`XRoleMetadataGuard`](https://docs.rs/nestrs/latest/nestrs/security/struct.XRoleMetadataGuard.html) is a small reference guard: it reads **`HandlerKey`** from the request, loads the **`roles`** string from [`MetadataRegistry`](https://docs.rs/nestrs-core/latest/nestrs_core/struct.MetadataRegistry.html) (populated by `#[roles(...)]`), and compares it to the **`x-role`** header (comma-split allow list on the handler side, single role from the client in this demo).
+
+**Application code** (no test-only reset guards—use real auth in production):
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/api", version = "v1")]
+struct DocsController;
+
+#[routes(state = AppState)]
+impl DocsController {
+    /// `#[roles("admin")]` registers metadata; the guard enforces it.
+    #[get("/admin-only")]
+    #[roles("admin")]
+    #[use_guards(XRoleMetadataGuard)]
+    async fn admin_only() -> &'static str {
+        "ok"
+    }
+}
+
+#[module(controllers = [DocsController], providers = [AppState])]
+struct AppModule;
+```
+
+Call the route with `x-role: admin` to receive **200**; `x-role: user` yields **403**. In real services, replace the header check with a JWT claim, session, or [`AuthStrategy`](https://docs.rs/nestrs/latest/nestrs/security/trait.AuthStrategy.html) implementation—keep **`#[roles]`** + OpenAPI inference ([OpenAPI & HTTP](openapi-http.md)) as **documentation** of intent even when enforcement lives in a different guard.
+
+### Worked example: validation + `ValidationPipe` (closest to `@Body()` + `ValidationPipe`)
+
+On **`#[routes]`**, add **`#[use_pipes(ValidationPipe)]`** on the handler (or controller) and use **`#[param::body]`**, **`#[param::query]`**, or **`#[param::param]`** with a **`#[dto]`** type. Field constraints use the nestrs DTO attributes (for example **`#[IsEmail]`**, **`#[Length(...)]`**, **`#[validate(...)]`**)—see **`nestrs/tests/param_decorators_and_pipes.rs`** for query, path, and body coverage.
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[dto]
+struct SignupDto {
+    #[IsEmail]
+    email: String,
+}
+
+#[controller(prefix = "/api", version = "v1")]
+struct ExampleController;
+
+#[routes(state = AppState)]
+impl ExampleController {
+    #[post("/signup")]
+    #[use_pipes(ValidationPipe)]
+    async fn signup(#[param::body] dto: SignupDto) -> &'static str {
+        let _ = dto;
+        "ok"
+    }
+}
+
+#[module(controllers = [ExampleController], providers = [AppState])]
+struct AppModule;
+```
+
+Some code paths also accept **`ValidatedBody<SignupDto>`** tuple extractors (see `nestrs/tests/bootstrap_composition.rs` **`POST /validate`**). Invalid payloads return **422** with a structured error body.
+
 ## 2) Parameter “decorators” (closest to `createParamDecorator`)
 
 Nest parameter decorators hide extraction from `ExecutionContext`. In nestrs, extraction is **type-driven**:
 
 | Nest-style idea | nestrs approach |
 |-----------------|-----------------|
-| Body DTO | `Json<T>`, **`ValidatedBody<T>`** (with `ValidationPipe` on the controller/route) |
-| Query DTO | `Query<T>`, **`ValidatedQuery<T>`** |
-| Path params | `Path<T>`, **`ValidatedPath<T>`** |
+| Body DTO | **`#[param::body]`** + **`#[dto]`** + **`#[use_pipes(ValidationPipe)]`**, or **`ValidatedBody<T>`** tuple style |
+| Query DTO | **`#[param::query]`** with **`#[dto]`** + **`ValidationPipe`**, or **`ValidatedQuery<T>`** |
+| Path params | **`#[param::param]`** with **`#[dto]`**, or **`ValidatedPath<T>`** |
 | Raw request | **`#[param::req]`** → `Request` |
 | Headers | **`#[param::headers]`** → `HeaderMap` |
-| Client IP | **`ClientIp`** / **`ClientIp`** extractor |
+| Client IP | **`#[param::ip]`** or **`ClientIp`** extractor (see `param_decorators_and_pipes` tests) |
 
 These use **attributes on parameters** (`#[param::body]`, etc.) expanded by **`#[routes]`**, not runtime reflection. Adding a **new** extractor shape means **new types and/or proc macros**, not a single `createParamDecorator` API.
 
@@ -88,4 +157,4 @@ What you **do not** get out of the box:
 | Custom parameter decorators | **Partial** — use Axum extractors + `#[param::…]` / macros; no TS-style `createParamDecorator` |
 | Reflect / generic decorator runtime | **No** — compile-time Rust only |
 
-For parity expectations across the framework, see [Roadmap parity](roadmap-parity.md).
+For parity expectations across the framework, see [Roadmap parity](roadmap-parity.md). For **`NestApplication`** methods that pair with guards and filters (CORS, global exception filter, etc.), see the [API cookbook](appendix-api-cookbook.md).

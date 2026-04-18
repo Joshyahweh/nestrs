@@ -7,6 +7,29 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-04-17
+
+### Added
+
+- **NestJS migration guide** (mdBook `docs/src/nestjs-migration.md`), served on the docs site at `/docs/nestjs-migration` (legacy URL `/docs/migration/nestjs-to-nestrs` redirects), linked from the root README and website sidebar.
+- **Secure defaults checklist** (`docs/src/secure-defaults.md`) and **HTTP pipeline ordering** (`docs/src/http-pipeline-order.md`) in mdBook; `SECURITY.md` expanded for CORS + CSRF runtime warnings.
+- **Runtime `tracing` warnings** when cookies or in-memory sessions are enabled without CSRF wiring (or without the `csrf` feature).
+- **CI job step** `Extension crate integration smoke` running targeted `nestrs` integration tests for OpenAPI, GraphQL, WebSockets, and TCP microservices.
+- **Ordering contract tests** (`nestrs/tests/cross_cutting_ordering_contract.rs`) locking guard, interceptor, and route filter sequencing; `impl_routes!` rustdoc updated accordingly.
+
+### Security
+
+- `#[dto]` now applies `#[serde(deny_unknown_fields)]` by default so extra JSON keys fail deserialization; use `#[dto(allow_unknown_fields)]` to opt out.
+
+### Fixed
+
+- Integration tests that rely on `RouteRegistry` / `MetadataRegistry` use shared `RegistryResetGuard` + `serial_test` where needed to avoid order-dependent failures under parallel `cargo test`.
+
+### Changed
+
+- `nestrs new --strict` now prepends `#![deny(unsafe_code)]` instead of a redundant `#[serde(deny_unknown_fields)]` before `#[dto]` (DTO unknown fields are enforced by the macro).
+- Workspace and crate versions aligned to `0.3.8` for crates.io publish.
+
 ## [0.3.7] - 2026-04-16
 
 ### Changed

@@ -16,7 +16,7 @@ Includes **`limits`** helpers (`with_default_limits`, depth/complexity defaults)
 
 ```toml
 [dependencies]
-nestrs-graphql = "0.3.7"
+nestrs-graphql = "0.3.8"
 async-graphql = "7.0.17"
 axum = "0.7"
 ```
@@ -24,7 +24,7 @@ axum = "0.7"
 Or:
 
 ```toml
-nestrs = { version = "0.3.7", features = ["graphql"] }
+nestrs = { version = "0.3.8", features = ["graphql"] }
 ```
 
 ## Example

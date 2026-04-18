@@ -1,16 +1,14 @@
 #![cfg(feature = "openapi")]
 
-#[cfg(feature = "test-hooks")]
-fn reset_global_registries() {
-    nestrs::core::RouteRegistry::clear_for_tests();
-    nestrs::core::MetadataRegistry::clear_for_tests();
-}
+mod common;
 
+use crate::common::RegistryResetGuard;
 use axum::body::{to_bytes, Body};
 use axum::http::Request;
 use nestrs::prelude::*;
 use nestrs_openapi::OpenApiOptions;
 use serde_json::json;
+use serial_test::serial;
 use tower::util::ServiceExt;
 
 #[derive(Default)]
@@ -37,10 +35,9 @@ impl OpenApiController {
 struct AppModule;
 
 #[tokio::test]
+#[serial]
 async fn openapi_json_includes_registered_routes() {
-    #[cfg(feature = "test-hooks")]
-    reset_global_registries();
-
+    let _registry_guard = RegistryResetGuard::new();
     let router = NestFactory::create::<AppModule>()
         .enable_openapi()
         .into_router();
@@ -93,10 +90,9 @@ impl OpenApiSecController {
 struct SecAppModule;
 
 #[tokio::test]
+#[serial]
 async fn openapi_infers_operation_security_when_roles_metadata_present() {
-    #[cfg(feature = "test-hooks")]
-    reset_global_registries();
-
+    let _registry_guard = RegistryResetGuard::new();
     let router = NestFactory::create::<SecAppModule>()
         .enable_openapi_with_options(OpenApiOptions {
             infer_route_security_from_roles: true,

@@ -2,6 +2,8 @@
 
 This page describes a **single golden path** for a typical [`NestFactory`](https://docs.rs/nestrs/latest/nestrs/struct.NestFactory.html) HTTP app: install `tracing`, add request logs + **spans**, expose **Prometheus** metrics, and optionally export traces to an OTLP collector.
 
+**More snippets:** Additional copy-paste blocks for **`configure_tracing`**, **`use_request_id`**, **`use_request_context`**, **`use_execution_context`**, **`enable_health_check`**, **`enable_readiness_check`**, and **`enable_metrics`** live in the [API cookbook](appendix-api-cookbook.md).
+
 ## 1. Install the global `tracing` subscriber
 
 Call [`NestApplication::configure_tracing`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.configure_tracing) **once**, before [`listen`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.listen), so all log lines and spans share one pipeline.
@@ -64,7 +66,7 @@ Enable the **`otel`** feature and use [`configure_tracing_opentelemetry`](https:
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.7", features = ["otel"] }
+nestrs = { version = "0.3.8", features = ["otel"] }
 ```
 
 **`main`:**
@@ -97,3 +99,25 @@ async fn main() {
 - **`OTEL_EXPORTER_OTLP_ENDPOINT`**: used when `OpenTelemetryConfig::endpoint(...)` is not set (default collector address falls back to `http://localhost:4317`).
 
 See also: [Production runbook](production.md) for deployment-oriented notes.
+
+## Troubleshooting
+
+| Symptom | Things to check |
+|---------|------------------|
+| No log lines at all | `configure_tracing` must run **before** `listen`; verify `NESTRS_LOG` / `RUST_LOG` and that nothing else installs a conflicting subscriber. |
+| `/metrics` floods access logs | Add `/metrics` to `RequestTracingOptions::skip_paths` (shown above). |
+| Spans missing in Jaeger/Tempo | Confirm `otel` feature, endpoint URL, and sampling ratio; verify the collector receives traffic on the expected gRPC/HTTP port. |
+| High cardinality in `http.route` | Expected: path is literal at this layer; add a custom layer or business metric if you need template-level labels. |
+
+## Environment variables (quick reference)
+
+| Variable | Role |
+|----------|------|
+| `NESTRS_LOG` | Preferred filter directive for nestrs tracing when set (overrides default in `TracingConfig`). |
+| `RUST_LOG` | Fallback if `NESTRS_LOG` is unset (standard `tracing-subscriber` semantics). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector address when not set explicitly in `OpenTelemetryConfig`. |
+
+## Local development vs production
+
+- **Local**: `TracingFormat::Pretty` or human-readable JSON to stdout; relaxed log levels (`debug` for `nestrs`).  
+- **Production**: Structured JSON (`TracingFormat::Json`), consistent `service.name` in OTel resource, scrape `/metrics` from Prometheus, and aggregate logs to your platform (Loki, CloudWatch, etc.).  

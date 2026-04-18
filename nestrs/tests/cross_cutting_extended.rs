@@ -1,6 +1,10 @@
+mod common;
+
+use crate::common::RegistryResetGuard;
 use axum::http::request::Parts;
 use nestrs::parse_authorization_bearer;
 use nestrs::prelude::*;
+use serial_test::serial;
 
 #[roles("admin")]
 #[set_metadata("scope", "users:read")]
@@ -55,7 +59,9 @@ async fn auth_strategy_trait_validates_headers() {
 }
 
 #[test]
+#[serial]
 fn metadata_registry_stores_and_reads_values() {
+    let _registry_guard = RegistryResetGuard::new();
     MetadataRegistry::set("users::list", "roles", "admin");
     let role = MetadataRegistry::get("users::list", "roles").expect("metadata value");
     assert_eq!(role, "admin");

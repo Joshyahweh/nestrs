@@ -20,6 +20,27 @@ jobs:
       - name: Verify workspace edition and MSRV policy
         run: python3 scripts/ci/check_msrv_edition.py
 
+      - name: Reject Python cache artifacts in repo
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import sys
+
+          out = subprocess.check_output(["git", "ls-files", "-z"])
+          bad = []
+          for rel in out.split(b"\0"):
+              if not rel:
+                  continue
+              s = rel.decode(errors="replace")
+              if "__pycache__/" in s or s.endswith(".pyc") or s.endswith(".pyo"):
+                  bad.append(s)
+          if bad:
+              print("Python cache artifacts are tracked by git. Remove them:")
+              for line in bad:
+                  print(line)
+              sys.exit(1)
+          PY
+
   test-matrix:
     runs-on: ubuntu-latest
     strategy:
@@ -47,6 +68,14 @@ jobs:
             --test transaction_batch \
             --test relation_queries \
             -- --test-threads=1
+
+      - name: Extension crate integration smoke
+        run: |
+          cargo test -p nestrs --all-features \
+            --test openapi_integration \
+            --test graphql_sdl_export \
+            --test ws_gateway_smoke \
+            --test microservices_tcp_integration
 
   lint-and-docs:
     runs-on: ubuntu-latest

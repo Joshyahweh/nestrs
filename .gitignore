@@ -48,6 +48,13 @@ node_modules/
 website/.next/
 website/node_modules/
 
+# Python cache artifacts
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # cargo-fuzz
 **/fuzz/artifacts/
 **/fuzz/corpus/

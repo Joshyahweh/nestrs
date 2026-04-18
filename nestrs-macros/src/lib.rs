@@ -3538,6 +3538,7 @@ fn convert_dto_field_attrs(field: &Field, expose_only: bool) -> Vec<syn::Attribu
 #[derive(Default)]
 struct DtoAttr {
     expose_only: bool,
+    allow_unknown_fields: bool,
 }
 
 impl Parse for DtoAttr {
@@ -3551,10 +3552,12 @@ impl Parse for DtoAttr {
         for id in vars {
             if id == "expose_only" {
                 out.expose_only = true;
+            } else if id == "allow_unknown_fields" {
+                out.allow_unknown_fields = true;
             } else {
                 return Err(syn::Error::new_spanned(
                     id,
-                    "unknown dto option (expected `expose_only`)",
+                    "unknown dto option (expected `expose_only` or `allow_unknown_fields`)",
                 ));
             }
         }
@@ -3566,6 +3569,7 @@ impl Parse for DtoAttr {
 pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
     let opts = parse_macro_input!(attr as DtoAttr);
     let expose_only = opts.expose_only;
+    let deny_unknown_fields = !opts.allow_unknown_fields;
     let item_struct = parse_macro_input!(item as ItemStruct);
     let vis = item_struct.vis;
     let ident = item_struct.ident;
@@ -3582,24 +3586,38 @@ pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let field_defs = fields.named.iter().map(|field| {
-        let attrs = convert_dto_field_attrs(field, expose_only);
-        let field_ident = field.ident.clone();
-        let ty = field.ty.clone();
+    let field_defs: Vec<_> = fields
+        .named
+        .iter()
+        .map(|field| {
+            let attrs = convert_dto_field_attrs(field, expose_only);
+            let field_ident = field.ident.clone();
+            let ty = field.ty.clone();
+            quote! {
+                #(#attrs)*
+                pub #field_ident: #ty
+            }
+        })
+        .collect();
+
+    if deny_unknown_fields {
         quote! {
-            #(#attrs)*
-            pub #field_ident: #ty
+            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto)]
+            #[serde(deny_unknown_fields)]
+            #vis struct #ident {
+                #(#field_defs,)*
+            }
         }
-    });
-
-    let expanded = quote! {
-        #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto)]
-        #vis struct #ident {
-            #(#field_defs,)*
+        .into()
+    } else {
+        quote! {
+            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto)]
+            #vis struct #ident {
+                #(#field_defs,)*
+            }
         }
-    };
-
-    expanded.into()
+        .into()
+    }
 }
 
 #[proc_macro_derive(

@@ -33,3 +33,9 @@ Use process-global registries for framework metadata and selected runtime single
 
 - Any new global registry requires explicit test reset behavior (or rationale for why it is unnecessary).
 - Changes that affect registry lifecycle must update `STABILITY.md` and related contributor docs.
+
+## See also
+
+- **`STABILITY.md`** at the repository root — semver, `test-hooks`, registry policy.  
+- [Fundamentals](../fundamentals.md) — `MetadataRegistry`, route discovery, integration-test resets.  
+- [Custom decorators](../custom-decorators.md) — `HandlerKey` and `#[roles]` metadata.

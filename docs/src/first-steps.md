@@ -7,6 +7,8 @@ This guide is the **nestrs** counterpart to Nest’s *Introduction* and *First s
 - **Rust** toolchain (`rustup`, stable recommended).
 - A **nestrs** dependency (workspace crate or crates.io), typically with `tokio` for `async` main.
 
+As you add **`NestApplication::…`** calls (CORS, metrics, CSRF, etc.), use the [API cookbook](appendix-api-cookbook.md) for minimal examples of each builder method.
+
 ## 1) Create or open a project
 
 **Option A — CLI scaffold** (closest to `nest new`):
@@ -27,6 +29,21 @@ cd my-api
 ```
 
 Add `nestrs` (and `tokio` with `macros` + `rt-multi-thread`) to `Cargo.toml`, then copy the minimal module below.
+
+**Example `Cargo.toml`** (adjust the `nestrs` version to match [crates.io](https://crates.io/crates/nestrs) or your workspace):
+
+```toml
+[package]
+name = "my-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nestrs = "0.3.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+Add **`serde`** / **`validator`** when you introduce **`#[dto]`** types; add optional crate features (`openapi`, `graphql`, …) as you need them—see [Roadmap parity](roadmap-parity.md).
 
 ## 2) Minimal HTTP application
 
@@ -103,13 +120,19 @@ Source: `examples/hello-app/src/main.rs`. Use it when you outgrow the snippet ab
 
 ## 5) Build this book locally
 
-From the repo root:
+From the repository root (where the `docs/` folder contains `book.toml`):
+
+```bash
+mdbook serve docs
+```
+
+Alternatively, from inside `docs/`:
 
 ```bash
 cd docs && mdbook serve
 ```
 
-Open the URL mdbook prints (usually `http://127.0.0.1:3000`). The [Introduction](index.md) still embeds the repo `README.md` for project layout and CI pointers.
+Open the URL mdbook prints (often `http://127.0.0.1:3000`). To emit static HTML only: `mdbook build docs` (output under `docs/book/`). The [Introduction](index.md) still embeds the repo `README.md` for project layout and CI pointers.
 
 ## Compared to Nest’s “full” first steps
 

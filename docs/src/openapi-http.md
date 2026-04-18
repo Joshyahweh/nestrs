@@ -10,6 +10,31 @@ This chapter closes the main gap versus Nest **`@nestjs/swagger`**: **request/re
 
 Use [`NestApplication::enable_openapi`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.enable_openapi) or [`enable_openapi_with_options`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.enable_openapi_with_options) with [`OpenApiOptions`](https://docs.rs/nestrs-openapi/latest/nestrs_openapi/struct.OpenApiOptions.html).
 
+**Minimal wiring** (requires `features = ["openapi"]` on `nestrs`):
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["openapi"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust
+use nestrs::prelude::*;
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .enable_openapi() // GET /openapi.json, GET /docs (Swagger UI)
+        .listen(3000)
+        .await;
+}
+```
+
+For **`components`**, **`security`**, and **`infer_route_security_from_roles`**, replace `enable_openapi()` with `enable_openapi_with_options(OpenApiOptions { ... })` as in the sections below.
+
 ---
 
 ## Schema story: manual `components`
@@ -100,8 +125,32 @@ This is **heuristic**: it keys off **metadata**, not runtime guard types or `Can
 
 ---
 
+## Merging **utoipa** `OpenApi` fragments
+
+A typical workflow:
+
+1. Derive **`utoipa::ToSchema`** (and **`IntoParams`**, etc.) on your request/response types.  
+2. Build a small **`utoipa::OpenApi`** instance that only lists **`components.schemas`** (and optionally **`securitySchemes`**).  
+3. Serialize that fragment to [`serde_json::Value`](https://docs.rs/serde_json) and assign it to [`OpenApiOptions.components`](https://docs.rs/nestrs-openapi/latest/nestrs_openapi/struct.OpenApiOptions.html#structfield.components), **deep-merging** with any manual JSON you already pass (so nestrs-generated **`paths`** stay authoritative).  
+4. Serve with **`enable_openapi_with_options`** so **`GET /openapi.json`** reflects both route discovery and your schemas.
+
+Exact merge code depends on your **utoipa** major version; keep merge logic in one module so upgrades stay localized.
+
+## Troubleshooting
+
+| Issue | What to check |
+|-------|----------------|
+| **`/docs` or `/openapi.json` 404** | `features = ["openapi"]` on **`nestrs`**; call **`enable_openapi()`** before **`listen`**. |
+| Routes missing from document | Handlers must use **`#[routes]`** / `impl_routes!` so they register in **`RouteRegistry`**. |
+| Schemas empty | Core does not infer DTOs—populate **`OpenApiOptions.components`** or merge **utoipa** (above). |
+| **`security` not per route** | Set **`infer_route_security_from_roles`** and **`roles_security_scheme`**; add **`#[roles]`** or metadata for those routes. |
+| **`422` validation not in OpenAPI** | Document request bodies manually under **`components`** until first-class `content` support lands for every route. |
+
+---
+
 ## See also
 
+- [API cookbook](appendix-api-cookbook.md) — `enable_openapi` / `enable_openapi_with_options` snippets  
 - Crate README: [`nestrs-openapi/README.md`](../../nestrs-openapi/README.md)
 - Security patterns: [Security](security.md)
 - Roadmap row: [Roadmap parity](roadmap-parity.md) → OpenAPI / Swagger

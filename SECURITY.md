@@ -25,7 +25,7 @@ Please report security vulnerabilities privately.
 
 ## Current platform controls
 
-- **CORS**: configurable through `NestApplication::enable_cors(CorsOptions::...)`.
+- **CORS**: configurable through `NestApplication::enable_cors(CorsOptions::...)`. Prefer **explicit origins** in production; permissive / wildcard settings are easy to misconfigure for browser clients that send credentials. See the mdBook page **`docs/src/secure-defaults.md`** (section *CORS quick reference*) for a short checklist.
 - **Security headers**: configurable through `NestApplication::use_security_headers(SecurityHeaders::default()...)`; opt-in **`SecurityHeaders::helmet_like()`** adds Cross-Origin-Opener-Policy, Cross-Origin-Resource-Policy, `X-DNS-Prefetch-Control`, and related Helmet-style headers (still configure CSP/HSTS yourself).
 - **Rate limiting hooks**: configurable through `NestApplication::use_rate_limit(RateLimitOptions::...)`.
 - **Body limits**: configurable through `NestApplication::use_body_limit(...)`.
@@ -58,6 +58,10 @@ Please report security vulnerabilities privately.
 - **Bearer token in `Authorization` header**: CSRF is generally not applicable.
 - **Cookie-based session auth**: CSRF protection is required (token-based anti-CSRF pattern recommended).
 - nestrs does **not** enable CSRF by default. When you need it, enable feature **`csrf`**, call **`use_cookies()`**, then **`use_csrf_protection(CsrfProtectionConfig::...)`** — your app must issue the token (e.g. set the cookie on a safe request and require the same value in `X-CSRF-Token` on mutations).
+
+### Runtime diagnostics
+
+When cookies or in-memory sessions are enabled **without** CSRF wiring, `NestApplication::build_router` emits a **`tracing` WARN** (and a separate WARN if the `csrf` Cargo feature is missing entirely). Treat these as release-blocking for browser-facing cookie auth until you have an explicit CSRF or SameSite strategy.
 
 ## Secrets and config
 

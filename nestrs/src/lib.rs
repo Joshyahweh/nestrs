@@ -2417,7 +2417,7 @@ struct RateLimitState {
 enum RateLimitInner {
     Memory {
         options: RateLimitOptions,
-        windows: tokio::sync::Mutex<std::collections::HashMap<String, RateLimitWindow>>,
+        state: tokio::sync::Mutex<RateLimitMemoryState>,
     },
     #[cfg(feature = "cache-redis")]
     Redis {
@@ -2432,6 +2432,31 @@ enum RateLimitInner {
 struct RateLimitWindow {
     started_at: std::time::Instant,
     count: u64,
+}
+
+#[derive(Debug)]
+struct RateLimitMemoryState {
+    windows: std::collections::HashMap<String, RateLimitWindow>,
+    last_pruned_at: std::time::Instant,
+}
+
+impl RateLimitMemoryState {
+    fn new() -> Self {
+        Self {
+            windows: std::collections::HashMap::new(),
+            last_pruned_at: std::time::Instant::now(),
+        }
+    }
+
+    fn prune_expired(&mut self, now: std::time::Instant, window_secs: u64) {
+        if now.duration_since(self.last_pruned_at).as_secs() < window_secs {
+            return;
+        }
+
+        self.last_pruned_at = now;
+        self.windows
+            .retain(|_, window| now.duration_since(window.started_at).as_secs() < window_secs);
+    }
 }
 
 impl RateLimitState {
@@ -2458,7 +2483,7 @@ impl RateLimitState {
         Self {
             inner: RateLimitInner::Memory {
                 options,
-                windows: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+                state: tokio::sync::Mutex::new(RateLimitMemoryState::new()),
             },
         }
     }
@@ -2470,15 +2495,17 @@ async fn rate_limit_middleware(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     match &state.inner {
-        RateLimitInner::Memory { options, windows } => {
+        RateLimitInner::Memory { options, state } => {
             let client_key = client_ip_from_request(&req);
-            let mut guard = windows.lock().await;
-            let window = guard.entry(client_key).or_insert_with(|| RateLimitWindow {
-                started_at: std::time::Instant::now(),
+            let now = std::time::Instant::now();
+            let mut guard = state.lock().await;
+            guard.prune_expired(now, options.window_secs);
+            let window = guard.windows.entry(client_key).or_insert_with(|| RateLimitWindow {
+                started_at: now,
                 count: 0,
             });
-            if window.started_at.elapsed().as_secs() >= options.window_secs {
-                window.started_at = std::time::Instant::now();
+            if now.duration_since(window.started_at).as_secs() >= options.window_secs {
+                window.started_at = now;
                 window.count = 0;
             }
             if window.count >= options.max_requests {
@@ -2538,6 +2565,59 @@ fn client_ip_from_request(req: &axum::extract::Request) -> String {
     crate::client_ip::best_effort_client_ip_from_request(req)
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::{RateLimitMemoryState, RateLimitWindow};
+
+    #[test]
+    fn prune_expired_removes_stale_windows() {
+        let now = std::time::Instant::now();
+        let mut state = RateLimitMemoryState {
+            windows: std::collections::HashMap::from([
+                (
+                    "fresh".to_string(),
+                    RateLimitWindow {
+                        started_at: now - std::time::Duration::from_secs(10),
+                        count: 1,
+                    },
+                ),
+                (
+                    "stale".to_string(),
+                    RateLimitWindow {
+                        started_at: now - std::time::Duration::from_secs(61),
+                        count: 1,
+                    },
+                ),
+            ]),
+            last_pruned_at: now - std::time::Duration::from_secs(61),
+        };
+
+        state.prune_expired(now, 60);
+
+        assert!(state.windows.contains_key("fresh"));
+        assert!(!state.windows.contains_key("stale"));
+    }
+
+    #[test]
+    fn prune_expired_skips_full_scan_before_interval_elapses() {
+        let now = std::time::Instant::now();
+        let mut state = RateLimitMemoryState {
+            windows: std::collections::HashMap::from([(
+                "stale".to_string(),
+                RateLimitWindow {
+                    started_at: now - std::time::Duration::from_secs(61),
+                    count: 1,
+                },
+            )]),
+            last_pruned_at: now - std::time::Duration::from_secs(30),
+        };
+
+        state.prune_expired(now, 60);
+
+        assert!(state.windows.contains_key("stale"));
+    }
 }
 
 async fn request_timeout_middleware(

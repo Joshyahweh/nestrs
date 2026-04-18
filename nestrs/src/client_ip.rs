@@ -74,18 +74,49 @@ where
 {
     type Rejection = ClientIpMissing;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        if let Ok(ConnectInfo(addr)) =
-            <ConnectInfo<SocketAddr> as axum::extract::FromRequestParts<S>>::from_request_parts(
-                parts, state,
-            )
-            .await
-        {
-            return Ok(Self(addr.ip()));
-        }
-
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         best_effort_client_ip(&parts.headers, &parts.extensions)
             .map(Self)
             .ok_or(ClientIpMissing)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{best_effort_client_ip, X_FORWARDED_FOR, X_REAL_IP};
+    use axum::extract::connect_info::ConnectInfo;
+    use axum::http::{Extensions, HeaderMap, HeaderValue};
+    use std::net::{IpAddr, SocketAddr};
+
+    #[test]
+    fn connect_info_takes_precedence_over_forwarded_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            &X_FORWARDED_FOR,
+            HeaderValue::from_static("203.0.113.10, 198.51.100.10"),
+        );
+
+        let mut extensions = Extensions::new();
+        extensions.insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4321))));
+
+        assert_eq!(
+            best_effort_client_ip(&headers, &extensions),
+            Some(IpAddr::from([127, 0, 0, 1]))
+        );
+    }
+
+    #[test]
+    fn forwarded_headers_are_used_when_connect_info_is_missing() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            &X_FORWARDED_FOR,
+            HeaderValue::from_static("203.0.113.10, 198.51.100.10"),
+        );
+        headers.insert(&X_REAL_IP, HeaderValue::from_static("198.51.100.20"));
+
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new()),
+            Some(IpAddr::from([203, 0, 113, 10]))
+        );
     }
 }

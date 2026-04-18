@@ -131,7 +131,16 @@ fn rewrite_request_path_for_version(
     }
 }
 
+fn normalize_root_prefix(root_prefix: &str) -> &str {
+    if root_prefix == "/" {
+        ""
+    } else {
+        root_prefix
+    }
+}
+
 fn strip_root_prefix<'a>(path: &'a str, root_prefix: &str) -> Option<&'a str> {
+    let root_prefix = normalize_root_prefix(root_prefix);
     if root_prefix.is_empty() {
         return Some(path);
     }
@@ -158,6 +167,7 @@ fn insert_version_segment(path: &str, version: &str) -> String {
 }
 
 fn apply_root_prefix(root_prefix: &str, app_path: &str) -> String {
+    let root_prefix = normalize_root_prefix(root_prefix);
     if root_prefix.is_empty() {
         return app_path.to_string();
     }
@@ -183,6 +193,23 @@ fn parse_version_from_accept(accept: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_root_prefix, strip_root_prefix};
+
+    #[test]
+    fn slash_root_prefix_is_ignored_when_stripping() {
+        assert_eq!(strip_root_prefix("/items", "/"), Some("/items"));
+        assert_eq!(strip_root_prefix("/", "/"), Some("/"));
+    }
+
+    #[test]
+    fn slash_root_prefix_is_ignored_when_applying() {
+        assert_eq!(apply_root_prefix("/", "/v1/items"), "/v1/items");
+        assert_eq!(apply_root_prefix("/", "/"), "/");
+    }
 }
 
 /// Rejects requests whose `Host` header does not match `expected` (port suffix ignored).

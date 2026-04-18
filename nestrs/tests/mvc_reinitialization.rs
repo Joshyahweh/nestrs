@@ -49,7 +49,13 @@ fn mvc_second_for_root_call_must_not_succeed_with_stale_templates() {
     );
 
     match MvcModule::for_root(second.path()) {
-        Err(_) => {}
+        Err(err) => {
+            assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+            assert_eq!(
+                err.to_string(),
+                "MvcModule::for_root has already been called for this process"
+            );
+        }
         Ok(_) => {
             let rendered = service
                 .render("index.html", ())

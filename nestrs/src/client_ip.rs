@@ -6,7 +6,8 @@
 
 use axum::extract::connect_info::ConnectInfo;
 use axum::http::request::Parts;
-use axum::http::{HeaderName, StatusCode};
+use axum::http::Extensions;
+use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use std::net::{IpAddr, SocketAddr};
 
@@ -40,6 +41,32 @@ fn parse_forwarded_ip(raw: &str) -> Option<IpAddr> {
     first.parse::<IpAddr>().ok()
 }
 
+pub(crate) fn best_effort_client_ip(
+    headers: &HeaderMap,
+    extensions: &Extensions,
+) -> Option<IpAddr> {
+    if let Some(ConnectInfo(addr)) = extensions.get::<ConnectInfo<SocketAddr>>() {
+        return Some(addr.ip());
+    }
+
+    if let Some(v) = headers
+        .get(&X_FORWARDED_FOR)
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_forwarded_ip)
+    {
+        return Some(v);
+    }
+
+    headers
+        .get(&X_REAL_IP)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<IpAddr>().ok())
+}
+
+pub(crate) fn best_effort_client_ip_from_request(req: &axum::extract::Request) -> Option<IpAddr> {
+    best_effort_client_ip(req.headers(), req.extensions())
+}
+
 #[async_trait::async_trait]
 impl<S> axum::extract::FromRequestParts<S> for ClientIp
 where
@@ -48,7 +75,6 @@ where
     type Rejection = ClientIpMissing;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Prefer Axum connect info when available (also supports `MockConnectInfo` in tests).
         if let Ok(ConnectInfo(addr)) =
             <ConnectInfo<SocketAddr> as axum::extract::FromRequestParts<S>>::from_request_parts(
                 parts, state,
@@ -58,24 +84,8 @@ where
             return Ok(Self(addr.ip()));
         }
 
-        if let Some(v) = parts
-            .headers
-            .get(&X_FORWARDED_FOR)
-            .and_then(|v| v.to_str().ok())
-            .and_then(parse_forwarded_ip)
-        {
-            return Ok(Self(v));
-        }
-
-        if let Some(v) = parts
-            .headers
-            .get(&X_REAL_IP)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<IpAddr>().ok())
-        {
-            return Ok(Self(v));
-        }
-
-        Err(ClientIpMissing)
+        best_effort_client_ip(&parts.headers, &parts.extensions)
+            .map(Self)
+            .ok_or(ClientIpMissing)
     }
 }

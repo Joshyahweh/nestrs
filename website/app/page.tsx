@@ -13,7 +13,7 @@ export default function HomePage() {
             nestrs
           </Link>
           <nav className="flex items-center gap-3 text-sm text-slate">
-            <Link href="/docs/introduction/overview" className="hover:text-ember">
+            <Link href="/docs/introduction" className="hover:text-ember">
               Docs
             </Link>
             <a href="https://github.com/Joshyahweh/nestrs" className="inline-flex items-center gap-2 hover:text-ember">
@@ -45,7 +45,7 @@ export default function HomePage() {
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button asChild className="h-10 bg-ember px-5 text-sm font-medium text-white hover:bg-[#d23b18]">
-                  <Link href="/docs/introduction/overview">Get started</Link>
+                  <Link href="/docs/first-steps">Get started</Link>
                 </Button>
                 <Button
                   asChild
@@ -58,15 +58,27 @@ export default function HomePage() {
             </div>
 
             <CodePanel
-              title="users.controller.rs"
+              title="hello_controller.rs"
               language="rust"
-              code={`#[controller("/users")]
-pub struct UsersController;
+              code={`use nestrs::prelude::*;
 
-#[get("/:id")]
-async fn find_one(Path(id): Path<u64>) -> Json<UserDto> {
-    Json(UserDto::new(id, "Taylor".to_string()))
-}`}
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/api")]
+struct HelloController;
+
+#[routes(state = AppState)]
+impl HelloController {
+    #[get("/hello")]
+    async fn hello() -> &'static str {
+        "Hello from nestrs"
+    }
+}
+
+#[module(controllers = [HelloController], providers = [AppState])]
+struct AppModule;`}
             />
           </div>
         </section>
@@ -107,12 +119,26 @@ export class UsersController {
               <CodePanel
                 title="nestrs (Rust)"
                 language="rust"
-                code={`#[controller("/users")]
-pub struct UsersController;
+                code={`use nestrs::prelude::*;
 
-#[get("/:id")]
-async fn find_one(Path(id): Path<String>) -> UserDto {
-    UserDto { id, name: "Taylor".to_string() }
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[dto]
+struct IdParam {
+    id: String,
+}
+
+#[controller(prefix = "/users", version = "v1")]
+struct UsersController;
+
+#[routes(state = AppState)]
+impl UsersController {
+    #[get("/:id")]
+    async fn find_one(#[param::param] p: IdParam) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({ "id": p.id, "name": "Taylor" }))
+    }
 }`}
               />
             </div>
@@ -153,12 +179,12 @@ async fn find_one(Path(id): Path<String>) -> UserDto {
               <CodePanel
                 title="main.rs"
                 language="rust"
-                code={`use nestrs::factory::NestFactory;
+                code={`use nestrs::prelude::*;
 
 #[tokio::main]
 async fn main() {
     NestFactory::create::<AppModule>()
-        .listen(3000)
+        .listen_graceful(3000)
         .await;
 }`}
               />
@@ -175,7 +201,7 @@ async fn main() {
             <span className="text-slate">MIT OR Apache-2.0</span>
           </div>
           <nav className="flex flex-wrap items-center justify-center gap-4">
-            <Link href="/docs/introduction/overview" className="hover:text-ember">
+            <Link href="/docs/introduction" className="hover:text-ember">
               Docs
             </Link>
             <a href="https://github.com/Joshyahweh/nestrs" className="hover:text-ember">

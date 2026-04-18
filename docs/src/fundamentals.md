@@ -69,6 +69,17 @@ Use it for **dynamic** resolution (plugins, conditional code) where static typin
 
 Nest’s reflection over class metadata has no direct equivalent; discovery is **type-id / route list** oriented.
 
+After you have a [`ModuleRef`](https://docs.rs/nestrs-core/latest/nestrs_core/struct.ModuleRef.html) (from `NestFactory::create` before `into_router`, or by wrapping the root registry in tests):
+
+```rust
+use nestrs::core::{DiscoveryService, ModuleRef};
+// let mref: ModuleRef = app.module_ref();
+
+let discovery = DiscoveryService::new(mref);
+let _provider_ids = discovery.get_providers();
+let _route_specs = discovery.get_routes(); // OpenAPI / diagnostics
+```
+
 ## Dynamic modules
 
 ### `DynamicModule`
@@ -152,9 +163,110 @@ Avoid **`block_on`** inside `construct` — it can deadlock the async runtime.
 
 There is **no** `forwardRef` for individual classes in Rust DI — cycles must be broken in **code structure** or **initialization order**.
 
+## Worked recipe: configurable module options (`for_root` / `for_root_async`)
+
+Nest’s **`ConfigModule.forRoot`** pattern maps to **`ConfigurableModuleBuilder`**, which registers a **[`ModuleOptions<O, M>`](https://docs.rs/nestrs-core/latest/nestrs_core/struct.ModuleOptions.html)** provider your injectables can depend on.
+
+**Synchronous options** (constants, env parsed before `main`):
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(Clone)]
+struct ApiOptions {
+    base_url: String,
+}
+
+#[injectable]
+struct HttpClientConfig {
+    opts: std::sync::Arc<ModuleOptions<ApiOptions, ConfigModule>>,
+}
+
+impl HttpClientConfig {
+    fn base_url(&self) -> &str {
+        &self.opts.get().base_url
+    }
+}
+
+#[module(providers = [HttpClientConfig], exports = [HttpClientConfig])]
+struct ConfigModule;
+
+fn build() -> DynamicModule {
+    ConfigurableModuleBuilder::<ApiOptions>::for_root::<ConfigModule>(ApiOptions {
+        base_url: "https://api.example.com".into(),
+    })
+}
+```
+
+**Async options** (remote secrets, KMS, slow disk): await **`for_root_async`** before composing the root module (the future runs **once**, before singleton construction):
+
+```rust
+async fn build_from_vault() -> DynamicModule {
+    ConfigurableModuleBuilder::<ApiOptions>::for_root_async::<ConfigModule, _, _>(|| async {
+        // Example: await a secrets client here, then fill `ApiOptions`.
+        ApiOptions {
+            base_url: std::env::var("API_BASE_URL").unwrap_or_else(|_| "https://api.example.com".into()),
+        }
+    })
+    .await
+}
+```
+
+`Injectable::construct` remains **synchronous**; use **`on_module_init`** inside `HttpClientConfig` (or a dedicated bootstrap service) for I/O that must happen **after** the type exists.
+
+## Worked recipe: `forward_ref` for cyclic **module** imports
+
+When **`AModule` imports `BModule`** and **`BModule` imports `AModule`**, the macro expansion detects a **cycle** and panics unless one import is the intentional **back-edge**. Mark it with **`forward_ref::<TheOtherModule>()`** (alias **`forwardRef`**):
+
+```rust
+use nestrs::prelude::*;
+
+// … controllers / providers for A and B omitted …
+
+#[module(
+    imports = [BForwardModule],
+    controllers = [AController],
+    providers = [AState],
+)]
+struct AForwardModule;
+
+#[module(
+    imports = [forward_ref::<AForwardModule>()],
+    controllers = [BController],
+    providers = [BState],
+)]
+struct BForwardModule;
+```
+
+See **`nestrs/tests/forward_ref_modules.rs`** in the repository for a compiling router test. This fixes **module graph** cycles only; **provider** cycles still need factories, `on_module_init`, or structural refactors (above).
+
+## Worked recipe: `register_use_factory` (Nest `useFactory`)
+
+Use a **sync** factory when construction order must be explicit or you need to close a provider cycle without eager `get()` during another type’s `construct`. The closure receives the root [`ProviderRegistry`](https://docs.rs/nestrs-core/latest/nestrs_core/struct.ProviderRegistry.html) so dependencies resolve the same way as in `construct`:
+
+```rust
+use nestrs::core::{ProviderRegistry, ProviderScope};
+use std::sync::Arc;
+
+// `HeavyService` / `LightService`: your own `Send + Sync + 'static` types.
+fn register_heavy(registry: &mut ProviderRegistry) {
+    registry.register_use_factory::<HeavyService>(ProviderScope::Singleton, |reg| {
+        let light = reg.get::<LightService>();
+        Arc::new(HeavyService::new(light))
+    });
+}
+```
+
+Keep the closure **non-async**; defer I/O to **`on_module_init`** on `HeavyService` or to **`for_root_async`** for module-level configuration.
+
+## Integration tests and global registries
+
+`RouteRegistry` and `MetadataRegistry` are **process-global** ([ADR-0002](adrs/0002-global-registries.md)). In **`#[tokio::test]`** suites that build multiple apps, enable **`nestrs`’s `test-hooks`** feature and clear registries between tests (see `nestrs/tests/common/mod.rs` **`RegistryResetGuard`**). **Never** enable `test-hooks` in production binaries—see **`STABILITY.md`** at the repository root.
+
 ## Related
 
 - [First steps](first-steps.md) — minimal app  
 - [Custom decorators](custom-decorators.md) — metadata vs Nest decorators  
 - [Roadmap parity](roadmap-parity.md) — feature matrix  
+- [API cookbook](appendix-api-cookbook.md) — `module_ref`, `set_global_prefix`, `use_request_scope`, and other `NestApplication` helpers  
 - Rustdoc: [`nestrs_core`](https://docs.rs/nestrs-core), [`nestrs`](https://docs.rs/nestrs)  

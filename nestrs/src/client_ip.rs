@@ -6,7 +6,8 @@
 
 use axum::extract::connect_info::ConnectInfo;
 use axum::http::request::Parts;
-use axum::http::{HeaderName, StatusCode};
+use axum::http::Extensions;
+use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use std::net::{IpAddr, SocketAddr};
 
@@ -40,6 +41,32 @@ fn parse_forwarded_ip(raw: &str) -> Option<IpAddr> {
     first.parse::<IpAddr>().ok()
 }
 
+pub(crate) fn best_effort_client_ip(
+    headers: &HeaderMap,
+    extensions: &Extensions,
+) -> Option<IpAddr> {
+    if let Some(ConnectInfo(addr)) = extensions.get::<ConnectInfo<SocketAddr>>() {
+        return Some(addr.ip());
+    }
+
+    if let Some(v) = headers
+        .get(&X_FORWARDED_FOR)
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_forwarded_ip)
+    {
+        return Some(v);
+    }
+
+    headers
+        .get(&X_REAL_IP)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<IpAddr>().ok())
+}
+
+pub(crate) fn best_effort_client_ip_from_request(req: &axum::extract::Request) -> Option<IpAddr> {
+    best_effort_client_ip(req.headers(), req.extensions())
+}
+
 #[async_trait::async_trait]
 impl<S> axum::extract::FromRequestParts<S> for ClientIp
 where
@@ -47,35 +74,49 @@ where
 {
     type Rejection = ClientIpMissing;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Prefer Axum connect info when available (also supports `MockConnectInfo` in tests).
-        if let Ok(ConnectInfo(addr)) =
-            <ConnectInfo<SocketAddr> as axum::extract::FromRequestParts<S>>::from_request_parts(
-                parts, state,
-            )
-            .await
-        {
-            return Ok(Self(addr.ip()));
-        }
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        best_effort_client_ip(&parts.headers, &parts.extensions)
+            .map(Self)
+            .ok_or(ClientIpMissing)
+    }
+}
 
-        if let Some(v) = parts
-            .headers
-            .get(&X_FORWARDED_FOR)
-            .and_then(|v| v.to_str().ok())
-            .and_then(parse_forwarded_ip)
-        {
-            return Ok(Self(v));
-        }
+#[cfg(test)]
+mod tests {
+    use super::{best_effort_client_ip, X_FORWARDED_FOR, X_REAL_IP};
+    use axum::extract::connect_info::ConnectInfo;
+    use axum::http::{Extensions, HeaderMap, HeaderValue};
+    use std::net::{IpAddr, SocketAddr};
 
-        if let Some(v) = parts
-            .headers
-            .get(&X_REAL_IP)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<IpAddr>().ok())
-        {
-            return Ok(Self(v));
-        }
+    #[test]
+    fn connect_info_takes_precedence_over_forwarded_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            &X_FORWARDED_FOR,
+            HeaderValue::from_static("203.0.113.10, 198.51.100.10"),
+        );
 
-        Err(ClientIpMissing)
+        let mut extensions = Extensions::new();
+        extensions.insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4321))));
+
+        assert_eq!(
+            best_effort_client_ip(&headers, &extensions),
+            Some(IpAddr::from([127, 0, 0, 1]))
+        );
+    }
+
+    #[test]
+    fn forwarded_headers_are_used_when_connect_info_is_missing() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            &X_FORWARDED_FOR,
+            HeaderValue::from_static("203.0.113.10, 198.51.100.10"),
+        );
+        headers.insert(&X_REAL_IP, HeaderValue::from_static("198.51.100.20"));
+
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new()),
+            Some(IpAddr::from([203, 0, 113, 10]))
+        );
     }
 }

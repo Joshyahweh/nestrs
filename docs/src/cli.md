@@ -2,6 +2,8 @@
 
 The **nestrs** command-line tool scaffolds projects and source files. On [crates.io](https://crates.io/crates/nestrs-scaffold) the package is published as **`nestrs-scaffold`** (the `nestrs-cli` name is taken); the binary you run is still **`nestrs`**.
 
+**Command examples:** See the [API cookbook](appendix-api-cookbook.md) for additional **`nestrs g …`** invocations alongside the **Examples** section below.
+
 ```bash
 cargo install nestrs-scaffold
 nestrs --help
@@ -49,6 +51,32 @@ This keeps **one** Rust toolchain story (Cargo) instead of duplicating workspace
 ## Package manager note
 
 `nestrs new` accepts `--package-manager cargo` (default). Other package managers are not supported — there is no parallel to Nest’s npm/yarn/pnpm integration.
+
+## Examples
+
+**New project** (interactive prompts may vary by version):
+
+```bash
+cargo install nestrs-scaffold
+nestrs new billing-api
+cd billing-api
+cargo run
+```
+
+**Generate a REST-shaped resource** into `src/` (dry run first in unfamiliar trees):
+
+```bash
+nestrs generate resource invoices --transport rest --path src --dry-run
+nestrs generate resource invoices --transport rest --path src
+```
+
+**Workspace doctor** (from a clone of nestrs):
+
+```bash
+cargo nestrs doctor
+```
+
+Use `doctor` output as a **hint list**: it catches common feature/Cargo mismatches but does not replace `cargo check` or your CI matrix.
 
 ## Related
 

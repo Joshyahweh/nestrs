@@ -59,6 +59,7 @@ fn print_help() -> Result<(), String> {
     println!();
     println!("Usage:");
     println!("  nestrs new <name> [--no-git] [--strict] [--package-manager cargo]");
+    println!("    --strict: generated src/main.rs starts with #![deny(unsafe_code)]");
     println!("  nestrs doctor   (toolchain + nestrs feature hints for the current crate)");
     println!("  nestrs g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs g <res|s|co|mo|dto|gu|pi|fi|in|st|r|ga|ms|tr> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
@@ -111,13 +112,13 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
     );
     fs::write(root.join("Cargo.toml"), cargo_toml).map_err(|e| e.to_string())?;
 
-    let strict_attr = if strict {
-        "#[serde(deny_unknown_fields)]\n"
+    let crate_header = if strict {
+        "#![deny(unsafe_code)]\n\n"
     } else {
         ""
     };
     let main_rs = format!(
-        "use nestrs::prelude::*;\n\n{strict_attr}#[dto]\npub struct PingDto {{\n    #[IsString]\n    pub message: String,\n}}\n\n#[controller(prefix = \"/\")]\npub struct AppController;\n\nimpl AppController {{\n    #[get(\"/\")]\n    pub async fn root() -> &'static str {{\n        \"Hello from nestrs\"\n    }}\n}}\n\n#[derive(Default)]\n#[injectable]\npub struct AppService;\n\nimpl_routes!(AppController, state AppService => [\n    GET \"/\" with () => AppController::root,\n]);\n\n#[module(\n    controllers = [AppController],\n    providers = [AppService],\n)]\npub struct AppModule;\n\n#[tokio::main]\nasync fn main() {{\n    let port = std::env::var(\"PORT\")\n        .ok()\n        .and_then(|v| v.parse::<u16>().ok())\n        .unwrap_or(3000);\n\n    NestFactory::create::<AppModule>()\n        .set_global_prefix(\"api\")\n        .use_request_id()\n        .use_request_tracing(RequestTracingOptions::builder().skip_paths([\"/metrics\"]))\n        .enable_metrics(\"/metrics\")\n        .enable_health_check(\"/health\")\n        // OpenAPI + Swagger UI (add `features = [\"openapi\"]` on `nestrs` in Cargo.toml):\n        // .enable_openapi()\n        .enable_production_errors_from_env()\n        .listen_graceful(port)\n        .await;\n}}\n"
+        "{crate_header}use nestrs::prelude::*;\n\n#[dto]\npub struct PingDto {{\n    #[IsString]\n    pub message: String,\n}}\n\n#[controller(prefix = \"/\")]\npub struct AppController;\n\nimpl AppController {{\n    #[get(\"/\")]\n    pub async fn root() -> &'static str {{\n        \"Hello from nestrs\"\n    }}\n}}\n\n#[derive(Default)]\n#[injectable]\npub struct AppService;\n\nimpl_routes!(AppController, state AppService => [\n    GET \"/\" with () => AppController::root,\n]);\n\n#[module(\n    controllers = [AppController],\n    providers = [AppService],\n)]\npub struct AppModule;\n\n#[tokio::main]\nasync fn main() {{\n    let port = std::env::var(\"PORT\")\n        .ok()\n        .and_then(|v| v.parse::<u16>().ok())\n        .unwrap_or(3000);\n\n    NestFactory::create::<AppModule>()\n        .set_global_prefix(\"api\")\n        .use_request_id()\n        .use_request_tracing(RequestTracingOptions::builder().skip_paths([\"/metrics\"]))\n        .enable_metrics(\"/metrics\")\n        .enable_health_check(\"/health\")\n        // OpenAPI + Swagger UI (add `features = [\"openapi\"]` on `nestrs` in Cargo.toml):\n        // .enable_openapi()\n        .enable_production_errors_from_env()\n        .listen_graceful(port)\n        .await;\n}}\n"
     );
     fs::write(root.join("src/main.rs"), main_rs).map_err(|e| e.to_string())?;
 

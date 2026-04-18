@@ -1663,6 +1663,7 @@ impl NestApplication {
     }
 
     fn build_router(self) -> axum::Router {
+        Self::log_security_footguns(&self);
         let production_errors = self.production_errors;
         let request_context = self.request_context;
         let execution_context = self.execution_context;
@@ -1926,6 +1927,46 @@ impl NestApplication {
         }
 
         router
+    }
+
+    /// Emits `tracing` warnings for common security footguns (cookies/sessions without CSRF, etc.).
+    ///
+    /// Called from [`Self::build_router`] so both [`Self::into_router`] and [`Self::listen`] paths share
+    /// the same diagnostics.
+    fn log_security_footguns(&self) {
+        #[cfg(feature = "cookies")]
+        {
+            #[cfg(feature = "session")]
+            let session_on = self.session_memory;
+            #[cfg(not(feature = "session"))]
+            let session_on = false;
+            let cookies_on = self.cookie_manager;
+            if !cookies_on && !session_on {
+                return;
+            }
+
+            #[cfg(feature = "csrf")]
+            {
+                if self.csrf.is_none() {
+                    tracing::warn!(
+                        target: "nestrs",
+                        "nestrs security: cookies or in-memory sessions are enabled, but CSRF protection is not configured. \
+                         Cookie-authenticated browser clients remain vulnerable to cross-site request forgery on unsafe HTTP methods \
+                         until you call NestApplication::use_csrf_protection(...) (after use_cookies). \
+                         CSRF stays opt-in by default; see SECURITY.md and the mdBook page `secure-defaults.md`."
+                    );
+                }
+            }
+            #[cfg(not(feature = "csrf"))]
+            {
+                tracing::warn!(
+                    target: "nestrs",
+                    "nestrs security: cookies or sessions are enabled, but the `csrf` Cargo feature is not enabled on `nestrs`. \
+                     Double-submit CSRF middleware is unavailable; add `features = [\"csrf\"]` (implies `cookies`) and call \
+                     use_cookies() + use_csrf_protection(...) for mutation endpoints that rely on cookies."
+                );
+            }
+        }
     }
 
     /// Builds the [`axum::Router`] with all middleware except [`Self::use_path_normalization`], which is
@@ -2951,6 +2992,26 @@ pub fn __nestrs_openapi_spec_leaked(
 
 /// Registers HTTP routes for a `#[controller]` type. Each line: `METHOD "path" with (RouteGuards...) => Handler,`.
 /// Use `with ()` when a route has no route-level guards. Route guards run **inside** (after) controller guards.
+///
+/// ## Per-route cross-cutting order (frozen contract)
+///
+/// For each route, nestrs builds an Axum [`MethodRouter`](axum::routing::MethodRouter) roughly as follows
+/// (outer → inner with respect to the **incoming request**), matching `impl_routes!` in this crate:
+///
+/// 1. **Route-level exception filters** (`#[use_filters(...)]`): first type in the attribute list is the
+///    **outermost** filter layer; the **last** filter sits closest to the handler and sees the handler/guard
+///    response first on the way out.
+/// 2. **Controller guard** (`impl_routes!(..., controller_guards(G) => [...])` only): one outer middleware that
+///    runs **before** route guards on the **incoming** request (still before the handler).
+/// 3. **Route guards** (`with (G1, G2, ...)`): run **left-to-right** in the generated `for` loop (short-circuit
+///    on first `Err`).
+/// 4. **Interceptors** (`#[use_interceptors(I1, I2, ...)]`): first interceptor in the list is the **outermost**
+///    Tower layer; the last interceptor is closest to the handler.
+/// 5. **Handler**: Axum extractors (including `#[use_pipes(ValidationPipe)]`-wired `ValidatedBody` / `ValidatedQuery`
+///    / `ValidatedPath`) run at the handler boundary in normal Axum parameter order.
+///
+/// **Pipes** (`#[use_pipes(...)]`) are compile-time wiring on parameters (not extra Tower layers). See the
+/// mdBook page `http-pipeline-order.md` for the global `NestApplication::build_router` middleware sequence.
 ///
 /// Optional OpenAPI metadata (for `nestrs-openapi`): between the path and `with`, add
 /// `openapi ( nestrs::__nestrs_openapi_spec_leaked(...) )` — `#[routes]` emits this from `#[openapi(...)]`.

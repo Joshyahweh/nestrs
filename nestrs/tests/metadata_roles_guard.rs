@@ -1,6 +1,10 @@
+mod common;
+
+use crate::common::RegistryResetGuard;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use nestrs::prelude::*;
+use serial_test::serial;
 use tower::util::ServiceExt;
 
 #[derive(Default)]
@@ -31,7 +35,9 @@ impl MetaController {
 struct AppModule;
 
 #[tokio::test]
+#[serial]
 async fn roles_metadata_is_visible_to_guards() {
+    let _registry_guard = RegistryResetGuard::new();
     let router = NestFactory::create::<AppModule>().into_router();
 
     let ok = router

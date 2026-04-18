@@ -2,9 +2,19 @@
 
 This chapter ties together **partial** areas from the [roadmap](roadmap-parity.md): GraphQL ecosystem boundaries, **WebSocket “exception filter”** semantics, **microservice** guard/pipe/filter parity, the **JSON wire** contract, and **gRPC** usage.
 
+If you are new to nestrs but know **NestJS**, start with the [NestJS → nestrs migration guide](nestjs-migration.md) for HTTP module/decorator mapping before diving into GraphQL/WebSocket differences here.
+
 ## GraphQL
 
 Async-GraphQL integration lives in **`nestrs-graphql`**. Nest parity for federation, plugins, and codegen is explicitly **out of core** — use **async-graphql** + Apollo Router / GraphOS / codegen crates. See the roadmap **GraphQL** row and `nestrs-graphql` crate docs.
+
+| Task in Nest | Practical nestrs approach |
+|----------------|---------------------------|
+| `@nestjs/graphql` code-first schema | Define async-graphql `Object`/`InputObject` types; pass a built `Schema` to `NestFactory::...enable_graphql(...)`. |
+| Federation / subgraph stitching | Run Apollo Router or GraphOS; nestrs exposes a **single** `/graphql` router—treat it as one subgraph in your platform. |
+| DataLoader / N+1 | Use async-graphql `dataloader` or application-level batching in resolvers—same ecosystem as standalone GraphQL servers. |
+
+**HTTP surface:** With the **`graphql`** feature, [`NestFactory::enable_graphql`](https://docs.rs/nestrs/latest/nestrs/struct.NestFactory.html#method.enable_graphql) mounts **GET/POST `/graphql`** on the same Axum router as REST controllers (global prefix and versioning apply). You still define resolvers and schema using **async-graphql** APIs; nestrs wires transport and DI around them.
 
 ## WebSockets: errors vs HTTP exception filters
 
@@ -23,6 +33,17 @@ On **`#[micro_routes]`** handlers:
 
 There is **no** microservice analogue of Nest’s **exception filter** stack: failures are **`TransportError`** (and `HttpException` is mapped into it in generated code). See the root [`MICROSERVICES.md`](../../MICROSERVICES.md) (also included in [Microservices](microservices.md)) for the HTTP vs micro parity table and wire-format notes.
 
+```text
+Micro route (conceptual):
+
+  request → micro interceptors (outer … inner)
+         → micro guards (left … right)
+         → micro pipes
+         → handler
+```
+
+Compare with [HTTP pipeline order](http-pipeline-order.md): HTTP runs **filters → (controller guard) → route guards → interceptors → handler**—do not assume the two stacks reorder the same cross-cutting types.
+
 ## JSON `wire` format (conformance)
 
 All Redis/Kafka/MQTT/RabbitMQ/custom adapters that use [`nestrs_microservices::wire`](https://docs.rs/nestrs-microservices/latest/nestrs_microservices/wire/index.html) share the same **`WireRequest`** / **`WireResponse`** JSON. **gRPC** carries the same JSON inside protobuf bytes.
@@ -39,6 +60,7 @@ Enable **`microservices`** + **`microservices-grpc`** on **`nestrs`**.
 
 ## See also
 
+- [API cookbook](appendix-api-cookbook.md) — `enable_graphql` pointer (async-graphql `Schema` required)  
 - [Microservices](microservices.md) (includes `MICROSERVICES.md`)
 - [Security](security.md)
 - `nestrs-ws/README.md`, `nestrs-microservices/README.md`

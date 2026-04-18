@@ -34,3 +34,9 @@ Macros favor explicit, predictable expansion with minimal hidden runtime behavio
 - New macro features must document expansion shape and failure modes.
 - Prefer incremental, composable attributes over opaque one-shot mega-macros.
 - If a macro feature increases hidden behavior, capture the trade-off in a new ADR.
+
+## See also
+
+- Crate: **`nestrs-macros`** — proc macro implementations and attribute reference.  
+- [Custom decorators](../custom-decorators.md) — how attributes map to Nest-style patterns.  
+- `impl_routes!` / `#[routes]` rustdoc on **`nestrs`** — ordering of guards, pipes, and interceptors.

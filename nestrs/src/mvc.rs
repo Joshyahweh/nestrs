@@ -65,7 +65,12 @@ impl MvcModule {
     /// Loads `*.html`, `*.htm`, `*.j2`, `*.jinja`, `*.mjinja` from `dir` into the template environment.
     pub fn for_root(dir: impl AsRef<Path>) -> Result<Self, std::io::Error> {
         let env = load_templates_from_dir(dir.as_ref())?;
-        let _ = MVC_ENV.set(Arc::new(env));
+        MVC_ENV.set(Arc::new(env)).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "MvcModule::for_root has already been called for this process",
+            )
+        })?;
         Ok(Self)
     }
 }

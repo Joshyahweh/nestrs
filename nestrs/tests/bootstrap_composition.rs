@@ -555,6 +555,49 @@ async fn rate_limit_returns_too_many_requests() {
 }
 
 #[tokio::test]
+async fn rate_limit_keeps_clients_in_separate_buckets_in_memory_mode() {
+    let router = NestFactory::create::<AppModule>()
+        .use_rate_limit(
+            RateLimitOptions::builder()
+                .max_requests(1)
+                .window_secs(60)
+                .build(),
+        )
+        .into_router();
+
+    let first = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .header("x-forwarded-for", "203.0.113.10")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request");
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = router
+        .oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .header("x-forwarded-for", "203.0.113.11")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request");
+    assert_eq!(
+        second.status(),
+        StatusCode::OK,
+        "separate clients should not consume the same in-memory rate-limit budget"
+    );
+}
+
+#[tokio::test]
 async fn body_limit_rejects_large_payload() {
     let router = NestFactory::create::<AppModule>()
         .use_body_limit(4)

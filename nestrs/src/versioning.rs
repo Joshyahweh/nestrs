@@ -5,6 +5,7 @@
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Resolved API version for the current request (e.g. `"v1"`, `"2"`).
@@ -43,17 +44,25 @@ impl Default for ApiVersioningPolicy {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ApiVersioningState {
+    pub policy: ApiVersioningPolicy,
+    pub route_root_prefix: String,
+    pub versioned_paths: HashSet<String>,
+}
+
 pub(crate) async fn api_version_middleware(
-    axum::extract::State(state): axum::extract::State<Arc<ApiVersioningPolicy>>,
+    axum::extract::State(state): axum::extract::State<Arc<ApiVersioningState>>,
     mut req: Request,
     next: Next,
 ) -> axum::response::Response {
-    let resolved = match state.kind {
+    let resolved = match state.policy.kind {
         VersioningType::Uri => {
             return next.run(req).await;
         }
         VersioningType::Header => {
             let name = state
+                .policy
                 .header_name
                 .as_deref()
                 .unwrap_or("x-api-version")
@@ -64,23 +73,108 @@ pub(crate) async fn api_version_middleware(
                 .and_then(|v| v.to_str().ok())
                 .map(str::trim)
                 .map(|s| s.to_string())
-                .or_else(|| state.default_version.clone())
+                .or_else(|| state.policy.default_version.clone())
         }
         VersioningType::MediaType => req
             .headers()
             .get(axum::http::header::ACCEPT)
             .and_then(|v| v.to_str().ok())
             .and_then(parse_version_from_accept)
-            .or_else(|| state.default_version.clone()),
+            .or_else(|| state.policy.default_version.clone()),
     };
 
     if let Some(v) = resolved {
         if !v.is_empty() {
+            rewrite_request_path_for_version(&mut req, &state, &v);
             req.extensions_mut().insert(NestApiVersion(v));
         }
     }
 
     next.run(req).await
+}
+
+fn rewrite_request_path_for_version(
+    req: &mut Request,
+    state: &ApiVersioningState,
+    resolved_version: &str,
+) {
+    let normalized_version = resolved_version.trim_matches('/');
+    if normalized_version.is_empty() {
+        return;
+    }
+
+    let request_path = req.uri().path();
+    let Some(app_path) = strip_root_prefix(request_path, &state.route_root_prefix) else {
+        return;
+    };
+
+    let candidate_app_path = insert_version_segment(app_path, normalized_version);
+    if !state.versioned_paths.contains(&candidate_app_path) {
+        return;
+    }
+
+    let full_path = apply_root_prefix(&state.route_root_prefix, &candidate_app_path);
+    let path_and_query = if let Some(query) = req.uri().query() {
+        format!("{full_path}?{query}")
+    } else {
+        full_path
+    };
+
+    let mut parts = req.uri().clone().into_parts();
+    let parsed = match path_and_query.parse() {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    parts.path_and_query = Some(parsed);
+    if let Ok(uri) = axum::http::Uri::from_parts(parts) {
+        *req.uri_mut() = uri;
+    }
+}
+
+fn normalize_root_prefix(root_prefix: &str) -> &str {
+    if root_prefix == "/" {
+        ""
+    } else {
+        root_prefix
+    }
+}
+
+fn strip_root_prefix<'a>(path: &'a str, root_prefix: &str) -> Option<&'a str> {
+    let root_prefix = normalize_root_prefix(root_prefix);
+    if root_prefix.is_empty() {
+        return Some(path);
+    }
+    if path == root_prefix {
+        return Some("/");
+    }
+    let rest = path.strip_prefix(root_prefix)?;
+    if rest.starts_with('/') {
+        Some(rest)
+    } else {
+        None
+    }
+}
+
+fn insert_version_segment(path: &str, version: &str) -> String {
+    let version_prefix = format!("/{version}");
+    if path == version_prefix || path.starts_with(&format!("{version_prefix}/")) {
+        return path.to_string();
+    }
+    if path == "/" {
+        return version_prefix;
+    }
+    format!("{version_prefix}{}", path)
+}
+
+fn apply_root_prefix(root_prefix: &str, app_path: &str) -> String {
+    let root_prefix = normalize_root_prefix(root_prefix);
+    if root_prefix.is_empty() {
+        return app_path.to_string();
+    }
+    if app_path == "/" {
+        return root_prefix.to_string();
+    }
+    format!("{root_prefix}{app_path}")
 }
 
 fn parse_version_from_accept(accept: &str) -> Option<String> {
@@ -99,6 +193,23 @@ fn parse_version_from_accept(accept: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_root_prefix, strip_root_prefix};
+
+    #[test]
+    fn slash_root_prefix_is_ignored_when_stripping() {
+        assert_eq!(strip_root_prefix("/items", "/"), Some("/items"));
+        assert_eq!(strip_root_prefix("/", "/"), Some("/"));
+    }
+
+    #[test]
+    fn slash_root_prefix_is_ignored_when_applying() {
+        assert_eq!(apply_root_prefix("/", "/v1/items"), "/v1/items");
+        assert_eq!(apply_root_prefix("/", "/"), "/");
+    }
 }
 
 /// Rejects requests whose `Host` header does not match `expected` (port suffix ignored).

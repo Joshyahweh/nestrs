@@ -2500,10 +2500,13 @@ async fn rate_limit_middleware(
             let now = std::time::Instant::now();
             let mut guard = state.lock().await;
             guard.prune_expired(now, options.window_secs);
-            let window = guard.windows.entry(client_key).or_insert_with(|| RateLimitWindow {
-                started_at: now,
-                count: 0,
-            });
+            let window = guard
+                .windows
+                .entry(client_key)
+                .or_insert_with(|| RateLimitWindow {
+                    started_at: now,
+                    count: 0,
+                });
             if now.duration_since(window.started_at).as_secs() >= options.window_secs {
                 window.started_at = now;
                 window.count = 0;

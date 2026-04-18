@@ -4,7 +4,7 @@
 //! available (enabled by `NestApplication::listen*` in this crate). As a fallback, it will attempt
 //! to parse `x-forwarded-for` (first IP) and then `x-real-ip`.
 
-use axum::extract::connect_info::ConnectInfo;
+use axum::extract::connect_info::{ConnectInfo, MockConnectInfo};
 use axum::http::request::Parts;
 use axum::http::Extensions;
 use axum::http::{HeaderMap, HeaderName, StatusCode};
@@ -49,6 +49,12 @@ pub(crate) fn best_effort_client_ip(
         return Some(addr.ip());
     }
 
+    // `MockConnectInfo` is stored as its own extension type until Axum's `ConnectInfo` extractor
+    // maps it (see axum `ConnectInfo::from_request_parts`).
+    if let Some(MockConnectInfo(addr)) = extensions.get::<MockConnectInfo<SocketAddr>>() {
+        return Some(addr.ip());
+    }
+
     if let Some(v) = headers
         .get(&X_FORWARDED_FOR)
         .and_then(|v| v.to_str().ok())
@@ -84,7 +90,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{best_effort_client_ip, X_FORWARDED_FOR, X_REAL_IP};
-    use axum::extract::connect_info::ConnectInfo;
+    use axum::extract::connect_info::{ConnectInfo, MockConnectInfo};
     use axum::http::{Extensions, HeaderMap, HeaderValue};
     use std::net::{IpAddr, SocketAddr};
 
@@ -117,6 +123,17 @@ mod tests {
         assert_eq!(
             best_effort_client_ip(&headers, &Extensions::new()),
             Some(IpAddr::from([203, 0, 113, 10]))
+        );
+    }
+
+    #[test]
+    fn mock_connect_info_is_visible_to_best_effort() {
+        let mut extensions = Extensions::new();
+        extensions.insert(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4321))));
+
+        assert_eq!(
+            best_effort_client_ip(&HeaderMap::new(), &extensions),
+            Some(IpAddr::from([127, 0, 0, 1]))
         );
     }
 }

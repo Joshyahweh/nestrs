@@ -1,0 +1,631 @@
+---
+title: "nestrs procedural macros — complete API reference"
+description: "Complete reference for every nestrs proc macro — module DI, routing, DTOs, guards, microservices, WebSockets, scheduling, events, and OpenAPI."
+---
+
+nestrs uses procedural macros to bring NestJS-style ergonomics to Rust. All macros are re-exported from `nestrs::prelude::*`, so a single glob import is enough in most files. This page covers every macro by category with the exact syntax the compiler expects.
+
+---
+
+## Module and dependency injection
+
+<AccordionGroup>
+
+<Accordion title="#[module(...)]">
+
+Marks a struct as a nestrs module and generates the `Module` + `ModuleGraph` trait implementations that wire the DI container and Axum router at compile time.
+
+```rust
+use nestrs::prelude::*;
+
+#[module(
+    controllers = [CatsController],
+    providers   = [CatsService],
+    imports     = [DatabaseModule],
+    exports     = [CatsService],
+)]
+struct CatsModule;
+```
+
+**Keys:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `controllers` | `[Type, ...]` | Controller structs registered with the router |
+| `providers` | `[Type, ...]` | Injectable structs registered in the DI container |
+| `imports` | `[Expr, ...]` | Other modules whose exported providers become available |
+| `exports` | `[Type, ...]` | Providers made available to parent modules |
+| `microservices` | `[Type, ...]` | Handler types registered for microservice transport |
+| `re_exports` | `[Type, ...]` | Re-export all exports from an imported module |
+
+For circular imports, wrap the type in `forward_ref::<TargetModule>()`. For singleton module instances shared across imports, use `lazy_module::<TargetModule>()`.
+
+</Accordion>
+
+<Accordion title="#[injectable] / #[injectable(scope = ...)]">
+
+Marks a struct as a nestrs provider and generates the `Injectable` trait implementation. The macro resolves all `Arc<T>` fields from the DI registry automatically — no constructor code is needed.
+
+```rust
+use nestrs::prelude::*;
+
+#[injectable]
+struct CatsService {
+    db: Arc<DatabaseService>,
+}
+```
+
+**Scope values:**
+
+| Value | Behaviour |
+|-------|-----------|
+| *(omitted)* or `"singleton"` | One shared instance per application (default) |
+| `"transient"` | New instance on every `registry.get::<T>()` call |
+| `"request"` | One instance per HTTP request (requires `use_request_scope()`) |
+
+```rust
+#[injectable(scope = "request")]
+struct RequestLogger;
+```
+
+</Accordion>
+
+<Accordion title="#[controller(prefix = ...)]">
+
+Marks a struct as a nestrs controller and attaches routing metadata used during module assembly.
+
+```rust
+#[controller(prefix = "/cats")]
+struct CatsController;
+```
+
+**Named keys:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `prefix` | string literal | URL path segment prepended to all routes |
+| `version` | string literal | Version segment for URI versioning (`"v1"`) |
+| `host` | string literal | Restrict controller to a specific `Host` header value |
+
+You can also use `#[version("v1")]` as a separate attribute above `#[controller]` when you want to set the version on the struct without repeating it in the controller args.
+
+```rust
+#[version("v1")]
+#[controller(prefix = "/cats")]
+struct CatsController;
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Route macros
+
+<AccordionGroup>
+
+<Accordion title="#[routes(state = T)]">
+
+Marks an `impl` block as a nestrs route handler block. `state = T` names the provider type injected as Axum state for all handlers in the block. This is the impl-block counterpart to `#[controller]`.
+
+```rust
+#[routes(state = CatsService)]
+impl CatsController {
+    // handler methods go here
+}
+```
+
+Use `controller_guards = GuardType` in the argument list to apply a guard to every route in the block.
+
+</Accordion>
+
+<Accordion title="HTTP method macros">
+
+Each macro maps a handler function to an HTTP method and path segment. The path is appended to the controller prefix.
+
+```rust
+#[routes(state = AppState)]
+impl CatsController {
+    #[get("/")]
+    async fn list() -> Json<Vec<Cat>> { /* ... */ }
+
+    #[post("/")]
+    async fn create() -> Json<Cat> { /* ... */ }
+
+    #[get("/:id")]
+    async fn find_one(Path(id): Path<u64>) -> Json<Cat> { /* ... */ }
+
+    #[put("/:id")]
+    async fn update(Path(id): Path<u64>) -> Json<Cat> { /* ... */ }
+
+    #[patch("/:id")]
+    async fn patch(Path(id): Path<u64>) -> Json<Cat> { /* ... */ }
+
+    #[delete("/:id")]
+    async fn remove(Path(id): Path<u64>) -> StatusCode { /* ... */ }
+
+    #[options("/")]
+    async fn options_handler() -> StatusCode { /* ... */ }
+
+    #[head("/")]
+    async fn head_handler() -> StatusCode { /* ... */ }
+
+    #[all("/catch-all")]
+    async fn any_method() -> &'static str { "ok" }
+}
+```
+
+Omitting the path argument (bare `#[get]`) uses `"/"` as the path.
+
+</Accordion>
+
+<Accordion title="#[http_code(N)]">
+
+Overrides the HTTP status code for a successful response. Without this macro, handlers return `200 OK`.
+
+```rust
+#[post("/")]
+#[http_code(201)]
+async fn create() -> Json<Cat> { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[response_header(name, value)]">
+
+Adds a static response header to the route.
+
+```rust
+#[get("/download")]
+#[response_header("content-disposition", "attachment; filename=\"file.bin\"")]
+async fn download() -> Vec<u8> { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[redirect(url)]">
+
+Redirects the client to `url` with `302 Found`.
+
+```rust
+#[get("/old-path")]
+#[redirect("/new-path")]
+async fn legacy() {}
+```
+
+</Accordion>
+
+<Accordion title="#[ver(version)] / #[version(version)]">
+
+Sets the version on an individual route, overriding the controller-level version for that handler. `#[ver]` is the short form.
+
+```rust
+#[get("/")]
+#[ver("v2")]
+async fn list_v2() -> Json<Vec<Cat>> { /* ... */ }
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## DTOs and validation
+
+<AccordionGroup>
+
+<Accordion title="#[dto] / #[dto(allow_unknown_fields)]">
+
+Derives `serde::Deserialize` and `validator::Validate` for a struct and applies `#[serde(deny_unknown_fields)]` by default. Unknown JSON keys cause a `422 Unprocessable Entity` response when the DTO is used with `ValidatedBody`.
+
+```rust
+#[dto]
+struct CreateCatDto {
+    #[IsString]
+    name: String,
+
+    #[IsEmail]
+    contact: String,
+
+    #[Range(min = 1, max = 20)]
+    age: u8,
+}
+```
+
+Pass `allow_unknown_fields` to opt out of the strict shape:
+
+```rust
+#[dto(allow_unknown_fields)]
+struct PartialUpdate {
+    name: Option<String>,
+}
+```
+
+</Accordion>
+
+<Accordion title="#[NestDto] derive macro">
+
+Derive macro alternative to the `#[dto]` attribute. Apply it with `#[derive(NestDto)]` on a struct that already has `serde::Deserialize` and `validator::Validate` derived.
+
+```rust
+#[derive(serde::Deserialize, validator::Validate, NestDto)]
+struct SignupDto {
+    #[validate(email)]
+    email: String,
+}
+```
+
+</Accordion>
+
+<Accordion title="#[NestConfig] derive macro">
+
+Derive macro for typed configuration structs loaded from environment variables with `load_config::<T>()`. The struct must also derive `serde::Deserialize` and `validator::Validate`.
+
+```rust
+#[derive(serde::Deserialize, validator::Validate, NestConfig)]
+struct AppConfig {
+    #[validate(length(min = 1))]
+    database_url: String,
+    port: u16,
+}
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Cross-cutting macros
+
+<AccordionGroup>
+
+<Accordion title="#[use_guards(Guard1, Guard2, ...)]">
+
+Applies one or more guards to a route or controller. Guards must implement `CanActivate`. They run before the handler and return an error response on failure.
+
+```rust
+#[get("/admin")]
+#[use_guards(AuthGuard, RolesGuard)]
+async fn admin_area() -> &'static str { "ok" }
+```
+
+</Accordion>
+
+<Accordion title="#[use_pipes(Pipe1, ...)]">
+
+Applies validation or transformation pipes to a route. The built-in `ValidationPipe` validates `#[param::body]`, `#[param::query]`, and `#[param::param]` arguments against their `#[dto]` constraints.
+
+```rust
+#[post("/signup")]
+#[use_pipes(ValidationPipe)]
+async fn signup(#[param::body] dto: SignupDto) -> &'static str { "ok" }
+```
+
+</Accordion>
+
+<Accordion title="#[use_interceptors(Interceptor1, ...)]">
+
+Wraps a handler with interceptors that run before and after the handler call. Interceptors must implement the `Interceptor` trait.
+
+```rust
+#[get("/")]
+#[use_interceptors(LoggingInterceptor)]
+async fn list() -> Json<Vec<Cat>> { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[use_filters(Filter1, ...)]">
+
+Attaches a per-route exception filter. The filter catches `HttpException` values produced by the handler or its guards and can rewrite the response.
+
+```rust
+#[get("/")]
+#[use_filters(MyExceptionFilter)]
+async fn guarded() -> Result<&'static str, HttpException> { Ok("ok") }
+```
+
+</Accordion>
+
+<Accordion title="#[roles(role1, role2, ...)]">
+
+Stores a comma-separated list of allowed roles in `MetadataRegistry` under the `"roles"` key for the handler. Pair with a role-aware guard such as `XRoleMetadataGuard` to enforce access control.
+
+```rust
+#[get("/admin-only")]
+#[roles("admin")]
+#[use_guards(XRoleMetadataGuard)]
+async fn admin_only() -> &'static str { "ok" }
+```
+
+</Accordion>
+
+<Accordion title="#[set_metadata(key, value)]">
+
+Attaches arbitrary string metadata to the handler's key in `MetadataRegistry`. Guards and interceptors read it via `HandlerKey` from request extensions.
+
+```rust
+#[get("/sensitive")]
+#[set_metadata("audit", "true")]
+async fn sensitive_op() -> &'static str { "ok" }
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Microservice macros
+
+<AccordionGroup>
+
+<Accordion title="#[micro_routes]">
+
+Marks an `impl` block as a microservice handler block, analogous to `#[routes]` for HTTP controllers.
+
+```rust
+#[micro_routes]
+impl OrdersService {
+    // message and event pattern handlers go here
+}
+```
+
+</Accordion>
+
+<Accordion title="#[message_pattern(pattern)]">
+
+Registers the handler for a request-response message pattern. The client sends a message to `pattern` and awaits a reply.
+
+```rust
+#[message_pattern("orders.find")]
+async fn find_order(data: FindOrderDto) -> OrderDto { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[event_pattern(pattern)]">
+
+Registers the handler for a fire-and-forget event pattern. No reply is sent.
+
+```rust
+#[event_pattern("order.created")]
+async fn on_order_created(data: OrderCreatedEvent) { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[subscribe_message]">
+
+Marks a handler to subscribe to a specific message topic (transport-specific subscription, e.g. NATS subjects or Kafka topics).
+
+```rust
+#[subscribe_message("notifications")]
+async fn handle_notification(data: Notification) { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[use_micro_guards], #[use_micro_interceptors], #[use_micro_pipes]">
+
+Microservice equivalents of `#[use_guards]`, `#[use_interceptors]`, and `#[use_pipes]`. Guards must implement `MicroCanActivate`, interceptors `MicroIncomingInterceptor`, and pipes `MicroPipeTransform`.
+
+```rust
+#[message_pattern("orders.create")]
+#[use_micro_guards(AuthMicroGuard)]
+#[use_micro_interceptors(LogMicroInterceptor)]
+async fn create_order(data: CreateOrderDto) -> OrderDto { /* ... */ }
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## WebSocket macros
+
+<AccordionGroup>
+
+<Accordion title="#[ws_gateway]">
+
+Marks a struct as a WebSocket gateway. Requires the `ws` feature.
+
+```rust
+#[ws_gateway("/ws")]
+struct EventsGateway;
+```
+
+</Accordion>
+
+<Accordion title="#[ws_routes]">
+
+Marks an `impl` block as a WebSocket message handler block.
+
+```rust
+#[ws_routes]
+impl EventsGateway {
+    // WebSocket handlers
+}
+```
+
+</Accordion>
+
+<Accordion title="#[use_ws_guards], #[use_ws_interceptors], #[use_ws_pipes]">
+
+WebSocket equivalents of the HTTP cross-cutting macros. Apply to handlers inside `#[ws_routes]` blocks.
+
+```rust
+#[use_ws_guards(WsAuthGuard)]
+#[use_ws_interceptors(WsLoggingInterceptor)]
+async fn on_message(/* ... */) { /* ... */ }
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Schedule and queue macros
+
+<AccordionGroup>
+
+<Accordion title="#[cron(expression)]">
+
+Registers the handler to run on a cron schedule. Requires the `schedule` feature and `ScheduleModule` in your module tree.
+
+```rust
+#[cron("0 * * * * *")] // every minute
+async fn cleanup_jobs() { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[interval(ms)]">
+
+Registers the handler to run every `ms` milliseconds. Requires the `schedule` feature.
+
+```rust
+#[interval(30_000)] // every 30 seconds
+async fn poll_metrics() { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[schedule_routes]">
+
+Marks an `impl` block as a scheduled-task handler block. Methods inside the block decorated with `#[cron]` or `#[interval]` are wired at startup.
+
+```rust
+#[schedule_routes]
+impl TasksService {
+    #[interval(60_000)]
+    async fn tick(&self) { /* ... */ }
+}
+```
+
+</Accordion>
+
+<Accordion title="#[queue_processor]">
+
+Marks an `impl` block as a job queue processor. Requires the `queues` feature and `QueuesModule`.
+
+```rust
+#[queue_processor]
+impl EmailWorker {
+    async fn process(&self, job: QueueJob) -> Result<(), QueueError> { /* ... */ }
+}
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Event macros
+
+<AccordionGroup>
+
+<Accordion title="#[on_event(event)]">
+
+Registers the handler for an internal application event emitted via `EventBus`. Requires the `microservices` feature.
+
+```rust
+#[on_event("order.created")]
+async fn on_order_created(data: OrderCreatedEvent) { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[event_routes]">
+
+Marks an `impl` block as an event listener block.
+
+```rust
+#[event_routes]
+impl NotificationService {
+    #[on_event("user.registered")]
+    async fn welcome(&self, data: UserRegisteredEvent) { /* ... */ }
+}
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## OpenAPI macros
+
+<AccordionGroup>
+
+<Accordion title="#[openapi]">
+
+Adds OpenAPI metadata to a route handler. Requires the `openapi` feature.
+
+```rust
+#[get("/:id")]
+#[openapi(summary = "Get a cat by ID", tag = "Cats")]
+async fn find_one(Path(id): Path<u64>) -> Json<Cat> { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[serialize]">
+
+Marks a response type for OpenAPI schema generation, causing the type to be included in the OpenAPI components output.
+
+```rust
+#[serialize]
+struct Cat {
+    id: u64,
+    name: String,
+}
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Miscellaneous macros
+
+<AccordionGroup>
+
+<Accordion title="#[raw_body]">
+
+Marks a handler parameter to receive the raw, unprocessed request body as bytes rather than going through Axum's normal body extraction.
+
+```rust
+#[post("/webhook")]
+#[raw_body]
+async fn webhook(body: RawBody) -> StatusCode { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="#[sse]">
+
+Marks a handler as a Server-Sent Events endpoint. The handler returns a stream of events.
+
+```rust
+#[get("/events")]
+#[sse]
+async fn stream_events() -> impl IntoResponse { /* ... */ }
+```
+
+</Accordion>
+
+<Accordion title="impl_routes! macro">
+
+A declarative macro used internally by `#[routes]` expansion to register handler functions, apply guards, interceptors, filters, and pipes, and populate `RouteRegistry` and `MetadataRegistry`. You typically do not call it directly — `#[routes]` emits it for you.
+
+</Accordion>
+
+</AccordionGroup>

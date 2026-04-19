@@ -1,0 +1,213 @@
+---
+title: "Migrating from NestJS to nestrs — Rust migration guide"
+description: "Concept-by-concept guide for teams moving HTTP APIs, guards, validation, and dependency injection from NestJS (TypeScript) to nestrs (Rust)."
+---
+
+If you already know NestJS, nestrs will feel familiar at a structural level: modules, controllers, providers, guards, interceptors, and exception filters all exist and behave the same way. What changes is the language and runtime — no V8, no TypeScript reflection, no `npm`. This guide walks through every major concept and calls out the differences that matter most.
+
+---
+
+## Why migrate
+
+Rust gives you true zero-cost abstractions and no garbage collector pauses. nestrs is built on Axum and Tower, which are async-first and compile down to a single binary with no Node.js runtime dependency. The result is lower memory usage, predictable tail latency, and a type system that catches entire categories of runtime bug at compile time. If your team is bottlenecked on compute cost or is tired of `undefined is not a function` in production, nestrs offers a path forward without abandoning the architectural patterns you already know.
+
+---
+
+## Concept mapping
+
+The table below is your translation dictionary. Left column is what you write in NestJS; right column is what you write in nestrs.
+
+| NestJS concept | nestrs equivalent |
+|----------------|------------------|
+| `@Module({})` | `#[module(controllers=[...], providers=[...])]` |
+| `@Controller('path')` | `#[controller(prefix = "/path")]` |
+| `@Get()`, `@Post()`, `@Put()`, `@Patch()`, `@Delete()` | `#[get("path")]`, `#[post("path")]`, `#[put("path")]`, `#[patch("path")]`, `#[delete("path")]` |
+| `@Options()`, `@Head()` | `#[options("path")]`, `#[head("path")]` |
+| `@All()` | `#[all("path")]` |
+| `@Injectable()` | `#[injectable]` |
+| `NestFactory.create()` | `NestFactory::create::<AppModule>()` |
+| `app.listen(3000)` | `.listen(3000).await` |
+| `class-validator` field decorators | `#[IsEmail]`, `#[IsString]`, `#[Length(min, max)]`, `#[Range(min, max)]`, etc. on `#[dto]` fields |
+| `@Body()` | `ValidatedBody(dto): ValidatedBody<T>` or `Json(body): Json<T>` |
+| `@Param('id')` | `Path(id): Path<T>` or `#[param::param]` with a DTO struct |
+| `@Query()` | `Query(q): Query<T>` or `ValidatedQuery<T>` |
+| `@Headers()` | `#[param::headers]` → `HeaderMap` |
+| `@Ip()` | `#[param::ip]` or the `ClientIp` extractor |
+| `@Req()` / `@Res()` | Not needed — use Axum extractors; raw request via `#[param::req]` |
+| `@SetMetadata(key, value)` | `#[set_metadata("key", "value")]` |
+| `@Roles(...)` | `#[roles("admin", "user")]` |
+| `@UseGuards(G)` | `#[use_guards(G)]` |
+| `@UsePipes(P)` | `#[use_pipes(P)]` |
+| `@UseInterceptors(I)` | `#[use_interceptors(I)]` |
+| `@UseFilters(F)` | `#[use_filters(F)]` |
+| `@HttpCode(201)` | `#[http_code(201)]` |
+| `@Header(name, value)` | `#[response_header("name", "value")]` |
+| `@Redirect(url)` | `#[redirect("url")]` |
+| Guard implementing `CanActivate` | Struct implementing `CanActivate` trait |
+| Pipe implementing `PipeTransform` | Struct implementing `PipeTransform` trait |
+| Interceptor implementing `NestInterceptor` | Struct implementing `Interceptor` trait |
+| `ExceptionFilter` implementing `ExceptionFilter` | Struct implementing `ExceptionFilter` trait |
+| `NotFoundException`, `BadRequestException`, etc. | `NotFoundException::new(msg)`, `BadRequestException::new(msg)`, etc. |
+| `app.useGlobalGuards()` | No direct equivalent — use `controller_guards = G` in `#[routes]` or `use_global_layer` |
+| `app.useGlobalFilters()` | `.use_global_exception_filter(filter)` on `NestApplication` |
+| `app.setGlobalPrefix('api')` | `.set_global_prefix("api")` |
+| `app.enableCors()` | `.enable_cors(CorsOptions::...)` |
+| `app.enableVersioning({type: URI})` | `.enable_uri_versioning("v1")` |
+| `app.enableVersioning({type: HEADER})` | `.enable_header_versioning("X-API-Version", default)` |
+| `@VersionedRoute()` / `@Version('2')` | `#[ver("2")]` on a handler |
+| `ServeStaticModule` / `useStaticAssets` | `.serve_static(mount_path, dir)` |
+| Microservices `@MessagePattern` | `#[message_pattern("pattern")]` |
+| Microservices `@EventPattern` | `#[event_pattern("event")]` |
+| `@WebSocketGateway` | `#[ws_gateway("/path")]` |
+| `ScheduleModule` + `@Cron()` | `ScheduleModule` feature + `#[cron("expression")]` |
+| `@nestjs/config` `ConfigService` | `load_config::<AppConfig>()` + `#[NestConfig]` derive |
+| `forwardRef(() => M)` | `forward_ref::<M>()` in module `imports` |
+| `@Resolve`, `@Query` (GraphQL) | `nestrs-graphql` resolver pattern (feature `graphql`) |
+| `NestFactory.createMicroservice` | `NestFactory::create_microservice::<M>(options)` |
+
+---
+
+## Side-by-side example
+
+**NestJS (TypeScript):**
+
+```typescript
+@Controller('cats')
+export class CatsController {
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return { id };
+  }
+}
+```
+
+**nestrs (Rust):**
+
+```rust
+use nestrs::prelude::*;
+
+#[controller(prefix = "/cats")]
+struct CatsController;
+
+#[routes(state = AppState)]
+impl CatsController {
+    #[get("/:id")]
+    async fn find_one(Path(id): Path<String>) -> Json<serde_json::Value> {
+        Json(serde_json::json!({ "id": id }))
+    }
+}
+
+#[module(controllers = [CatsController], providers = [AppState])]
+struct AppModule;
+```
+
+---
+
+## Key differences
+
+These are the points that trip up NestJS developers most often.
+
+**No TypeScript metadata reflection.** nestrs has no `reflect-metadata` and no `emitDecoratorMetadata`. DI is resolved purely by type at compile time via proc macros. Every `Arc<T>` field in an `#[injectable]` struct is wired by the code generator — no magic token scanning.
+
+**No class-based DI.** NestJS injects into class constructors. nestrs injects into struct fields typed as `Arc<T>`. Your injected providers must be `Send + Sync + 'static`.
+
+**No async constructors.** Rust has no `async` constructor. Use `for_root_async` on `ConfigurableModuleBuilder` when you need to await a secret vault or database connection before the DI graph finishes building.
+
+**Cargo vs npm.** Features (microservices, openapi, graphql, etc.) are Cargo feature flags, not separate `@nestjs/*` packages. You opt in by adding the feature name to your `Cargo.toml` dependency.
+
+**`into_router()` vs `listen()`.** Testing in NestJS uses `supertest` against an in-memory server. In nestrs, call `.into_router()` and use `tower::ServiceExt::oneshot` for request-level tests without binding a port.
+
+**Global registries in tests.** `RouteRegistry` and `MetadataRegistry` are process-wide. Parallel integration tests that register controllers multiple times can accumulate state. Enable the `test-hooks` feature in dev/test and call `RouteRegistry::clear_for_tests()` between test cases. Never enable `test-hooks` in production.
+
+**CSRF is opt-in.** Enabling cookies or sessions without calling `use_csrf_protection` emits a `tracing::warn!` at startup and leaves mutation endpoints unprotected. This mirrors Nest's recommendation but nestrs makes the gap audible.
+
+**Middleware DSL.** NestJS `MiddlewareConsumer` lets you apply middleware to route prefixes. nestrs does not have that DSL. Model route-specific middleware with controller-level guards and interceptors, or split routes into separate controllers.
+
+---
+
+## Notable gaps
+
+The following NestJS features do not have a direct 1:1 equivalent in nestrs today. They are not blockers for most applications, but you should plan around them.
+
+<AccordionGroup>
+
+<Accordion title="createParamDecorator">
+
+NestJS lets you write `createParamDecorator((data, ctx) => ctx.switchToHttp().getRequest().user)` and use it as `@CurrentUser()`. nestrs has no equivalent runtime API. You implement custom extraction as an Axum `FromRequestParts` type. This is more code but compiles to a zero-overhead extractor.
+
+</Accordion>
+
+<Accordion title="MiddlewareConsumer / forRoutes">
+
+NestJS `configure(consumer: MiddlewareConsumer)` lets you apply middleware to specific route prefixes. In nestrs, apply middleware globally via `NestApplication.use_global_layer`, or per-route via `#[use_guards]`, `#[use_interceptors]`, and `#[use_filters]`.
+
+</Accordion>
+
+<Accordion title="Dynamic module forRootAsync with useFactory">
+
+NestJS `forRootAsync({ useFactory: async (config) => ({ ... }) })` is the standard pattern for async provider factories. nestrs `ConfigurableModuleBuilder::for_root_async` covers the common case (typed options resolved before DI build). More complex factory patterns require explicit `Arc<Mutex<...>>` or initialisation in `OnModuleInit`.
+
+</Accordion>
+
+<Accordion title="Lifecycle events beyond OnModuleInit / OnApplicationBootstrap">
+
+NestJS has `OnModuleInit`, `OnApplicationBootstrap`, `BeforeApplicationShutdown`, `OnApplicationShutdown`, and `OnModuleDestroy`. nestrs supports the init and bootstrap hooks, and `OnApplicationShutdown` / `OnModuleDestroy` (called after graceful drain). `BeforeApplicationShutdown` (pre-drain) is not currently exposed.
+
+</Accordion>
+
+<Accordion title="Class serialization / class-transformer">
+
+NestJS's `ClassSerializerInterceptor` strips `@Exclude()` fields and transforms `@Expose()` ones. nestrs uses serde attributes directly on response types. There is no interceptor-based serialisation transform; apply `#[serde(skip)]` or custom `Serialize` impls instead.
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Configuration migration
+
+NestJS `@nestjs/config` loads `.env` and exposes a typed `ConfigService`. In nestrs you use `load_config::<T>()`:
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(serde::Deserialize, validator::Validate, NestConfig)]
+struct AppConfig {
+    database_url: String,
+    #[validate(range(min = 1024, max = 65535))]
+    port: u16,
+}
+
+fn main() {
+    let config = load_config::<AppConfig>().expect("invalid config");
+    // config is fully validated — database_url exists and port is in range
+}
+```
+
+In non-production environments, `load_config` automatically loads `.env` and `.env.<env>` files via `dotenvy`. In production (detected by `NESTRS_ENV=production`), only real environment variables are read.
+
+---
+
+## Testing migration
+
+| NestJS (Jest / Supertest) | nestrs |
+|---------------------------|--------|
+| `TestingModule.createTestingModule({ imports: [AppModule] })` | `NestFactory::create::<AppModule>().into_router()` |
+| `supertest(app.getHttpServer()).get('/cats')` | `tower::ServiceExt::oneshot(router, request).await` |
+| Isolated metadata between tests | Enable `test-hooks` feature; call `RouteRegistry::clear_for_tests()` |
+| `jest --runInBand` for serial tests | `serial_test` crate or explicit synchronisation |
+
+---
+
+## Packaging migration
+
+| NestJS / npm | nestrs / Cargo |
+|--------------|----------------|
+| `package.json` + `package-lock.json` | `Cargo.toml` + `Cargo.lock` (commit the lock file for binaries) |
+| `@nestjs/microservices` | `nestrs` with `features = ["microservices"]` |
+| `@nestjs/swagger` | `nestrs` with `features = ["openapi"]` |
+| `@nestjs/graphql` + `apollo-server` | `nestrs` with `features = ["graphql"]` |
+| `@nestjs/websockets` | `nestrs` with `features = ["ws"]` |
+| `@nestjs/schedule` | `nestrs` with `features = ["schedule"]` |
+| `peerDependencies` | No equivalent — use workspace `[patch]` for version alignment |

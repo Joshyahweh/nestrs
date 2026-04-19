@@ -21,6 +21,7 @@
           {
             "group": "Get Started",
             "pages": [
+              "index",
               "introduction",
               "quickstart",
               "cli"

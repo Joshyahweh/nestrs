@@ -26,6 +26,7 @@ export const sidebarSections: SidebarSection[] = [
     title: "Getting started",
     items: [
       item("First steps", "first-steps"),
+      item("Backend stack recipes", "backend-recipes"),
       item("NestJS → nestrs migration", "nestjs-migration"),
       item("CLI (nestrs-scaffold)", "cli")
     ]

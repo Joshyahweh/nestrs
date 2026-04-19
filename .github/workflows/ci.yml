@@ -41,6 +41,15 @@ jobs:
               sys.exit(1)
           PY
 
+  mintlify-nav:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Mintlify docs.json matches .mdx files
+        run: python3 mintlify-docs/scripts/verify_mintlify_nav.py
+
   test-matrix:
     runs-on: ubuntu-latest
     strategy:

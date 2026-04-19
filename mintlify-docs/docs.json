@@ -1,0 +1,71 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "luma",
+  "name": "nestrs",
+  "colors": {
+    "primary": "#E94560",
+    "light": "#FF6B80",
+    "dark": "#C0334F"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Joshyahweh/nestrs"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "cli"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/modules",
+              "concepts/controllers",
+              "concepts/providers",
+              "concepts/middleware-pipeline"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/validation",
+              "guides/security",
+              "guides/versioning",
+              "guides/observability",
+              "guides/testing"
+            ]
+          },
+          {
+            "group": "Extensions",
+            "pages": [
+              "extensions/microservices",
+              "extensions/graphql",
+              "extensions/websockets",
+              "extensions/openapi",
+              "extensions/database"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/nest-application",
+              "reference/macros",
+              "reference/migration",
+              "reference/configuration"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

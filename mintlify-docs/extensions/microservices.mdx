@@ -1,0 +1,327 @@
+---
+title: "Microservices: transports, patterns, and client proxy"
+description: "Build message-driven nestrs services over TCP, NATS, Redis, Kafka, MQTT, RabbitMQ, or gRPC. Use #[micro_routes] and ClientProxy for typed calls."
+---
+
+The `nestrs-microservices` crate turns any module into a message-driven service. You define handlers the same way you define HTTP controllers — with injectable structs and proc-macro decorators — and then choose a transport adapter at boot time. All adapters share one JSON wire format, so you can swap transports without rewriting your business logic.
+
+## Choosing a transport
+
+| Transport | Feature flag | Best for |
+|-----------|-------------|----------|
+| TCP | `microservices` | Internal services, simple RPC |
+| NATS | `microservices-nats` | Low-ops, pub/sub, single region |
+| Redis | `microservices-redis` | Existing Redis infrastructure |
+| Kafka | `microservices-kafka` | High-throughput event streaming |
+| MQTT | `microservices-mqtt` | IoT, mobile fan-out |
+| RabbitMQ | `microservices-rabbitmq` | Complex routing, enterprise patterns |
+| gRPC | `microservices-grpc` | Cross-language RPC, strong contracts |
+
+## Enable the feature
+
+Add `nestrs` to your `Cargo.toml` with the transport features you need:
+
+<Tabs>
+  <Tab title="TCP (default)">
+    ```toml Cargo.toml
+    [dependencies]
+    nestrs = { version = "0.3.8", features = ["microservices"] }
+    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+    serde = { version = "1", features = ["derive"] }
+    ```
+  </Tab>
+  <Tab title="NATS">
+    ```toml Cargo.toml
+    [dependencies]
+    nestrs = { version = "0.3.8", features = ["microservices", "microservices-nats"] }
+    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+    serde = { version = "1", features = ["derive"] }
+    ```
+  </Tab>
+  <Tab title="Redis">
+    ```toml Cargo.toml
+    [dependencies]
+    nestrs = { version = "0.3.8", features = ["microservices", "microservices-redis"] }
+    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+    serde = { version = "1", features = ["derive"] }
+    ```
+  </Tab>
+  <Tab title="Kafka">
+    ```toml Cargo.toml
+    [dependencies]
+    nestrs = { version = "0.3.8", features = ["microservices", "microservices-kafka"] }
+    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+    serde = { version = "1", features = ["derive"] }
+    ```
+  </Tab>
+  <Tab title="RabbitMQ">
+    ```toml Cargo.toml
+    [dependencies]
+    nestrs = { version = "0.3.8", features = ["microservices", "microservices-rabbitmq"] }
+    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+    serde = { version = "1", features = ["derive"] }
+    ```
+  </Tab>
+  <Tab title="gRPC">
+    ```toml Cargo.toml
+    [dependencies]
+    nestrs = { version = "0.3.8", features = ["microservices", "microservices-grpc"] }
+    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+    serde = { version = "1", features = ["derive"] }
+    ```
+  </Tab>
+</Tabs>
+
+## Define handlers with `#[micro_routes]`
+
+Use `#[micro_routes]` on an `impl` block the same way you use `#[routes]` for HTTP. Decorate individual methods with `#[message_pattern]` for request/reply flows or `#[event_pattern]` for fire-and-forget events.
+
+```rust src/orders/orders_handler.rs
+use nestrs::prelude::*;
+
+#[derive(serde::Deserialize)]
+struct GetOrderRequest {
+    id: u64,
+}
+
+#[derive(serde::Serialize)]
+struct OrderResponse {
+    id: u64,
+    status: String,
+}
+
+#[injectable]
+struct OrdersHandler;
+
+#[micro_routes]
+impl OrdersHandler {
+    #[message_pattern("orders.get")]
+    async fn get_order(&self, req: GetOrderRequest) -> OrderResponse {
+        OrderResponse { id: req.id, status: "pending".into() }
+    }
+
+    #[event_pattern("orders.created")]
+    async fn on_order_created(&self, payload: serde_json::Value) {
+        tracing::info!("order created: {payload}");
+    }
+}
+```
+
+<Note>
+  The method decorated with `#[message_pattern]` must return a serializable value. Methods decorated with `#[event_pattern]` are fire-and-forget and may return `()`.
+</Note>
+
+## Cross-cutting concerns on micro handlers
+
+You can attach interceptors, guards, and pipes to micro handlers the same way you do for HTTP — but note the **execution order differs**:
+
+```rust
+#[micro_routes]
+impl OrdersHandler {
+    #[message_pattern("orders.get")]
+    #[use_micro_interceptors(LoggingInterceptor)]
+    #[use_micro_guards(AuthGuard)]
+    #[use_micro_pipes(ValidationPipe)]
+    async fn get_order(&self, req: GetOrderRequest) -> OrderResponse {
+        // ...
+    }
+}
+```
+
+<Warning>
+  On `#[micro_routes]` handlers, execution order is **interceptors → guards → pipes → handler**. This differs from the HTTP pipeline, where guards run before interceptors. Do not assume the two pipelines reorder cross-cutting types the same way.
+</Warning>
+
+There is no microservice analogue of HTTP exception filters. Handlers return `Result<_, TransportError>`, and `HttpException` is mapped into `TransportError` in generated code.
+
+## Boot the microservice
+
+Call the transport-specific factory method on `NestFactory`. Each method returns a `MicroserviceApplication` you can optionally configure before calling `.listen()`.
+
+<Steps>
+  <Step title="Wire the module">
+    ```rust src/main.rs
+    use nestrs::prelude::*;
+
+    #[module(providers = [OrdersHandler])]
+    struct AppModule;
+    ```
+  </Step>
+  <Step title="Choose a factory method and listen">
+    <Tabs>
+      <Tab title="TCP">
+        ```rust src/main.rs
+        use nestrs::microservices::TcpMicroserviceOptions;
+
+        #[tokio::main]
+        async fn main() {
+            NestFactory::create_microservice::<AppModule>(
+                TcpMicroserviceOptions { port: 3001 },
+            )
+            .listen()
+            .await;
+        }
+        ```
+      </Tab>
+      <Tab title="NATS">
+        ```rust src/main.rs
+        use nestrs::microservices::NatsMicroserviceOptions;
+
+        #[tokio::main]
+        async fn main() {
+            NestFactory::create_microservice_nats::<AppModule>(
+                NatsMicroserviceOptions::new("nats://127.0.0.1:4222"),
+            )
+            .listen()
+            .await;
+        }
+        ```
+      </Tab>
+      <Tab title="Redis">
+        ```rust src/main.rs
+        use nestrs::microservices::RedisMicroserviceOptions;
+
+        #[tokio::main]
+        async fn main() {
+            NestFactory::create_microservice_redis::<AppModule>(
+                RedisMicroserviceOptions::new("redis://127.0.0.1:6379"),
+            )
+            .listen()
+            .await;
+        }
+        ```
+      </Tab>
+      <Tab title="gRPC">
+        ```rust src/main.rs
+        use nestrs::microservices::GrpcMicroserviceOptions;
+
+        #[tokio::main]
+        async fn main() {
+            NestFactory::create_microservice_grpc::<AppModule>(
+                GrpcMicroserviceOptions::bind("0.0.0.0:50051"),
+            )
+            .listen()
+            .await;
+        }
+        ```
+      </Tab>
+      <Tab title="RabbitMQ">
+        ```rust src/main.rs
+        use nestrs::microservices::RabbitMqMicroserviceOptions;
+
+        #[tokio::main]
+        async fn main() {
+            NestFactory::create_microservice_rabbitmq::<AppModule>(
+                RabbitMqMicroserviceOptions::new("amqp://guest:guest@localhost:5672"),
+            )
+            .listen()
+            .await;
+        }
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+## Hybrid HTTP + microservice apps
+
+Call `.also_listen_http(port)` on the `MicroserviceApplication` to run an HTTP router and a microservice transport in the same process. Use `.configure_http(...)` to apply HTTP-specific configuration before listening.
+
+```rust src/main.rs
+use nestrs::microservices::TcpMicroserviceOptions;
+use nestrs::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create_microservice::<AppModule>(
+        TcpMicroserviceOptions { port: 3001 },
+    )
+    .also_listen_http(3000)
+    .configure_http(|app| app.enable_cors(CorsOptions::permissive()))
+    .listen()
+    .await;
+}
+```
+
+## Calling other services with `ClientsModule` and `ClientProxy`
+
+Register remote services with `ClientsModule::register`, then inject `ClientsService` or `ClientProxy` into your providers.
+
+```rust src/orders/orders_module.rs
+use nestrs::prelude::*;
+use nestrs::microservices::{ClientConfig, ClientsModule, NatsTransportOptions};
+
+#[module(
+    imports = [
+        ClientsModule::register(&[
+            ClientConfig {
+                name: "USER_SERVICE",
+                transport: NatsTransportOptions::new("nats://127.0.0.1:4222").into(),
+            },
+        ])
+    ],
+    providers = [OrdersService],
+)]
+struct OrdersModule;
+```
+
+When exactly one client is registered, `ClientProxy` is also exported as the default client. Look up a named client via `clients.expect("USER_SERVICE")`.
+
+```rust src/orders/orders_service.rs
+use nestrs::prelude::*;
+use nestrs::microservices::{ClientProxy, ClientsService};
+use std::sync::Arc;
+
+#[injectable]
+struct OrdersService {
+    clients: Arc<ClientsService>,
+}
+
+impl OrdersService {
+    async fn notify_user(&self, user_id: u64) -> Result<(), nestrs::microservices::TransportError> {
+        let proxy: Arc<ClientProxy> = self.clients.expect("USER_SERVICE");
+
+        #[derive(serde::Serialize)]
+        struct Payload { user_id: u64 }
+        #[derive(serde::Deserialize)]
+        struct Ack { ok: bool }
+
+        let _ack: Ack = proxy.send("users.notify", &Payload { user_id }).await?;
+        Ok(())
+    }
+}
+```
+
+<Tip>
+  Use `proxy.send(pattern, payload)` for request/reply flows where you need a typed response. Use `proxy.emit(pattern, payload)` for fire-and-forget integration events where no reply is required.
+</Tip>
+
+## In-process event bus
+
+`EventBus` provides an in-process async event bus with subscribe and emit semantics, re-exported from `nestrs_events`. Use `#[event_routes]` with `#[on_event]` to register handlers that are auto-subscribed when the app boots.
+
+```rust src/notifications/notifications_handler.rs
+use nestrs::prelude::*;
+
+#[injectable]
+struct NotificationsHandler;
+
+#[event_routes]
+impl NotificationsHandler {
+    #[on_event("user.created")]
+    async fn on_user_created(&self, payload: serde_json::Value) {
+        tracing::info!("new user event: {payload}");
+    }
+}
+```
+
+## Reliability guidance
+
+- All transports use **at-least-once delivery** semantics. Write handlers to be idempotent.
+- Include a correlation or request ID in event payloads for tracing.
+- For critical integration events, use the outbox pattern: write your business state and an outbox row in a single database transaction, then publish outbox rows asynchronously with retries.
+- Configure a dead-letter or retry strategy per transport adapter.
+
+## Wire format
+
+All adapters (Redis, Kafka, MQTT, RabbitMQ, custom, and the JSON inside gRPC) share one `WireRequest` / `WireResponse` JSON shape from `nestrs_microservices::wire`. The stability marker is `nestrs_microservices::WIRE_FORMAT_DOC_REVISION`. Run `cargo test -p nestrs-microservices --test wire_conformance` when changing serialization on those types.

@@ -42,7 +42,8 @@
               "guides/security",
               "guides/versioning",
               "guides/observability",
-              "guides/testing"
+              "guides/testing",
+              "guides/recipes"
             ]
           },
           {
@@ -68,9 +69,9 @@
       }
     ]
   },
-  "favicon": "/images/nestrs.png",
-  "logo": "/images/nestrs.png",
   "seo": {
     "indexing": "all"
-  }
+  },
+  "favicon": "/images/nestrs.png",
+  "description": "Nestrs gives you the NestJS developer experience — modules, controllers, dependency injection, guards, pipes, interceptors — all written in Rust on top of Axum and Tower. You get compile-time safety, explicit typing, and async-first performance without giving up the structured architecture that makes large codebases maintainable."
 }

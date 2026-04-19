@@ -42,8 +42,7 @@
               "guides/security",
               "guides/versioning",
               "guides/observability",
-              "guides/testing",
-              "guides/recipes"
+              "guides/testing"
             ]
           },
           {

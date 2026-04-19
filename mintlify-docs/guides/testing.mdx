@@ -1,0 +1,289 @@
+---
+title: "Testing: In-Process HTTP Testing with TestClient"
+description: "Spin up an in-process nestrs app in your test suite using TestingModule and TestClient to send real HTTP requests without binding a network port."
+---
+
+nestrs includes an in-process testing harness that lets you compile your module graph, spin up the full middleware stack, and send HTTP requests — all without binding a TCP socket. The key types are `TestingModule`, `TestingModuleBuilder`, `TestClient`, and `TestRequest`. Because everything runs in the same process, tests are fast, isolated, and do not require network access.
+
+## Building a test module
+
+`TestingModule::builder::<M>()` returns a `TestingModuleBuilder<M>` typed to your module. Call `compile().await` to run the DI graph, register controllers, and build the Axum router.
+
+```rust
+#[cfg(test)]
+mod tests {
+    use nestrs::prelude::*;
+
+    #[module(controllers = [HelloController], providers = [])]
+    struct AppModule;
+
+    #[tokio::test]
+    async fn test_hello_endpoint() {
+        let app = TestingModule::builder::<AppModule>()
+            .compile()
+            .await;
+
+        let client = app.http_client();
+        let res = client.get("/hello").send().await;
+
+        assert_eq!(res.status(), 200);
+    }
+}
+```
+
+<Note>
+`compile` is `async` because it runs lifecycle hooks (`OnModuleInit`, `OnApplicationBootstrap`) in the same order as the production `listen` path, so your tests exercise the real startup sequence.
+</Note>
+
+## Sending requests with TestClient
+
+`TestClient` exposes `get`, `post`, and the generic `request(method, uri)` builder. Each returns a `TestRequest` that you can configure with headers and a body before calling `send().await`.
+
+<Tabs>
+  <Tab title="GET request">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[tokio::test]
+    async fn test_get() {
+        let app = TestingModule::builder::<AppModule>()
+            .compile()
+            .await;
+
+        let client = app.http_client();
+        let res = client.get("/api/users").send().await;
+
+        assert_eq!(res.status(), 200);
+    }
+    ```
+  </Tab>
+  <Tab title="POST with JSON body">
+    Use `TestRequest::json` to serialize a value and set `Content-Type: application/json` in one call.
+
+    ```rust
+    use nestrs::prelude::*;
+
+    #[tokio::test]
+    async fn test_create_user() {
+        let app = TestingModule::builder::<AppModule>()
+            .compile()
+            .await;
+
+        let client = app.http_client();
+        let res = client
+            .post("/api/users")
+            .json(&serde_json::json!({ "name": "Alice", "email": "alice@example.com" }))
+            .send()
+            .await;
+
+        assert_eq!(res.status(), 201);
+    }
+    ```
+  </Tab>
+  <Tab title="Custom headers">
+    Use `TestRequest::header` to attach arbitrary headers — for example an `Authorization` bearer token.
+
+    ```rust
+    use axum::http::{HeaderName, HeaderValue};
+    use nestrs::prelude::*;
+
+    #[tokio::test]
+    async fn test_authenticated_route() {
+        let app = TestingModule::builder::<AppModule>()
+            .compile()
+            .await;
+
+        let client = app.http_client();
+        let res = client
+            .get("/api/profile")
+            .header(
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_static("Bearer test-token"),
+            )
+            .send()
+            .await;
+
+        assert_eq!(res.status(), 200);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Reading the response
+
+`TestRequest::send()` returns an `axum::response::Response`. Use `response.status()` for the status code and `axum::body::to_bytes` (re-exported from Axum) to consume the body.
+
+```rust
+use axum::body::to_bytes;
+use nestrs::prelude::*;
+
+#[tokio::test]
+async fn test_response_body() {
+    let app = TestingModule::builder::<AppModule>()
+        .compile()
+        .await;
+
+    let client = app.http_client();
+    let res = client.get("/api/hello").send().await;
+
+    assert_eq!(res.status(), 200);
+
+    let body_bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(json["message"], "Hello, world!");
+}
+```
+
+## Overriding providers
+
+Use `override_provider` on the builder to swap a real provider for a test double. The override replaces the provider in the DI registry before `compile` runs.
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[derive(Default)]
+#[injectable]
+struct EmailService;
+
+impl EmailService {
+    async fn send(&self, _to: &str, _body: &str) {}
+}
+
+// A test double that records calls instead of sending emails
+#[derive(Default)]
+struct FakeEmailService;
+
+#[injectable]
+impl FakeEmailService {
+    async fn send(&self, _to: &str, _body: &str) {
+        // no-op in tests
+    }
+}
+
+#[tokio::test]
+async fn test_with_fake_email() {
+    let app = TestingModule::builder::<AppModule>()
+        .override_provider::<EmailService>(Arc::new(FakeEmailService::default()))
+        .compile()
+        .await;
+
+    let client = app.http_client();
+    let res = client.post("/api/signup").send().await;
+    assert_eq!(res.status(), 201);
+}
+```
+
+## Applying HTTP middleware in tests
+
+Use `configure_http` to chain the same `NestApplication` builder methods you use in production — rate limiting, security headers, CORS, and so on. This lets you test that middleware behaves correctly.
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::test]
+async fn test_rate_limit_middleware() {
+    let app = TestingModule::builder::<AppModule>()
+        .configure_http(|app| {
+            app.use_rate_limit(
+                RateLimitOptions::builder()
+                    .max_requests(2)
+                    .window_secs(60)
+                    .build(),
+            )
+        })
+        .compile()
+        .await;
+
+    let client = app.http_client();
+    let res1 = client.get("/api/hello").send().await;
+    let res2 = client.get("/api/hello").send().await;
+    let res3 = client.get("/api/hello").send().await;
+
+    assert_eq!(res1.status(), 200);
+    assert_eq!(res2.status(), 200);
+    assert_eq!(res3.status(), 429); // Too Many Requests
+}
+```
+
+## Resolving providers directly
+
+`TestingModule::get::<T>()` resolves a provider from the compiled DI registry. Use this to call service methods directly in tests without going through HTTP.
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::test]
+async fn test_service_directly() {
+    let app = TestingModule::builder::<AppModule>()
+        .compile()
+        .await;
+
+    let svc = app.get::<UserService>();
+    let user = svc.find_by_id(1).await;
+    assert!(user.is_some());
+}
+```
+
+## Global registry isolation with `test-hooks`
+
+nestrs uses static global registries for route and metadata registration. When multiple tests run in the same process and share these globals (for example when using `#[module]` macros that register routes at startup), tests can interfere with each other.
+
+Enable the `test-hooks` feature to unlock `RouteRegistry::clear_for_tests()` and `MetadataRegistry::clear_for_tests()`:
+
+```toml
+[dev-dependencies]
+nestrs = { version = "*", features = ["test-hooks"] }
+serial_test = "3"
+```
+
+Then write a reset guard:
+
+```rust
+use serial_test::serial;
+
+struct RegistryResetGuard;
+
+impl RegistryResetGuard {
+    fn new() -> Self {
+        #[cfg(feature = "test-hooks")]
+        {
+            nestrs::core::RouteRegistry::clear_for_tests();
+            nestrs::core::MetadataRegistry::clear_for_tests();
+        }
+        Self
+    }
+}
+
+impl Drop for RegistryResetGuard {
+    fn drop(&mut self) {
+        #[cfg(feature = "test-hooks")]
+        {
+            nestrs::core::RouteRegistry::clear_for_tests();
+            nestrs::core::MetadataRegistry::clear_for_tests();
+        }
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_isolated() {
+    let _guard = RegistryResetGuard::new();
+
+    let app = TestingModule::builder::<AppModule>()
+        .compile()
+        .await;
+
+    let client = app.http_client();
+    let res = client.get("/api/hello").send().await;
+    assert_eq!(res.status(), 200);
+}
+```
+
+<Warning>
+Tests that share global state via the macro registries **must** run serially, not in parallel. Use `#[serial]` from the `serial_test` crate alongside the reset guard. Without serialization, one test can clear the registry while another test is still using it.
+</Warning>
+
+<Tip>
+If your tests do not use `#[module]` macros that register into global statics, you may not need `test-hooks` at all — each `TestingModule::builder().compile()` call builds an isolated router from scratch.
+</Tip>

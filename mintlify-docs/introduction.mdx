@@ -1,0 +1,95 @@
+---
+title: "nestrs overview: NestJS architecture for Rust APIs"
+description: "nestrs brings NestJS modules, controllers, and DI to Rust on Axum and Tower. Learn the mental model, key features, and how to add it to your project."
+---
+
+nestrs is a NestJS-style API framework for Rust built on [Axum](https://github.com/tokio-rs/axum) and [Tower](https://github.com/tower-rs/tower). If you already know NestJS, you already know most of nestrs: modules organize your application, controllers handle routes, and providers hold your business logic — the difference is that you get Rust's compile-time safety, explicit typing, and native async performance instead of a Node.js runtime.
+
+## The NestJS → nestrs mental model
+
+Every NestJS concept maps to a direct nestrs equivalent. The decorators you know become Rust proc-macro attributes, and `NestFactory.create` becomes `NestFactory::create::<AppModule>()`.
+
+| NestJS | nestrs |
+|--------|--------|
+| `@Module` | `#[module(...)]` on a struct |
+| `@Controller` / `@Get` | `#[controller(...)]` + `#[routes]` impl with `#[get("/path")]` |
+| `@Injectable` provider | `#[injectable]` on a type; register in `providers = [...]` |
+| `NestFactory.create` | `NestFactory::create::<AppModule>()` |
+| Pipes / Guards / Interceptors | Same names, trait-based |
+
+<Note>
+nestrs assumes comfort with Rust — ownership, `async`, and Cargo. It does not replicate NestJS's TypeScript-first teaching path, but the structural concepts transfer directly.
+</Note>
+
+## Key features
+
+nestrs ships everything you need to build production HTTP APIs:
+
+- **Module-oriented architecture** — `#[module]`, `#[controller]`, and `#[injectable]` macros mirror NestJS's structural conventions
+- **HTTP route macros** — `#[get]`, `#[post]`, `#[put]`, `#[patch]`, `#[delete]`, `#[options]`, `#[head]`, and `#[all]`
+- **Dependency injection and application context** — providers are resolved and injected automatically
+- **DTO validation pipeline** — `#[dto]` with class-validator-style field annotations (`#[IsEmail]`, `#[Length(...)]`, etc.)
+- **Cross-cutting pipeline** — guards, pipes, interceptors, exception filters, and strategies with trait-based implementations
+- **Production controls** — backpressure, Prometheus metrics, request tracing, security headers, CORS, rate limiting, health checks
+- **Optional crate features** — enable GraphQL, WebSockets, OpenAPI, microservices transports (NATS, Redis, Kafka, gRPC, MQTT, RabbitMQ), SQLx, MongoDB, Redis cache, sessions, CSRF, and OpenTelemetry only when you need them
+
+## Optional features
+
+nestrs uses Cargo features to keep the default binary small. Add what you need to `Cargo.toml`:
+
+| Feature | What it enables |
+|---------|-----------------|
+| `openapi` | OpenAPI spec generation + Swagger UI |
+| `graphql` | GraphQL support via `nestrs-graphql` |
+| `ws` | WebSocket gateway support |
+| `microservices` | Message-based transport primitives |
+| `microservices-nats` | NATS transport |
+| `microservices-redis` | Redis transport |
+| `microservices-kafka` | Kafka transport |
+| `microservices-grpc` | gRPC transport |
+| `database-sqlx` | SQLx integration (Postgres, SQLite) |
+| `mongo` | MongoDB integration |
+| `cache-redis` | Redis cache support |
+| `otel` | OpenTelemetry tracing export |
+| `csrf` | CSRF protection middleware |
+| `session` | Session management |
+| `schedule` | Cron-style task scheduling |
+| `mvc` | MVC template rendering via MiniJinja |
+
+## Add nestrs to your project
+
+Add these dependencies to `Cargo.toml` to get started. You need `tokio` for the async runtime and `serde` when you introduce DTO types.
+
+```toml
+[dependencies]
+nestrs = "0.3.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+<Tip>
+Add the `validator` crate when you use `#[dto]` for request body validation. Add optional nestrs features (like `openapi` or `graphql`) to the `nestrs` dependency as you need them: `nestrs = { version = "0.3.8", features = ["openapi"] }`.
+</Tip>
+
+## What nestrs is built on
+
+nestrs layers directly on the Axum and Tower ecosystem. You can use Axum extractors (`State`, `Json`, `Path`, `Query`), Tower middleware, and Tower-HTTP utilities alongside nestrs's macro-based abstractions — nothing is hidden from you.
+
+The current workspace version is **0.3.8**, requires Rust **1.88** or later (MSRV), and targets the 2021 edition.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build a working nestrs API from scratch, step by step.
+  </Card>
+  <Card title="CLI tool" icon="terminal" href="/cli">
+    Scaffold projects and generate resources with the `nestrs` CLI.
+  </Card>
+  <Card title="Modules" icon="layer-group" href="/concepts/modules">
+    Understand how modules organize your application.
+  </Card>
+  <Card title="Middleware pipeline" icon="filter" href="/concepts/middleware-pipeline">
+    Learn how guards, pipes, interceptors, and exception filters compose.
+  </Card>
+</CardGroup>

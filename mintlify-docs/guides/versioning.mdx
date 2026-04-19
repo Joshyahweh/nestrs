@@ -1,0 +1,179 @@
+---
+title: "Version nestrs APIs with URI, header, or media type"
+description: "Choose URI path prefixes, custom request headers, or Accept media type parameters to version your nestrs API, and read the resolved version in handlers."
+---
+
+nestrs supports three versioning strategies from NestJS's `VersioningType` enum, each suited to different API contract styles. URI versioning embeds the version in the path (`/v1/users`), header versioning reads it from a custom request header, and media type versioning parses it from the `Accept` header's parameters. You pick one strategy at the application level; route-level `#[version]` and `#[ver]` macros then let you opt individual controllers or handlers into specific versions.
+
+## URI versioning
+
+`enable_uri_versioning` nests your entire router under a path prefix. Pass the segment you want — nestrs normalizes it by adding a leading slash and stripping extras.
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .enable_uri_versioning("v1")  // routes become /v1/...
+        .listen(3000)
+        .await;
+}
+```
+
+Annotate a controller or handler with `#[version("1")]` (or the shorthand `#[ver("1")]`) to declare which version it belongs to. This is a metadata marker — it does not change routing by itself; the URI prefix from `enable_uri_versioning` does the routing work.
+
+```rust
+use nestrs::prelude::*;
+
+#[controller(prefix = "/users")]
+#[version("1")]
+struct UsersV1Controller;
+
+#[routes]
+impl UsersV1Controller {
+    #[get("")]
+    async fn list() -> Json<serde_json::Value> {
+        Json(serde_json::json!({ "version": "v1", "users": [] }))
+    }
+}
+
+#[controller(prefix = "/users")]
+#[ver("2")]
+struct UsersV2Controller;
+
+#[routes]
+impl UsersV2Controller {
+    #[get("")]
+    async fn list() -> Json<serde_json::Value> {
+        Json(serde_json::json!({ "version": "v2", "users": [], "meta": {} }))
+    }
+}
+```
+
+<Tip>
+URI versioning is the most discoverable strategy for public APIs — clients can bookmark and inspect versioned URLs directly. It works well with reverse proxy caching and load balancer routing rules.
+</Tip>
+
+## Header versioning
+
+`enable_header_versioning` reads the API version from a named request header. You specify the header name and an optional default version to use when the header is absent.
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .enable_header_versioning("X-API-Version", Some("1".into()))
+        .listen(3000)
+        .await;
+}
+```
+
+A client selects version 2 by sending:
+
+```http
+GET /users HTTP/1.1
+X-API-Version: 2
+```
+
+If no header is present and you passed `Some("1".into())` as the default, the request is treated as version `"1"`. If no default is set and the header is absent, `NestApiVersion` will not be present in request extensions.
+
+You can also build the policy explicitly with `ApiVersioningPolicy` for more control:
+
+```rust
+use nestrs::prelude::*;
+
+fn main() {
+    let policy = ApiVersioningPolicy {
+        kind: VersioningType::Header,
+        header_name: Some("X-API-Version".into()),
+        default_version: Some("1".into()),
+    };
+
+    let _router = NestFactory::create::<AppModule>()
+        .enable_api_versioning(policy)
+        .into_router();
+}
+```
+
+## Media type versioning
+
+`enable_media_type_versioning` parses the version from the `Accept` header's parameters using the `version=` key.
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .enable_media_type_versioning(Some("1".into()))
+        .listen(3000)
+        .await;
+}
+```
+
+A client selects version 2 with:
+
+```http
+GET /users HTTP/1.1
+Accept: application/json;version=2
+```
+
+nestrs parses `version=2` from the `Accept` header parameters and sets `NestApiVersion("2")` on the request extensions. The optional default version applies when no `version=` parameter is present.
+
+## Reading the resolved version in a handler
+
+The `NestApiVersion` extractor retrieves the version string that the versioning middleware resolved for the current request. It is available for all three strategies.
+
+```rust
+use nestrs::prelude::*;
+
+#[get("/version-info")]
+async fn version_info(
+    version: Option<NestApiVersion>,
+) -> Json<serde_json::Value> {
+    let v = version.map(|nv| nv.0).unwrap_or_else(|| "none".into());
+    Json(serde_json::json!({ "resolved_version": v }))
+}
+```
+
+Use `Option<NestApiVersion>` when the version may be absent (no default configured, no header sent). Use `NestApiVersion` directly when the version is always expected — Axum will return a 500 if extraction fails.
+
+## VersioningType enum
+
+The `VersioningType` enum describes the three strategies. You reference it when constructing `ApiVersioningPolicy` directly:
+
+```rust
+use nestrs::prelude::*;
+
+// VersioningType variants:
+// VersioningType::Uri      – URI prefix (use enable_uri_versioning instead)
+// VersioningType::Header   – custom request header
+// VersioningType::MediaType – Accept header parameter
+```
+
+<Note>
+URI versioning (`VersioningType::Uri`) is handled by `enable_uri_versioning`, not by `enable_api_versioning`. The other two strategies go through `enable_api_versioning` (or the shorthand `enable_header_versioning` / `enable_media_type_versioning`). You cannot combine URI versioning with header or media type versioning on the same app.
+</Note>
+
+## Combining versioning with a global prefix
+
+URI versioning and `set_global_prefix` can be used together. The global prefix is nested outside the version segment.
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .set_global_prefix("api")
+        .enable_uri_versioning("v1")
+        // routes are reachable at /api/v1/...
+        .listen(3000)
+        .await;
+}
+```
+
+Health, readiness, and metrics probes are mounted at the server root and are **not** affected by `set_global_prefix` or `enable_uri_versioning`.

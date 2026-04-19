@@ -1,0 +1,63 @@
+---
+title: "nestrs: NestJS architecture for high-performance Rust APIs"
+description: "nestrs brings NestJS's module/controller/provider model to Rust on Axum and Tower. Build structured HTTP APIs with compile-time safety."
+---
+
+nestrs gives you the NestJS developer experience — modules, controllers, dependency injection, guards, pipes, interceptors — all written in Rust on top of [Axum](https://github.com/tokio-rs/axum) and [Tower](https://github.com/tower-rs/tower). You get compile-time safety, explicit typing, and async-first performance without giving up the structured architecture that makes large codebases maintainable.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Build and run your first nestrs HTTP API in minutes.
+  </Card>
+  <Card title="CLI Tool" icon="terminal" href="/cli">
+    Scaffold projects and generate modules, controllers, and resources with `nestrs new` and `nestrs generate`.
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/modules">
+    Understand modules, controllers, providers, and the middleware pipeline.
+  </Card>
+  <Card title="Extensions" icon="puzzle-piece" href="/extensions/microservices">
+    Add microservices, GraphQL, WebSockets, OpenAPI, and database integrations.
+  </Card>
+</CardGroup>
+
+## Get started in 4 steps
+
+<Steps>
+  <Step title="Install the CLI">
+    ```bash
+    cargo install nestrs-scaffold
+    ```
+  </Step>
+  <Step title="Create a new project">
+    ```bash
+    nestrs new my-api
+    cd my-api
+    ```
+  </Step>
+  <Step title="Run the development server">
+    ```bash
+    cargo run
+    ```
+    Your API is available at `http://127.0.0.1:3000`.
+  </Step>
+  <Step title="Explore the framework">
+    Read the [Core Concepts](/concepts/modules) to understand modules, controllers, and providers — or jump straight to a [Guide](/guides/validation) for a specific feature.
+  </Step>
+</Steps>
+
+## Why nestrs?
+
+<CardGroup cols={2}>
+  <Card title="Familiar architecture" icon="layer-group">
+    If you know NestJS, you already know nestrs. Modules, controllers, providers, and decorators map directly.
+  </Card>
+  <Card title="Rust performance" icon="bolt">
+    Built on Axum and Tokio. No GC pauses, minimal overhead, and native async concurrency.
+  </Card>
+  <Card title="Rich middleware pipeline" icon="filter">
+    Guards, pipes, interceptors, and exception filters — the same cross-cutting concern model as NestJS, in Rust.
+  </Card>
+  <Card title="Batteries included" icon="battery-full">
+    CORS, rate limiting, security headers, Prometheus metrics, request tracing, health checks — all built in.
+  </Card>
+</CardGroup>

@@ -1,0 +1,160 @@
+---
+title: "GraphQL: mount async-graphql schemas in nestrs apps"
+description: "Enable the graphql feature to serve queries and mutations alongside REST. Apply depth and complexity limits with one helper call in schema setup."
+---
+
+The `nestrs-graphql` crate wires an [async-graphql](https://github.com/async-graphql/async-graphql) schema into the nestrs HTTP router. You build your schema entirely with async-graphql's own APIs — `Object`, `InputObject`, `SimpleObject`, and so on — and then hand it to nestrs, which mounts `GET /graphql` (Playground) and `POST /graphql` (queries and batch) alongside your REST controllers. The global prefix and URI versioning you configure on `NestApplication` apply to the GraphQL route like any other route.
+
+## Enable the feature
+
+```toml Cargo.toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["graphql"] }
+async-graphql = "7.0.17"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+<Note>
+  Pin `async-graphql` to the version your workspace uses. nestrs ships `async-graphql = "=7.0.17"` as a dev dependency, so `7.0.17` is the tested version.
+</Note>
+
+## Define a schema
+
+Define your root query (and optionally mutation and subscription) types using async-graphql macros, then build the schema:
+
+```rust src/schema.rs
+use async_graphql::{EmptyMutation, EmptySubscription, Object, Schema};
+
+pub struct QueryRoot;
+
+#[Object]
+impl QueryRoot {
+    async fn hello(&self) -> &str {
+        "world"
+    }
+
+    async fn user(&self, id: u64) -> String {
+        format!("user:{id}")
+    }
+}
+
+pub type AppSchema = Schema<QueryRoot, EmptyMutation, EmptySubscription>;
+
+pub fn build_schema() -> AppSchema {
+    Schema::build(QueryRoot, EmptyMutation, EmptySubscription).finish()
+}
+```
+
+## Apply query limits
+
+For APIs exposed to untrusted clients, apply depth and complexity limits before calling `.finish()`. nestrs-graphql provides two helpers:
+
+<CodeGroup>
+
+```rust Development limits
+use nestrs::graphql::with_default_limits;
+
+let schema = with_default_limits(
+    async_graphql::Schema::build(QueryRoot, EmptyMutation, EmptySubscription)
+)
+.finish();
+```
+
+```rust Production limits
+// Adds depth/complexity bounds AND the Analyzer extension.
+use nestrs::graphql::with_production_graphql_limits;
+
+let schema = with_production_graphql_limits(
+    async_graphql::Schema::build(QueryRoot, EmptyMutation, EmptySubscription)
+)
+.finish();
+```
+
+</CodeGroup>
+
+<Tip>
+  Use `with_production_graphql_limits` in deployed environments. It enables the async-graphql `Analyzer` extension in addition to depth and complexity bounds, which prevents expensive introspection attacks.
+</Tip>
+
+## Mount on the nestrs app
+
+Use `NestFactory::create::<AppModule>()` and call `enable_graphql` to mount the schema on the running Axum router.
+
+<Steps>
+  <Step title="Build the module">
+    ```rust src/app_module.rs
+    use nestrs::prelude::*;
+
+    #[module]
+    pub struct AppModule;
+    ```
+  </Step>
+  <Step title="Wire the schema in main">
+    ```rust src/main.rs
+    use nestrs::prelude::*;
+    use nestrs::graphql::graphql_router;
+
+    mod schema;
+
+    #[tokio::main]
+    async fn main() {
+        let schema = schema::build_schema();
+        let graphql = graphql_router(schema, "/graphql");
+
+        NestFactory::create::<AppModule>()
+            .use_global_layer(move |router| router.merge(graphql.clone()))
+            .listen(3000)
+            .await;
+    }
+    ```
+  </Step>
+</Steps>
+
+After booting, `GET http://localhost:3000/graphql` opens the GraphQL Playground and `POST http://localhost:3000/graphql` accepts queries.
+
+## HTTP options
+
+To disable the Playground (for example in production) while keeping query execution, use `graphql_router_with_options`:
+
+```rust src/main.rs
+use nestrs::graphql::{graphql_router_with_options, GraphQlHttpOptions};
+
+let router = graphql_router_with_options(
+    schema,
+    "/graphql",
+    GraphQlHttpOptions { enable_playground: false },
+);
+```
+
+## Export SDL
+
+Export the schema in SDL format for use with Apollo Router, codegen tools, or subgraph workflows:
+
+```rust src/main.rs
+use nestrs::graphql::{export_schema_sdl, export_schema_sdl_with_options, SDLExportOptions};
+
+// Plain SDL
+let sdl = export_schema_sdl(&schema);
+
+// Federation-shaped SDL for Apollo subgraph registration
+let fed_sdl = export_schema_sdl_with_options(
+    &schema,
+    SDLExportOptions::default().federation(),
+);
+```
+
+## Ecosystem scope
+
+nestrs-graphql provides HTTP transport and DI wiring. Federation, custom scalar plugins, field-level auth, and codegen are handled by async-graphql and external tooling:
+
+| Task | Approach |
+|------|----------|
+| Federation / subgraph stitching | Run Apollo Router or GraphOS; nestrs exposes one `/graphql` endpoint — treat it as a single subgraph |
+| DataLoader / N+1 batching | Use async-graphql's built-in `dataloader` feature or application-level batching in resolvers |
+| Field-level auth | Implement as async-graphql guards or resolver logic |
+| Codegen | Use `graphql-client`, `cynic`, or export SDL for external tooling |
+
+<Note>
+  The `graphql` feature exposes the `nestrs-graphql` crate as `nestrs::graphql` in your code.
+</Note>

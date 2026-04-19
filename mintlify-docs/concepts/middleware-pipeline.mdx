@@ -1,0 +1,278 @@
+---
+title: "HTTP Pipeline: Guards, Interceptors, and Exception Filters"
+description: "Understand the nestrs HTTP pipeline order — guards, pipes, interceptors, and exception filters — and apply each at route, controller, or global scope."
+---
+
+Every incoming HTTP request in nestrs passes through a layered pipeline before reaching your route handler, and back out again on the way to the client. Understanding this ordering lets you place authentication, validation, logging, and error handling at exactly the right layer. The pipeline has four main cross-cutting concern types: guards, pipes, interceptors, and exception filters — each with its own scope of application (per-route, per-controller, or global).
+
+## Execution order
+
+The pipeline moves **inward** through guards and interceptors to the handler, then **outward** through interceptors and filters on the response path:
+
+```text
+Client
+  → [global NestApplication middleware: CORS, rate limits, security headers, …]
+  → [exception filters: outermost → innermost]
+  → [controller guard, if declared]
+  → [route guards: G1, G2, … left-to-right]
+  → [interceptors: outermost → innermost]
+  → Handler + Axum extractors
+  → Response
+```
+
+<Note>
+nestrs pipeline ordering is defined by the framework contract, not by NestJS ordering. If you are migrating from NestJS, verify the sequence against `nestrs/tests/cross_cutting_ordering_contract.rs` in the repository rather than assuming identical behavior.
+</Note>
+
+## Guards
+
+Guards run before the handler and before interceptors. They answer a single question: should this request be allowed to proceed? A guard implements `CanActivate` and returns `Ok(())` to pass or a `GuardError` to reject.
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(Default)]
+pub struct AuthGuard;
+
+#[async_trait]
+impl CanActivate for AuthGuard {
+    async fn can_activate(&self, parts: &axum::http::request::Parts) -> Result<(), GuardError> {
+        let token = parts
+            .headers
+            .get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.strip_prefix("Bearer "));
+
+        match token {
+            Some(t) if is_valid_token(t) => Ok(()),
+            _ => Err(GuardError::unauthorized("Missing or invalid token")),
+        }
+    }
+}
+```
+
+`GuardError::Unauthorized` produces a `401` JSON response; `GuardError::Forbidden` produces `403`.
+
+### Applying guards
+
+<Tabs>
+  <Tab title="Route-level">
+    Use `#[use_guards(GuardType)]` on an individual handler to protect a single route.
+
+    ```rust
+    #[routes(state = UsersService)]
+    impl UsersController {
+        #[delete("/:id")]
+        #[use_guards(AuthGuard)]
+        async fn delete(
+            Path(id): Path<u64>,
+            State(svc): State<Arc<UsersService>>,
+        ) -> StatusCode {
+            svc.delete(id).await;
+            StatusCode::NO_CONTENT
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Controller-level">
+    Declare `controller_guards` in the `#[routes]` macro to apply a guard to all routes in that impl block. The controller guard runs **outside** route-level guards on the incoming request.
+
+    ```rust
+    // controller_guards is available via impl_routes! macro
+    // See the nestrs prelude for impl_routes! usage when you need
+    // controller_guards on a #[routes] impl block.
+    ```
+
+    <Note>
+    The `controller_guards` argument is accepted in the `impl_routes!` macro. When you use the `#[routes]` attribute, apply `#[use_guards(...)]` individually on each handler or use `use_global_guard` on the app for true app-wide coverage.
+    </Note>
+  </Tab>
+  <Tab title="Global">
+    Call `.use_global_guard(guard)` on `NestApplication` to protect every route in the application.
+
+    ```rust
+    NestFactory::create::<AppModule>()
+        .use_global_guard(AuthGuard::default())
+        .listen_graceful(3000)
+        .await;
+    ```
+  </Tab>
+</Tabs>
+
+## Pipes
+
+Pipes transform or validate input values. nestrs provides two built-in pipes: `ParseIntPipe` (parses a string to `i64`) and `ValidationPipe` (validates a DTO using the `validator` crate).
+
+```rust
+use nestrs::prelude::*;
+
+#[async_trait]
+impl PipeTransform<String> for ParseIntPipe {
+    type Output = i64;
+    type Error = HttpException;
+
+    async fn transform(&self, value: String) -> Result<i64, HttpException> {
+        value
+            .parse()
+            .map_err(|_| BadRequestException::new("Validation failed (integer expected)"))
+    }
+}
+```
+
+### Applying pipes
+
+Use `#[use_pipes(ValidationPipe)]` together with `#[param::body]`, `#[param::query]`, or `#[param::param]` parameter decorators to run validation at extraction time:
+
+```rust
+#[routes(state = UsersService)]
+impl UsersController {
+    #[post("/")]
+    #[use_pipes(ValidationPipe)]
+    async fn create(
+        State(svc): State<Arc<UsersService>>,
+        #[param::body] dto: CreateUserDto,
+    ) -> Json<User> {
+        Json(svc.create(dto).await)
+    }
+}
+```
+
+The equivalent using the `ValidatedBody` extractor directly (no `#[use_pipes]` needed) is more idiomatic for most cases:
+
+```rust
+#[post("/")]
+async fn create(
+    State(svc): State<Arc<UsersService>>,
+    ValidatedBody(dto): ValidatedBody<CreateUserDto>,
+) -> Json<User> {
+    Json(svc.create(dto).await)
+}
+```
+
+## Interceptors
+
+Interceptors wrap the handler call — they run on both the inward (request) and outward (response) path. Use them for logging, timing, response transformation, or caching. An interceptor implements the `Interceptor` trait and calls `next.run(req)` to continue the chain.
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(Default)]
+pub struct TimingInterceptor;
+
+#[async_trait]
+impl Interceptor for TimingInterceptor {
+    async fn intercept(&self, req: Request, next: Next) -> Response {
+        let start = std::time::Instant::now();
+        let mut response = next.run(req).await;
+        let elapsed = start.elapsed().as_millis();
+        response.headers_mut().insert(
+            "X-Response-Time-Ms",
+            elapsed.to_string().parse().unwrap(),
+        );
+        response
+    }
+}
+```
+
+nestrs ships a `LoggingInterceptor` that logs method, path, status, and elapsed time at `debug` level.
+
+### Applying interceptors
+
+<Tabs>
+  <Tab title="Route-level">
+    Use `#[use_interceptors(InterceptorType)]` on a handler.
+
+    ```rust
+    #[get("/")]
+    #[use_interceptors(TimingInterceptor)]
+    async fn list(State(svc): State<Arc<UsersService>>) -> Json<Vec<User>> {
+        Json(svc.find_all().await)
+    }
+    ```
+
+    Multiple interceptors are listed left-to-right; the first is the **outermost** Tower layer and sees the request first.
+  </Tab>
+  <Tab title="Global (interceptor_layer!)">
+    Use the `interceptor_layer!` macro to add an interceptor as a global Tower layer on the application.
+
+    ```rust
+    use nestrs::interceptor_layer;
+
+    NestFactory::create::<AppModule>()
+        .use_global_layer(|router| router.layer(interceptor_layer!(LoggingInterceptor)))
+        .listen_graceful(3000)
+        .await;
+    ```
+  </Tab>
+</Tabs>
+
+## Exception filters
+
+Exception filters catch `HttpException` values and transform them into custom error responses. They run on the response path, after the handler has returned an error. The first filter in `#[use_filters(...)]` is the outermost Tower layer; on the inward error path the innermost filter (closest to the handler) processes the exception first.
+
+```rust
+use nestrs::prelude::*;
+
+pub struct JsonApiErrorFilter;
+
+#[async_trait]
+impl ExceptionFilter for JsonApiErrorFilter {
+    async fn catch(&self, ex: HttpException) -> Response {
+        let body = serde_json::json!({
+            "errors": [{
+                "status": ex.status.as_u16().to_string(),
+                "title": ex.message,
+            }]
+        });
+        (ex.status, Json(body)).into_response()
+    }
+}
+```
+
+### Applying exception filters
+
+<Tabs>
+  <Tab title="Route-level">
+    ```rust
+    #[get("/:id")]
+    #[use_filters(JsonApiErrorFilter)]
+    async fn find_one(
+        Path(id): Path<u64>,
+        State(svc): State<Arc<UsersService>>,
+    ) -> Result<Json<User>, HttpException> {
+        Ok(Json(svc.find_one(id).await?))
+    }
+    ```
+  </Tab>
+  <Tab title="Global">
+    Register one global exception filter on the application. It runs inside the CORS and production-error-sanitization layers.
+
+    ```rust
+    NestFactory::create::<AppModule>()
+        .use_global_exception_filter(JsonApiErrorFilter)
+        .listen_graceful(3000)
+        .await;
+    ```
+  </Tab>
+</Tabs>
+
+## Pipeline summary
+
+<CardGroup cols={2}>
+  <Card title="Guards" icon="shield">
+    Run before the handler. Return `Ok(())` to allow or `GuardError` to reject with 401/403. Applied with `#[use_guards(...)]` or `.use_global_guard(...)`.
+  </Card>
+  <Card title="Pipes" icon="filter">
+    Transform or validate inputs at extraction time. Apply `ValidationPipe` with `#[use_pipes(...)]`, or use `ValidatedBody` / `ValidatedQuery` / `ValidatedPath` extractors directly.
+  </Card>
+  <Card title="Interceptors" icon="arrows-left-right">
+    Wrap the entire handler call. See the request and response. Apply with `#[use_interceptors(...)]` or `interceptor_layer!(...)` globally.
+  </Card>
+  <Card title="Exception Filters" icon="triangle-exclamation">
+    Catch `HttpException` on the response path and rewrite the error body. Apply with `#[use_filters(...)]` or `.use_global_exception_filter(...)`.
+  </Card>
+</CardGroup>
+
+<Tip>
+When combining multiple cross-cutting concerns, guards protect the gate (authentication/authorization), interceptors handle observability (logging, timing, tracing), pipes validate inputs, and exception filters shape error responses. Keep each concern in its own type and compose them at the appropriate scope.
+</Tip>

@@ -1,0 +1,638 @@
+---
+title: "NestApplication API — all builder methods reference"
+description: "Complete reference for every public NestApplication builder method — routing, security, observability, performance, middleware, and server binding."
+---
+
+`NestApplication` is the fluent builder you get back from `NestFactory::create::<AppModule>()`. Every method returns `Self`, so you chain calls and finish with `.listen(port).await`, `.listen_graceful(port).await`, or `.into_router()`. This page documents every public method grouped by concern.
+
+---
+
+## Routing and prefixes
+
+<AccordionGroup>
+
+<Accordion title="set_global_prefix(prefix)">
+
+Mounts all controller routes under a URL prefix. Health, readiness, metrics, and static-file mounts are **not** affected — they always register at the server root.
+
+```rust
+NestFactory::create::<AppModule>()
+    .set_global_prefix("api") // routes become /api/...
+    .listen(3000)
+    .await;
+```
+
+Leading and trailing slashes are normalised automatically. Passing `"api"` and `"/api/"` both produce `/api`.
+
+</Accordion>
+
+<Accordion title="enable_uri_versioning(version)">
+
+Nests all controller routes under a URI segment, producing paths like `/v1/cats`. Combine with `set_global_prefix` to get `/api/v1/cats`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .set_global_prefix("api")
+    .enable_uri_versioning("v1")
+    .listen(3000)
+    .await;
+```
+
+<Note>Health, readiness, metrics, and static-file endpoints are mounted at the server root and are **not** nested under the URI version segment.</Note>
+
+</Accordion>
+
+<Accordion title="enable_api_versioning(policy)">
+
+Enables header-based or media-type-based version negotiation. The resolved version is stored on each request as a `NestApiVersion` extension, available to guards and interceptors.
+
+```rust
+use nestrs::prelude::*;
+
+NestFactory::create::<AppModule>()
+    .enable_api_versioning(ApiVersioningPolicy {
+        kind: VersioningType::Header,
+        header_name: Some("X-API-Version".to_string()),
+        default_version: Some("1".to_string()),
+    })
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="enable_header_versioning(header_name, default_version)">
+
+Shorthand for `enable_api_versioning` with `VersioningType::Header`. Reads the version from the named request header and falls back to `default_version` when the header is absent.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_header_versioning("X-API-Version", Some("1".to_string()))
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="enable_media_type_versioning(default_version)">
+
+Shorthand for `enable_api_versioning` with `VersioningType::MediaType`. Parses the version from the `Accept` header, for example `Accept: application/vnd.api+json;version=2`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_media_type_versioning(Some("1".to_string()))
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_path_normalization(mode)">
+
+Rewrites request URIs before routing using `tower_http::normalize_path`. Accepted values are `PathNormalization::TrimTrailingSlash` (`/items/` → `/items`) and `PathNormalization::AppendTrailingSlash` (`/items` → `/items/`).
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_path_normalization(PathNormalization::TrimTrailingSlash)
+    .listen_graceful(3000)
+    .await;
+```
+
+<Warning>`into_router()` ignores this setting. When you manage your own server, apply `NormalizePathLayer` manually around the extracted router.</Warning>
+
+</Accordion>
+
+<Accordion title="serve_static(mount_path, dir)">
+
+Serves static files from `dir` at `mount_path`. The mount is at the **server root** (not under the global prefix or URI version), analogous to NestJS `ServeStaticModule`. Directories automatically serve `index.html`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .serve_static("/assets", "./public")
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Security
+
+<AccordionGroup>
+
+<Accordion title="enable_cors(CorsOptions)">
+
+Attaches a `tower_http::cors::CorsLayer` built from `CorsOptions`. Use `CorsOptions::permissive()` for development and `CorsOptions::builder()` with explicit origins for production.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_cors(
+        CorsOptions::builder()
+            .allow_origins(["https://app.example.com"])
+            .allow_methods(["GET", "POST"])
+            .allow_headers(["content-type", "authorization"])
+            .allow_credentials(true)
+            .build(),
+    )
+    .listen(3000)
+    .await;
+```
+
+<Warning>Using `CorsOptions::permissive()` in a production environment (detected via `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV`) emits a `tracing::warn!` at startup.</Warning>
+
+</Accordion>
+
+<Accordion title="use_security_headers(SecurityHeaders)">
+
+Adds hardening response headers via `tower_http::set_header`. `SecurityHeaders::default()` sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-XSS-Protection: 0`, and `Permissions-Policy`. `SecurityHeaders::helmet_like()` additionally enables `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-DNS-Prefetch-Control`, `X-Download-Options`, and `X-Permitted-Cross-Domain-Policies`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_security_headers(SecurityHeaders::helmet_like())
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_rate_limit(RateLimitOptions)">
+
+Applies a fixed-window rate limiter. Exceeded requests receive `429 Too Many Requests`. The default window is 100 requests per 60 seconds. With the `cache-redis` feature, pass `.redis(url, key_prefix)` for distributed limiting across instances via Redis `INCR` + `EXPIRE`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_rate_limit(
+        RateLimitOptions::builder()
+            .max_requests(200)
+            .window_secs(60)
+            .build(),
+    )
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_body_limit(max_bytes)">
+
+Rejects request bodies larger than `max_bytes` with `413 Payload Too Large`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_body_limit(1024 * 1024) // 1 MiB
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_cookies() — feature: cookies">
+
+Installs `tower_cookies::CookieManagerLayer` so handlers can read and write cookies. Required before `use_csrf_protection`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_cookies()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_session_memory() — feature: session">
+
+Installs `tower_sessions::SessionManagerLayer` backed by an in-memory `MemoryStore`, plus the cookie manager layer. Suitable for development; use a persistent store for production.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_session_memory()
+    .listen(3000)
+    .await;
+```
+
+<Warning>Enabling cookies or sessions without CSRF protection emits a runtime `tracing::warn!`. Call `use_csrf_protection` to suppress the warning and protect mutation endpoints.</Warning>
+
+</Accordion>
+
+<Accordion title="use_csrf_protection(config) — feature: csrf">
+
+Enables double-submit CSRF checks on `POST`, `PUT`, `PATCH`, and `DELETE` requests. Requires `use_cookies()` so `tower_cookies::Cookies` is available to the middleware.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_cookies()
+    .use_csrf_protection(CsrfProtectionConfig::default())
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="enable_production_errors()">
+
+Sanitises JSON bodies for all `5xx` responses: the `message` field is replaced with `"An unexpected error occurred"`, the `errors` field is removed, and the `error` field is set to the HTTP reason phrase. Prevents internal detail from leaking to clients.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_production_errors()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="enable_production_errors_from_env()">
+
+Conditionally enables the same sanitisation as `enable_production_errors()` when `runtime_is_production()` returns `true`. The check reads `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV`; values `production` and `prod` (case-insensitive) trigger production mode.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_production_errors_from_env()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Observability
+
+<AccordionGroup>
+
+<Accordion title="enable_metrics(path)">
+
+Registers a Prometheus scrape endpoint at `path` (defaults to `"/metrics"` when you pass an empty string). The endpoint exposes three automatic RED metrics: `http_requests_total{method, status}`, `http_request_duration_seconds{method}`, and `http_requests_in_flight`. The scrape path itself is excluded from metrics recording.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_metrics("/metrics")
+    .listen(3000)
+    .await;
+```
+
+<Tip>Combine with `use_request_tracing` and `use_request_id` for a complete observability baseline. Skip the metrics path in request tracing with `RequestTracingOptions::builder().skip_paths(["/metrics"])`.</Tip>
+
+</Accordion>
+
+<Accordion title="enable_health_check(path)">
+
+Mounts a minimal JSON liveness probe at `path`. The endpoint returns `{"status":"ok"}` with `200 OK`. It is registered at the server root, so orchestrators can probe it without API prefixes.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_health_check("/health")
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="enable_readiness_check(path, indicators)">
+
+Mounts a readiness probe at `path`. Each `HealthIndicator` in `indicators` is called on every request. The JSON response follows a Terminus-style shape (`status`, `info`, `error`, `details`). Returns `200` when all indicators are `Up` and `503 Service Unavailable` when any indicator returns `Down`.
+
+```rust
+#[derive(Clone, Default)]
+struct DbIndicator;
+
+#[async_trait::async_trait]
+impl HealthIndicator for DbIndicator {
+    fn name(&self) -> &'static str { "db" }
+    async fn check(&self) -> HealthStatus { HealthStatus::Up }
+}
+
+let indicators: Vec<std::sync::Arc<dyn HealthIndicator>> =
+    vec![std::sync::Arc::new(DbIndicator)];
+
+NestFactory::create::<AppModule>()
+    .enable_readiness_check("/ready", indicators)
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_request_id()">
+
+Assigns a stable `x-request-id` UUID to each request (preserving it when the client sends one) and echoes it on the response. Pair with `use_request_context()` to make the ID available in handlers via the `RequestContext` extractor.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_id()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_request_tracing(options)">
+
+Emits a structured `tracing` log line for each request with fields `method`, `path`, `status`, `duration_ms`, and `request_id`. Use `RequestTracingOptions::builder().skip_paths([...])` to exclude paths like `/health` and `/metrics`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_id()
+    .use_request_tracing(
+        RequestTracingOptions::builder()
+            .skip_paths(["/metrics", "/health"]),
+    )
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="enable_openapi() — feature: openapi">
+
+Registers `GET /openapi.json` (OpenAPI spec from `RouteRegistry`) and `GET /docs` (Swagger UI). For custom servers, components, security schemes, and per-operation `#[roles]` inference, use `enable_openapi_with_options(OpenApiOptions)`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_openapi()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Performance
+
+<AccordionGroup>
+
+<Accordion title="use_request_timeout(duration)">
+
+Cancels requests that take longer than `duration` and returns `504 Gateway Timeout`.
+
+```rust
+use std::time::Duration;
+
+NestFactory::create::<AppModule>()
+    .use_request_timeout(Duration::from_secs(30))
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_concurrency_limit(max_in_flight)">
+
+Caps the number of simultaneously active requests across the full app service. Additional requests wait unless `use_load_shed()` is also enabled, in which case overload is rejected immediately with `503 Service Unavailable`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_concurrency_limit(256)
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_load_shed()">
+
+When combined with `use_concurrency_limit`, rejects excess requests immediately instead of queuing them. Without a concurrency limit, this method has no effect.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_concurrency_limit(128)
+    .use_load_shed()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_compression()">
+
+Enables gzip response compression via `tower_http::compression::CompressionLayer`. The client must advertise support with `Accept-Encoding: gzip`. Responses under approximately 32 bytes are skipped by tower-http defaults.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_compression()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_request_decompression()">
+
+Decompresses gzip-encoded request bodies (`Content-Encoding: gzip`) via `tower_http::decompression::RequestDecompressionLayer`. Unsupported encodings return `415 Unsupported Media Type`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_decompression()
+    .use_compression()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Middleware and filters
+
+<AccordionGroup>
+
+<Accordion title="use_global_layer(fn)">
+
+Applies an arbitrary Tower layer or `Router` transform around the full application after all built-in middleware. The first call is the innermost layer; the last call is the outermost (first to see the incoming request).
+
+```rust
+use axum::http::{HeaderName, HeaderValue};
+use tower_http::set_header::SetResponseHeaderLayer;
+
+NestFactory::create::<AppModule>()
+    .use_global_layer(|router| {
+        router.layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("x-app"),
+            HeaderValue::from_static("my-api"),
+        ))
+    })
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_global_exception_filter(filter)">
+
+Registers a global `ExceptionFilter` that intercepts responses carrying an `HttpException`. The filter runs inside built-in layers like CORS and `enable_production_errors`, so it sees the original exception payload before sanitisation.
+
+```rust
+#[derive(Clone, Default)]
+struct MyFilter;
+
+#[async_trait::async_trait]
+impl ExceptionFilter for MyFilter {
+    async fn catch(&self, ex: HttpException) -> axum::response::Response {
+        ex.into_response()
+    }
+}
+
+NestFactory::create::<AppModule>()
+    .use_global_exception_filter(MyFilter)
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_request_context()">
+
+Installs middleware that snapshots request metadata (method, path, query string, optional `x-request-id`) into a `RequestContext` extension on every request. Handlers read it with the `RequestContext` extractor.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_id()
+    .use_request_context()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_execution_context()">
+
+Attaches an `ExecutionContext` per request — the nestrs analogue of NestJS `ArgumentsHost`. Handlers and guards read it with the `HttpExecutionContext` extractor.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_execution_context()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_request_scope()">
+
+Enables request-scoped providers (`ProviderScope::Request`). The middleware injects the provider registry into request extensions and creates a task-local cache so that repeated resolutions within one request share instances. Pair with `#[injectable(scope = "request")]` on your provider structs and the `RequestScoped<T>` extractor in handlers.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_scope()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="use_i18n()">
+
+Resolves the locale per request and installs the `Locale` and `I18n` extractors. Requires `I18nService` to be registered, typically via `I18nModule` in your module tree.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_i18n()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="enable_default_fallback()">
+
+Installs `nestrs_default_not_found_handler` as the Axum router fallback. Unmatched requests receive a JSON `NotFoundException` body (`Cannot METHOD /path`) that is consistent with handler-produced errors.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_default_fallback()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Binding and startup
+
+<AccordionGroup>
+
+<Accordion title="set_listen_ip(ip)">
+
+Sets the bind address for `listen` and `listen_graceful`. Defaults to `127.0.0.1` when not called.
+
+```rust
+use std::net::{IpAddr, Ipv4Addr};
+
+NestFactory::create::<AppModule>()
+    .set_listen_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="bind_all_interfaces()">
+
+Shorthand for `set_listen_ip(0.0.0.0)`. Binds to all IPv4 interfaces, which is typical for containers and multi-interface hosts.
+
+```rust
+NestFactory::create::<AppModule>()
+    .bind_all_interfaces()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="listen_graceful(port)">
+
+Starts the server on `port` with graceful shutdown. Listens for `Ctrl+C` on all platforms and `SIGTERM` on Unix systems. In-flight requests finish before the process exits, and `OnApplicationShutdown` / `OnModuleDestroy` lifecycle hooks run after draining.
+
+```rust
+NestFactory::create::<AppModule>()
+    .bind_all_interfaces()
+    .listen_graceful(3000)
+    .await;
+```
+
+<Tip>Use `listen_graceful` in production. It handles container shutdown signals (SIGTERM from Kubernetes) and drains connections cleanly.</Tip>
+
+</Accordion>
+
+<Accordion title="listen(port)">
+
+Starts the server on `port` without graceful shutdown. Lifecycle hooks (`OnModuleInit`, `OnApplicationBootstrap`) run before the server accepts connections. Use `listen_graceful` or `listen_with_shutdown` when you need drain behaviour.
+
+```rust
+NestFactory::create::<AppModule>()
+    .listen(3000)
+    .await;
+```
+
+</Accordion>
+
+<Accordion title="into_router()">
+
+Builds and returns the raw `axum::Router` without starting a server. Use this for tower `ServiceExt::oneshot` integration tests, embedding nestrs inside an existing Axum application, or custom `tokio::net::TcpListener` setups.
+
+```rust
+let router = NestFactory::create::<AppModule>()
+    .enable_cors(CorsOptions::permissive())
+    .into_router();
+
+// Use with tower::ServiceExt::oneshot in tests, or axum::serve directly.
+```
+
+<Note>`use_path_normalization` is ignored when you call `into_router`. Apply `NormalizePathLayer` manually around the returned router if you need it.</Note>
+
+</Accordion>
+
+</AccordionGroup>

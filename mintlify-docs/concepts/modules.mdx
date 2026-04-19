@@ -1,0 +1,253 @@
+---
+title: "Modules: Organize Your nestrs Application Structure"
+description: "Learn how nestrs modules bundle controllers and providers, build a root module tree, and configure dynamic modules with DynamicModuleBuilder for your app."
+---
+
+Modules are the fundamental unit of organization in nestrs. Every controller and provider belongs to exactly one module, and modules can import providers exported by other modules — forming a composition tree rooted at the module you pass to `NestFactory::create`. If you are coming from NestJS, the mental model is identical; the syntax is a Rust attribute macro instead of a TypeScript decorator.
+
+## The `#[module]` macro
+
+Annotate a plain struct with `#[module(...)]` to declare a module. The macro accepts four keys: `controllers`, `providers`, `imports`, and `exports`. All four are optional; omit any key you do not need.
+
+```rust
+use nestrs::prelude::*;
+
+#[module(
+    controllers = [UsersController],
+    providers = [UsersService, DatabaseService],
+    imports = [DatabaseModule],
+    exports = [UsersService],
+)]
+pub struct UsersModule;
+```
+
+<Note>
+The macro generates `impl Module for UsersModule` and `impl ModuleGraph for UsersModule` at compile time. You never write these by hand.
+</Note>
+
+### What each key does
+
+| Key | What goes here | Effect |
+|-----|----------------|--------|
+| `controllers` | Types annotated with `#[controller]` | Routes are registered on the Axum router |
+| `providers` | Types annotated with `#[injectable]` | Registered in the DI container for this module |
+| `imports` | Other module types or `DynamicModule` expressions | Exported providers from those modules become available here |
+| `exports` | A subset of this module's `providers` | Makes those providers available to importing modules |
+
+## The root module
+
+The module you pass to `NestFactory::create` is the **composition root**. nestrs builds the entire module graph, wires all providers into a single `ProviderRegistry`, and merges all controller routers into one Axum `Router` — all at startup.
+
+```rust
+use nestrs::prelude::*;
+
+#[module(
+    imports = [UsersModule, AuthModule],
+)]
+pub struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .bind_all_interfaces()
+        .listen_graceful(3000)
+        .await;
+}
+```
+
+<Tip>
+Keep `AppModule` thin — its only job is to compose feature modules. Put controllers and providers inside feature modules like `UsersModule` or `AuthModule`.
+</Tip>
+
+## Module composition
+
+<Steps>
+  <Step title="Define feature modules">
+    Each feature module declares its own controllers and providers. Export only what other modules need.
+
+    ```rust
+    #[module(
+        controllers = [UsersController],
+        providers = [UsersService],
+        exports = [UsersService],
+    )]
+    pub struct UsersModule;
+    ```
+  </Step>
+
+  <Step title="Import the module">
+    List the module in the `imports` key of the consuming module. The exported providers become injectable in that module's providers and controllers.
+
+    ```rust
+    #[module(
+        imports = [UsersModule],
+        controllers = [AdminController],
+        providers = [AdminService],
+    )]
+    pub struct AdminModule;
+    ```
+  </Step>
+
+  <Step title="Compose at the root">
+    Import all feature modules into `AppModule`. `NestFactory::create::<AppModule>()` triggers the full build.
+
+    ```rust
+    #[module(imports = [UsersModule, AdminModule])]
+    pub struct AppModule;
+    ```
+  </Step>
+</Steps>
+
+## Dynamic modules
+
+A `DynamicModule` is a module built at runtime — useful for feature flags, configurable third-party integrations, or conditional imports. You pass `DynamicModule` expressions directly in `imports = [...]`.
+
+### `DynamicModuleBuilder`
+
+`DynamicModuleBuilder` runs a static module's provider registration and controller wiring, but lets you override providers before controllers see them. This is most useful in tests or when you need to swap an implementation at runtime.
+
+```rust
+use nestrs::core::{DynamicModuleBuilder, DynamicModule};
+
+fn build_payments_module() -> DynamicModule {
+    DynamicModuleBuilder::<PaymentsModule>::new()
+        .override_provider::<PaymentsGateway>(Arc::new(StripeGateway::new()))
+        .build()
+}
+
+#[module(
+    imports = [build_payments_module()],
+    controllers = [CheckoutController],
+)]
+pub struct AppModule;
+```
+
+### `ConfigurableModuleBuilder`
+
+`ConfigurableModuleBuilder` is the nestrs equivalent of NestJS's `forRoot` / `forRootAsync` pattern. It injects a `ModuleOptions<O, M>` provider into the module so your injectables can read configuration from the DI container.
+
+<Tabs>
+  <Tab title="Synchronous (for_root)">
+    Use `for_root` when your options are available synchronously — parsed from environment variables or constants.
+
+    ```rust
+    use nestrs::prelude::*;
+
+    #[derive(Clone)]
+    pub struct DatabaseOptions {
+        pub url: String,
+    }
+
+    #[injectable]
+    pub struct DatabaseService {
+        opts: Arc<ModuleOptions<DatabaseOptions, DatabaseModule>>,
+    }
+
+    #[module(providers = [DatabaseService], exports = [DatabaseService])]
+    pub struct DatabaseModule;
+
+    // In your AppModule imports:
+    // imports = [ConfigurableModuleBuilder::<DatabaseOptions>::for_root::<DatabaseModule>(opts)]
+    fn database_module() -> DynamicModule {
+        ConfigurableModuleBuilder::<DatabaseOptions>::for_root::<DatabaseModule>(
+            DatabaseOptions {
+                url: std::env::var("DATABASE_URL").unwrap(),
+            },
+        )
+    }
+    ```
+  </Tab>
+  <Tab title="Async (for_root_async)">
+    Use `for_root_async` when you need to fetch configuration from a remote source before building the module graph.
+
+    ```rust
+    use nestrs::core::{ConfigurableModuleBuilder, DynamicModule};
+
+    async fn database_module() -> DynamicModule {
+        ConfigurableModuleBuilder::<DatabaseOptions>::for_root_async::<DatabaseModule, _, _>(
+            || async {
+                DatabaseOptions {
+                    url: fetch_url_from_vault().await,
+                }
+            },
+        )
+        .await
+    }
+    ```
+
+    <Note>
+    `Injectable::construct` is always synchronous. Use `for_root_async` to resolve options before the module graph builds, then do any async I/O that depends on those options inside `on_module_init`.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Circular module imports
+
+If two modules import each other, nestrs panics at startup with `Circular module dependency detected`. Mark the **back-edge** import with `forward_ref::<M>()` (alias `forwardRef::<M>()`):
+
+```rust
+#[module(
+    imports = [BModule],
+    controllers = [AController],
+    providers = [AService],
+)]
+pub struct AModule;
+
+#[module(
+    imports = [forward_ref::<AModule>()],
+    controllers = [BController],
+    providers = [BService],
+)]
+pub struct BModule;
+```
+
+<Warning>
+`forward_ref` resolves the module graph cycle only. Circular **provider** dependencies (where two injectables each depend on the other) cannot be fixed with `forward_ref` — you must restructure the code or use `on_module_init` to defer the dependency.
+</Warning>
+
+## Lifecycle hooks
+
+nestrs calls async lifecycle hooks on your providers in a fixed order. Override the default no-op implementations on `Injectable` to hook into the application lifecycle.
+
+<CardGroup cols={2}>
+  <Card title="on_module_init" icon="play">
+    Runs after the module graph is fully built and all singletons are constructed. Use this for async setup such as running database migrations or opening connection pools.
+  </Card>
+  <Card title="on_application_bootstrap" icon="rocket">
+    Runs after `on_module_init` for all providers, just before the server starts accepting requests.
+  </Card>
+  <Card title="on_application_shutdown" icon="stop">
+    Runs on graceful shutdown, before `on_module_destroy`. Use this to flush queues or finish in-flight work.
+  </Card>
+  <Card title="on_module_destroy" icon="trash">
+    Runs after `on_application_shutdown`. Use this to close connections and release resources.
+  </Card>
+</CardGroup>
+
+```rust
+use nestrs::prelude::*;
+
+#[injectable]
+pub struct DatabaseService {
+    // pool field would go here
+}
+
+#[async_trait]
+impl Injectable for DatabaseService {
+    fn construct(registry: &ProviderRegistry) -> Arc<Self> {
+        Arc::new(DatabaseService {})
+    }
+
+    async fn on_module_init(&self) {
+        // run migrations, warm connection pool, etc.
+    }
+
+    async fn on_application_shutdown(&self) {
+        // close pool gracefully
+    }
+}
+```
+
+<Note>
+Lifecycle hooks only run for **singleton** providers. Transient and request-scoped providers are constructed on demand and do not participate in the global hook sequence.
+</Note>

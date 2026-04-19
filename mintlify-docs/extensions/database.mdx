@@ -1,0 +1,282 @@
+---
+title: "Database integrations: SQLx, MongoDB, Prisma, cache"
+description: "Connect nestrs to Postgres, SQLite, or MongoDB. Use nestrs-prisma, SqlxDatabaseModule, and CacheModule for typed queries and caching."
+---
+
+nestrs ships first-class support for multiple persistence backends, all following the same module registration pattern. Enable the relevant Cargo feature, import the `DynamicModule` into your root module, and inject the service into your providers. The sections below cover SQLx for relational databases, MongoDB for document storage, `nestrs-prisma` for a Prisma-style repository layer, and the built-in `CacheModule` for in-memory or Redis-backed caching.
+
+---
+
+## SQLx (Postgres and SQLite)
+
+The `database-sqlx` feature adds `SqlxDatabaseModule` and `SqlxDatabaseService`, backed by SQLx with TLS via `rustls`.
+
+### Enable the feature
+
+```toml Cargo.toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["database-sqlx"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+SQLx is compiled with Postgres and SQLite support. Set `DATABASE_URL` in your environment to select the backend:
+
+```bash
+DATABASE_URL=postgres://user:pass@localhost/mydb
+# or
+DATABASE_URL=sqlite:app.db
+```
+
+### Register and inject
+
+```rust src/app_module.rs
+use nestrs::prelude::*;
+use nestrs::SqlxDatabaseModule;
+
+#[module(
+    imports = [SqlxDatabaseModule::for_root()],
+    providers = [UsersRepository],
+    controllers = [UsersController],
+)]
+pub struct AppModule;
+```
+
+```rust src/users/users_repository.rs
+use nestrs::prelude::*;
+use nestrs::SqlxDatabaseService;
+use std::sync::Arc;
+
+#[derive(Debug, sqlx::FromRow, serde::Serialize)]
+pub struct UserRow {
+    pub id: i64,
+    pub email: String,
+    pub name: String,
+}
+
+#[injectable]
+pub struct UsersRepository {
+    db: Arc<SqlxDatabaseService>,
+}
+
+impl UsersRepository {
+    pub async fn find_all(&self) -> Vec<UserRow> {
+        self.db
+            .query_all_as(r#"SELECT "id", "email", "name" FROM "users""#)
+            .await
+            .unwrap_or_default()
+    }
+}
+```
+
+---
+
+## MongoDB
+
+Enable the `mongo` feature to get `MongoModule` and `MongoService`.
+
+```toml Cargo.toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["mongo"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+```rust src/app_module.rs
+use nestrs::prelude::*;
+use nestrs::MongoModule;
+
+#[module(
+    imports = [MongoModule::for_root()],
+    providers = [ArticlesRepository],
+)]
+pub struct AppModule;
+```
+
+Set `MONGODB_URI` (and optionally `MONGODB_DATABASE`) in your environment, then inject `Arc<MongoService>` into your providers to access the raw `mongodb::Database` handle.
+
+---
+
+## nestrs-prisma
+
+`nestrs-prisma` is a separate crate (not a feature flag on `nestrs`) that adds a `PrismaModule` / `PrismaService` with optional SQLx pooling and a `prisma_model!` proc-macro that generates typed repository code from your Prisma schema.
+
+### Add the dependency
+
+```toml Cargo.toml
+[dependencies]
+nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+nestrs = "0.3.8"
+async-trait = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+Choose exactly one backend feature: `sqlx-postgres`, `sqlx-sqlite`, or `sqlx-mysql`.
+
+The `async-trait` crate must be a direct dependency of any crate that calls `prisma_model!`, because the generated repository trait uses `#[async_trait::async_trait]`.
+
+### Native type dependencies
+
+Depending on the Prisma scalar types in your schema, you may need additional crates:
+
+```toml Cargo.toml
+[dependencies]
+chrono = { version = "0.4", features = ["clock"] }  # DateTime, Timestamp, Date, Time
+uuid = { version = "1", features = ["v4"] }          # @db.Uuid
+serde_json = "1"                                      # Json, JsonB
+rust_decimal = "1"                                    # Decimal, Numeric
+ipnetwork = "0.21"                                    # @db.Cidr
+bit-vec = "0.6"                                       # @db.Bit, @db.VarBit
+```
+
+Add only the crates your schema actually uses.
+
+### Write a Prisma schema
+
+```prisma prisma/schema.prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id    Int    @id @default(autoincrement())
+  email String @unique
+  name  String
+}
+```
+
+Run `prisma migrate dev` or `prisma db push` to apply the schema to your database.
+
+### Use `prisma_model!` for typed repositories
+
+The `prisma_model!` macro generates a typed repository trait and client extension from your table definition. You get `find_unique`, `find_many`, `create`, `update`, `upsert`, `delete`, and more.
+
+```rust src/users/model.rs
+use nestrs_prisma::PrismaService;
+use std::sync::Arc;
+
+nestrs_prisma::prisma_model!(User => "users", {
+    id: i64,
+    email: String,
+    name: String,
+});
+
+// PrismaUserRepository and PrismaUserClientExt are now in scope.
+
+async fn create_user(
+    prisma: Arc<PrismaService>,
+) -> Result<(), nestrs_prisma::PrismaError> {
+    prisma
+        .user()
+        .create(UserCreateInput {
+            email: "ada@example.com".into(),
+            name: "Ada".into(),
+        })
+        .await?;
+    Ok(())
+}
+```
+
+`PrismaError` maps to `nestrs::HttpException` automatically (404 for missing rows, 409 for unique violations).
+
+### Register the module
+
+```rust src/app_module.rs
+use nestrs::prelude::*;
+use nestrs_prisma::PrismaModule;
+
+#[module(
+    imports = [PrismaModule::for_root()],
+    providers = [UsersService],
+    controllers = [UsersController],
+)]
+pub struct AppModule;
+```
+
+### Raw SQL queries
+
+When you need queries outside the generated repository, use `PrismaService` directly:
+
+```rust
+// Select rows mapped to a struct
+let users: Vec<UserRow> = prisma
+    .query_all_as(r#"SELECT "id", "email", "name" FROM "User""#)
+    .await?;
+
+// Execute DDL or DML without a row mapper
+prisma.execute("CREATE INDEX ...").await?;
+```
+
+### Generated Prisma Client Rust (optional)
+
+For fully generated model APIs, add [prisma-client-rust](https://github.com/Brendonovich/prisma-client-rust) to your app and run:
+
+```bash
+cargo prisma generate --schema prisma/schema.prisma
+```
+
+Register the generated client as an additional `#[injectable]` provider alongside `PrismaService`. `nestrs-prisma` does not embed the codegen CLI; it focuses on connectivity and the `PrismaService` shape.
+
+---
+
+## Caching
+
+`CacheModule` and `CacheService` are available without any extra feature flag. The default backend is in-memory. Add the `cache-redis` feature to switch to a Redis-backed distributed cache.
+
+### In-memory cache
+
+```rust src/app_module.rs
+use nestrs::prelude::*;
+
+#[module(
+    imports = [CacheModule::register(CacheOptions::in_memory())],
+    providers = [AppService],
+    controllers = [AppController],
+)]
+struct AppModule;
+```
+
+```rust src/app_service.rs
+use nestrs::prelude::*;
+use nestrs::{CacheService};
+use std::sync::Arc;
+
+#[injectable]
+struct AppService {
+    cache: Arc<CacheService>,
+}
+
+impl AppService {
+    pub async fn get_or_fetch(&self, key: &str) -> serde_json::Value {
+        if let Some(cached) = self.cache.get_json(key).await {
+            return cached;
+        }
+        let fresh = serde_json::json!({ "from": "db" });
+        self.cache.set_json(key, &fresh, Some(60)).await.ok();
+        fresh
+    }
+}
+```
+
+### Redis cache
+
+Enable the feature and pass a Redis URL:
+
+```toml Cargo.toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["cache-redis"] }
+```
+
+```rust src/app_module.rs
+use nestrs::prelude::*;
+
+#[module(imports = [CacheModule::register(CacheOptions::redis("redis://localhost:6379"))])]
+struct AppModule;
+```
+
+<Tip>
+  Redis cache is shared across all instances of your service, making it suitable for multi-process or containerized deployments. In-memory cache is local to one process and resets on restart.
+</Tip>
+
+`CacheService` exposes `get_json`, `set_json`, `del`, and `ttl`. For rate limiting backed by Redis, see `RedisCacheOptions` and `RateLimitOptions::redis` on `NestApplication`.

@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "luma",
-  "name": "nestrs",
+  "name": "Nestrs",
   "colors": {
     "primary": "#E94560",
     "light": "#FF6B80",
@@ -21,7 +21,6 @@
           {
             "group": "Get Started",
             "pages": [
-              "index",
               "introduction",
               "quickstart",
               "cli"
@@ -43,7 +42,8 @@
               "guides/security",
               "guides/versioning",
               "guides/observability",
-              "guides/testing"
+              "guides/testing",
+              "guides/recipes"
             ]
           },
           {
@@ -68,5 +68,10 @@
         ]
       }
     ]
-  }
+  },
+  "seo": {
+    "indexing": "all"
+  },
+  "favicon": "/images/nestrs.png",
+  "description": "Nestrs gives you the NestJS developer experience — modules, controllers, dependency injection, guards, pipes, interceptors — all written in Rust on top of Axum and Tower. You get compile-time safety, explicit typing, and async-first performance without giving up the structured architecture that makes large codebases maintainable."
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "luma",
-  "name": "nestrs",
+  "name": "Nestrs",
   "colors": {
     "primary": "#E94560",
     "light": "#FF6B80",
@@ -67,5 +67,10 @@
         ]
       }
     ]
+  },
+  "favicon": "/images/nestrs.png",
+  "logo": "/images/nestrs.png",
+  "seo": {
+    "indexing": "all"
   }
 }

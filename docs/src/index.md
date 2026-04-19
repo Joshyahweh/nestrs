@@ -1,12 +1,12 @@
 # nestrs
 
-**New to the framework?** Start with [**First steps**](first-steps.md) (minimal app, CLI, where to read next). Coming from **NestJS**? Read the [**NestJS → nestrs migration guide**](nestjs-migration.md). For Nest’s *custom decorators* mapped to Rust macros and metadata, see [**Custom decorators**](custom-decorators.md). For **scopes**, **lifecycle**, **dynamic modules**, **`ModuleRef`**, **discovery**, **factories**, and **circular dependencies**, see [**Fundamentals**](fundamentals.md). For **OpenAPI** schemas (**utoipa** / **okapi** / manual `components`) and **Swagger security** (including **`#[roles]`** inference), see [**OpenAPI & HTTP**](openapi-http.md). For **GraphQL** scope, **WebSocket** error semantics vs HTTP filters, **micro** guard/pipe parity, **wire** golden tests, and **gRPC** usage, see [**GraphQL, WebSockets & microservices DX**](graphql-ws-micro-dx.md).
+**New to the framework?** Start with [**First steps**](first-steps.md) (minimal app, CLI, where to read next). For **Postgres/MySQL/SQLite + Prisma**, **MongoDB**, **GraphQL**, and **gRPC** wiring in one place, see [**Backend stack recipes**](backend-recipes.md). Coming from **NestJS**? Read the [**NestJS → nestrs migration guide**](nestjs-migration.md). For Nest’s *custom decorators* mapped to Rust macros and metadata, see [**Custom decorators**](custom-decorators.md). For **scopes**, **lifecycle**, **dynamic modules**, **`ModuleRef`**, **discovery**, **factories**, and **circular dependencies**, see [**Fundamentals**](fundamentals.md). For **OpenAPI** schemas (**utoipa** / **okapi** / manual `components`) and **Swagger security** (including **`#[roles]`** inference), see [**OpenAPI & HTTP**](openapi-http.md). For **GraphQL** scope, **WebSocket** error semantics vs HTTP filters, **micro** guard/pipe parity, **wire** golden tests, and **gRPC** usage, see [**GraphQL, WebSockets & microservices DX**](graphql-ws-micro-dx.md).
 
 ## How this book is organized
 
 | Section | Chapters | Best for |
 |---------|----------|----------|
-| **Onboarding** | [First steps](first-steps.md), [CLI](cli.md) | Running your first server and generators. |
+| **Onboarding** | [First steps](first-steps.md), [Backend stack recipes](backend-recipes.md), [CLI](cli.md) | Running your first server, stack-specific procedures, generators. |
 | **Nest → Rust** | [NestJS migration](nestjs-migration.md), [Custom decorators](custom-decorators.md), [Fundamentals](fundamentals.md) | Teams porting modules, DI, and route style from NestJS. |
 | **Platform** | [Observability](observability.md), [Production](production.md), [Ecosystem modules](ecosystem.md) | Metrics, tracing, cache/schedule/queues/i18n. |
 | **APIs & protocols** | [OpenAPI & HTTP](openapi-http.md), [Microservices](microservices.md), [GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md) | HTTP docs, messaging, GraphQL/WS. |

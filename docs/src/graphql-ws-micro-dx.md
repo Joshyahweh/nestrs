@@ -60,6 +60,7 @@ Enable **`microservices`** + **`microservices-grpc`** on **`nestrs`**.
 
 ## See also
 
+- [Backend stack recipes](backend-recipes.md) — procedural REST / GraphQL / gRPC × Postgres + Prisma or MongoDB  
 - [API cookbook](appendix-api-cookbook.md) — `enable_graphql` pointer (async-graphql `Schema` required)  
 - [Microservices](microservices.md) (includes `MICROSERVICES.md`)
 - [Security](security.md)

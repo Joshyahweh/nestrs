@@ -2,6 +2,7 @@
 
 - [Introduction](index.md)
 - [First steps](first-steps.md)
+- [Backend stack recipes](backend-recipes.md)
 - [NestJS → nestrs migration](nestjs-migration.md)
 - [Custom decorators (Nest → Rust)](custom-decorators.md)
 - [Fundamentals (DI, scopes, lifecycle)](fundamentals.md)

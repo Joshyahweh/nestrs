@@ -58,3 +58,6 @@ __pycache__/
 # cargo-fuzz
 **/fuzz/artifacts/
 **/fuzz/corpus/
+
+
+rust_out

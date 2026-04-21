@@ -1,0 +1,188 @@
+---
+title: "Schedule recurring tasks in nestrs"
+description: "ScheduleModule runs cron jobs and interval tasks inside nestrs. Declare scheduled work with #[cron] and #[interval] macros on a #[schedule_routes] impl block."
+---
+
+`ScheduleModule` brings recurring background tasks into your nestrs application without relying on the OS cron daemon or an external scheduler. It is backed by `tokio-cron-scheduler` and starts automatically when your app calls `listen`. Declare task handlers with `#[cron("...")]` or `#[interval(ms)]` on a `#[schedule_routes]` impl block, register the service as a provider, and import `ScheduleModule::for_root()`.
+
+<Note>
+`ScheduleModule` is designed for app-local tasks — work that belongs in the same process as your HTTP server. It is not a distributed scheduler. For durable, multi-instance job queues, see `QueuesModule`.
+</Note>
+
+## Enable the feature
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["schedule"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+## Register ScheduleModule
+
+Import `ScheduleModule::for_root()` and add your task provider to `providers`. The `ScheduleRuntime` is automatically exported by the module and manages the underlying scheduler lifecycle.
+
+```rust
+use nestrs::prelude::*;
+
+#[module(
+    imports = [ScheduleModule::for_root()],
+    providers = [TasksService],
+)]
+struct AppModule;
+```
+
+## Declare scheduled tasks
+
+Annotate an `#[injectable]` struct with `#[schedule_routes]` and mark individual async methods with `#[cron("...")]` or `#[interval(ms)]`.
+
+```rust
+use nestrs::prelude::*;
+
+#[injectable]
+struct TasksService;
+
+#[schedule_routes]
+impl TasksService {
+    #[cron("0 * * * * *")]
+    async fn run_every_minute(&self) {
+        println!("tick: {}", chrono::Utc::now());
+    }
+
+    #[interval(30_000)]
+    async fn run_every_30s(&self) {
+        println!("30s heartbeat");
+    }
+}
+```
+
+## Starting the scheduler
+
+The scheduler starts when `NestApplication::listen` (or `listen_graceful`) is called. Wire it all together in `main`:
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .listen(3000)
+        .await;
+}
+```
+
+`ScheduleRuntime` also implements `on_application_shutdown`, so it shuts the scheduler down cleanly when the process exits via `listen_graceful`.
+
+## Cron expressions
+
+nestrs uses the six-field `tokio-cron-scheduler` format:
+
+```
+sec  min  hour  day-of-month  month  day-of-week
+```
+
+<CodeGroup>
+
+```rust Every minute
+#[cron("0 * * * * *")]
+async fn every_minute(&self) { /* ... */ }
+```
+
+```rust Every day at midnight
+#[cron("0 0 0 * * *")]
+async fn daily_cleanup(&self) { /* ... */ }
+```
+
+```rust Every weekday at 9am
+#[cron("0 0 9 * * Mon-Fri")]
+async fn morning_report(&self) { /* ... */ }
+```
+
+```rust Every 15 minutes
+#[cron("0 */15 * * * *")]
+async fn metrics_flush(&self) { /* ... */ }
+```
+
+</CodeGroup>
+
+## Interval tasks
+
+`#[interval(ms)]` takes a millisecond count as a literal integer. Use it for tasks that should fire at a fixed rate rather than at wall-clock times.
+
+```rust
+#[schedule_routes]
+impl TasksService {
+    #[interval(5_000)]
+    async fn every_5_seconds(&self) {
+        // poll an upstream service, refresh a cache entry, etc.
+    }
+
+    #[interval(60_000)]
+    async fn every_minute(&self) {
+        // flush in-memory metrics
+    }
+}
+```
+
+## ScheduleRuntime
+
+`ScheduleRuntime` is the provider that owns the `tokio_cron_scheduler::JobScheduler`. You can inject it if you need to inspect or extend the scheduler at runtime, but most applications only interact with it indirectly through `ScheduleModule::for_root()`.
+
+```rust
+use nestrs::prelude::*;
+use nestrs::schedule::ScheduleRuntime;
+use std::sync::Arc;
+
+#[injectable]
+struct AdminService {
+    runtime: Arc<ScheduleRuntime>,
+}
+
+impl AdminService {
+    pub async fn shutdown_scheduler(&self) {
+        self.runtime.shutdown().await;
+    }
+}
+```
+
+## Combining scheduled tasks with HTTP controllers
+
+`ScheduleModule` and HTTP controllers live in the same module graph. Scheduled tasks can share providers — inject a `CacheService` or `PrismaService` into your `TasksService` the same way you would in a controller.
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+struct TasksService {
+    cache: Arc<CacheService>,
+}
+
+#[schedule_routes]
+impl TasksService {
+    #[cron("0 */5 * * * *")]
+    async fn refresh_cache(&self) {
+        self.cache
+            .set_json("hot_data", serde_json::json!({}), None)
+            .await;
+    }
+}
+
+#[module(
+    imports = [
+        CacheModule::register(CacheOptions::in_memory()),
+        ScheduleModule::for_root(),
+    ],
+    providers = [TasksService],
+    controllers = [AppController],
+)]
+struct AppModule;
+```
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---------|---------------|
+| Tasks never run | Confirm `ScheduleModule::for_root()` is in `imports` and `TasksService` is in `providers`. The scheduler only starts when `listen` is called. |
+| "feature not enabled" | Add `schedule` to `features` in `Cargo.toml`. |
+| Cron expression parse error | Use the six-field format (seconds as the first field). Five-field standard cron expressions are not supported. |
+| Tasks stop after first error | Panics inside a scheduled task can bring down the tokio task. Wrap task bodies in `catch_unwind` or use `Result`-returning tasks and log errors explicitly. |

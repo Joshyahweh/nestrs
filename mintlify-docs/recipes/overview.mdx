@@ -1,0 +1,56 @@
+---
+title: "Backend stack recipes"
+description: "Choose a recipe for REST + Prisma, MongoDB, GraphQL, gRPC microservices, message brokers, and event-driven patterns. Copy-paste Cargo.toml, bootstrap, and CRUD examples."
+---
+
+These **recipes** mirror the nestrs **[mdBook chapter](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/backend-recipes.md)** (`docs/src/backend-recipes.md`) with **Mintlify-first** layout—each recipe page adds **production-oriented** CRUD, broker, and event-driven examples (layering, idempotency, outbox, DLQ, multi-tenant filters) and links back to the canonical source.
+
+<CardGroup cols={2}>
+  <Card title="Recipe A — REST + Prisma" icon="database" href="/recipes/rest-prisma">
+    PostgreSQL/MySQL/SQLite, `PrismaService`, `prisma_model!`, controllers, REST CRUD.
+  </Card>
+  <Card title="Recipe B — REST + MongoDB" icon="leaf" href="/recipes/rest-mongo">
+    `MongoModule`, BSON collections, indexes, upserts, typed `_id`.
+  </Card>
+  <Card title="Recipe C — GraphQL + Prisma" icon="share-nodes" href="/recipes/graphql-prisma">
+    `async-graphql`, schema limits, mutations, CRUD resolvers.
+  </Card>
+  <Card title="Recipe D — GraphQL + MongoDB" icon="diagram-project" href="/recipes/graphql-mongo">
+    Single-file GraphQL server, `MongoService`, mutations on BSON docs.
+  </Card>
+  <Card title="Recipe E — gRPC micro + Prisma" icon="bolt" href="/recipes/grpc-microservice">
+    `#[micro_routes]`, JSON-wire gRPC, hybrid HTTP + micro.
+  </Card>
+  <Card title="Recipe F — Message brokers" icon="tower-cell" href="/recipes/message-brokers">
+    NATS, Redis, RabbitMQ, Kafka clients; `NestFactory::create_microservice_*`.
+  </Card>
+  <Card title="Recipe G — Event-driven" icon="satellite-dish" href="/recipes/event-driven">
+    `emit` vs `send`, `EventBus`, `#[on_event]`, outbox, CQRS hints.
+  </Card>
+</CardGroup>
+
+## How to use this tab
+
+<Steps>
+  <Step title="Pick your data plane">
+    Relational SQL → **Recipe A** or **C**. Document store → **B** or **D**. Service RPC → **E**, then **F**/**G** for brokers and events.
+  </Step>
+  <Step title="Align features in Cargo.toml">
+    Exactly **one** SQL backend on `nestrs-prisma` (`sqlx-postgres`, `sqlx-mysql`, or `sqlx-sqlite`). Enable `mongo` / `graphql` / `microservices*` only when needed.
+  </Step>
+  <Step title="Copy bootstrap first">
+    Each recipe page leads with **`PrismaModule::for_root*`** or **`MongoModule::for_root`** **before** `NestFactory::create::<AppModule>()`.
+  </Step>
+</Steps>
+
+## Related docs
+
+| Topic | Where |
+|-------|--------|
+| Full prose + every subsection anchor | **[`backend-recipes.md` (repo)](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/backend-recipes.md)** |
+| Micro transports & JSON wire | [Microservices](/guides/microservices) |
+| nestrs-prisma DDL & `prisma_model!` | **[nestrs-prisma README](https://github.com/Joshyahweh/nestrs/tree/main/nestrs-prisma)** |
+
+<Note>
+  CI and local builds often use **`docs/`** mdBook (`mdbook build`). This Mintlify **Recipes** tab is curated for onboarding; drift is resolved by linking the repo chapter as source of truth.
+</Note>

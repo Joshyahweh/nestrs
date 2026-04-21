@@ -1,0 +1,135 @@
+{
+  "projectType": "framework",
+  "projectName": "nestrs",
+  "projectDescription": "A NestJS-inspired API framework for Rust built on Axum and Tower, providing modules, controllers, dependency injection, and a rich middleware pipeline.",
+  "theme": "luma",
+  "primaryColor": "#E8343A",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/modules",
+              "concepts/controllers",
+              "concepts/providers",
+              "concepts/dependency-injection",
+              "concepts/middleware-pipeline"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/validation",
+              "guides/security",
+              "guides/observability",
+              "guides/api-versioning",
+              "guides/microservices",
+              "guides/graphql-websockets"
+            ]
+          },
+          {
+            "group": "Ecosystem",
+            "pages": [
+              "ecosystem/overview",
+              "ecosystem/database",
+              "ecosystem/caching",
+              "ecosystem/scheduling",
+              "ecosystem/openapi"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/overview",
+              "cli/generate"
+            ]
+          },
+          {
+            "group": "Migration",
+            "pages": [
+              "migration/from-nestjs"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Application",
+            "pages": [
+              "api/nest-factory",
+              "api/nest-application"
+            ]
+          },
+          {
+            "group": "Macros",
+            "pages": [
+              "api/macros/routing",
+              "api/macros/di",
+              "api/macros/validation"
+            ]
+          },
+          {
+            "group": "Crates",
+            "pages": [
+              "api/crates/nestrs-core",
+              "api/crates/nestrs-microservices",
+              "api/crates/nestrs-openapi"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "NestJS-style module/controller/provider architecture",
+    "Attribute macros for HTTP routing (#[get], #[post], #[put], #[delete], etc.)",
+    "Dependency injection with singleton, transient, and request scopes",
+    "DTO validation pipeline with class-validator-style ergonomics",
+    "Cross-cutting middleware: guards, pipes, interceptors, exception filters",
+    "Built-in security: CORS, CSRF protection, security headers, rate limiting",
+    "Observability: Prometheus metrics, distributed tracing, OpenTelemetry",
+    "Microservice transports: Kafka, NATS, Redis, RabbitMQ, MQTT, gRPC",
+    "Optional extensions: GraphQL, WebSockets, OpenAPI/Swagger UI",
+    "CLI scaffold tool (nestrs-scaffold) for project and code generation",
+    "API versioning (URI, header, media type)",
+    "Prisma-style database integration via nestrs-prisma"
+  ],
+  "publicApiSurface": [
+    "NestFactory::create::<M>()",
+    "NestFactory::create_microservice::<M>(options)",
+    "NestApplication::set_global_prefix()",
+    "NestApplication::enable_cors(CorsOptions)",
+    "NestApplication::use_security_headers(SecurityHeaders)",
+    "NestApplication::use_rate_limit(RateLimitOptions)",
+    "NestApplication::enable_metrics(path)",
+    "NestApplication::enable_readiness_check(path, indicators)",
+    "NestApplication::listen_graceful(port)",
+    "#[module(controllers = [...], providers = [...])]",
+    "#[controller(prefix = \"/path\")]",
+    "#[routes(state = MyService)]",
+    "#[get(\"/path\")], #[post], #[put], #[patch], #[delete]",
+    "#[injectable], #[injectable(scope = \"request\")]",
+    "#[dto] with #[IsString], #[IsEmail], #[Length], etc.",
+    "#[use_guards(MyGuard)], #[use_pipes(MyPipe)], #[use_interceptors(MyInterceptor)]",
+    "#[micro_routes], #[message_pattern], #[event_pattern]",
+    "#[ws_gateway], #[ws_routes], #[subscribe_message]",
+    "nestrs new <name> (CLI)",
+    "nestrs generate resource <name> --transport rest|graphql|ws|grpc|microservice (CLI)",
+    "nestrs doctor (CLI)"
+  ]
+}

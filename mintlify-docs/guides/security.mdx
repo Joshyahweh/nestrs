@@ -1,0 +1,299 @@
+---
+title: "Secure your nestrs API"
+description: "Configure security headers, CORS, rate limiting, CSRF, cookies, and auth guards to harden your nestrs API. Includes a pre-production security checklist."
+---
+
+nestrs exposes security controls as explicit opt-in builder calls on `NestApplication`. Nothing is enabled by default — small services that don't need a particular control don't pay for it. This page covers each control in order of how frequently you'll need it, followed by a checklist you can run through before shipping.
+
+## Security headers
+
+Call `use_security_headers` with a `SecurityHeaders` value to inject protective HTTP headers on every response. `SecurityHeaders::default()` sets the most broadly applicable headers:
+
+```rust
+use nestrs::prelude::*;
+
+NestFactory::create::<AppModule>()
+    .use_security_headers(SecurityHeaders::default())
+    .listen(3000)
+    .await;
+```
+
+The defaults set:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-XSS-Protection: 0`
+- `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+
+For browser-facing APIs that need Helmet-style hardening, use `SecurityHeaders::helmet_like()`, which adds `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-DNS-Prefetch-Control`, `X-Download-Options`, and `X-Permitted-Cross-Domain-Policies` on top of the defaults:
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_security_headers(
+        SecurityHeaders::helmet_like()
+            .content_security_policy("default-src 'self'")
+            .hsts("max-age=63072000; includeSubDomains"),
+    )
+    .listen(3000)
+    .await;
+```
+
+<Note>
+`helmet_like()` does **not** set CSP or HSTS automatically — configure both explicitly for your deployment. nestrs runs behind a reverse proxy in most production topologies; HSTS may already be set at the edge.
+</Note>
+
+## CORS
+
+CORS is off until you call `enable_cors`. Pass a `CorsOptions` value with an explicit origin allowlist for browser clients:
+
+```rust
+use nestrs::prelude::*;
+
+NestFactory::create::<AppModule>()
+    .enable_cors(
+        CorsOptions::builder()
+            .allow_origins(["https://app.example.com"])
+            .allow_methods(["GET", "POST", "PUT", "DELETE"])
+            .allow_headers(["content-type", "authorization"])
+            .allow_credentials(true)
+            .max_age_secs(600)
+            .build(),
+    )
+    .listen(3000)
+    .await;
+```
+
+For local development only, `CorsOptions::permissive()` allows all origins. nestrs emits a `tracing` WARN at startup if you use permissive CORS when `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV` is set to `production`.
+
+<Warning>
+You cannot combine `allow_credentials(true)` with a wildcard `*` origin — browsers reject it. Always set an explicit list when you need credentialed cross-origin requests.
+</Warning>
+
+## Rate limiting
+
+`use_rate_limit` accepts a `RateLimitOptions` value. The defaults allow 100 requests per 60-second window per client IP:
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_rate_limit(
+        RateLimitOptions::builder()
+            .max_requests(200)
+            .window_secs(60)
+            .build(),
+    )
+    .listen(3000)
+    .await;
+```
+
+For shared rate limits across multiple instances, enable the `cache-redis` feature and call `.redis(url, key_prefix)`:
+
+```rust
+RateLimitOptions::builder()
+    .max_requests(500)
+    .window_secs(60)
+    .redis("redis://127.0.0.1:6379", "rl:")
+    .build()
+```
+
+## CSRF protection
+
+CSRF protection targets cookie-based browser flows. Bearer token APIs in `Authorization` headers are not CSRF-bound and do not need this.
+
+<Steps>
+  <Step title="Enable the csrf feature">
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["csrf", "cookies"] }
+```
+
+  </Step>
+  <Step title="Enable cookies and CSRF middleware">
+
+```rust
+use nestrs::prelude::*;
+
+NestFactory::create::<AppModule>()
+    .use_cookies()
+    .use_csrf_protection(CsrfProtectionConfig::default())
+    .listen(3000)
+    .await;
+```
+
+`CsrfProtectionConfig` uses a double-submit pattern: your app sets a cookie on safe requests, and the client must echo the same value in an `X-CSRF-Token` header on POST/PUT/PATCH/DELETE.
+
+  </Step>
+</Steps>
+
+If you enable `use_cookies()` or `use_session_memory()` without wiring `use_csrf_protection`, nestrs emits a `tracing` WARN at router build time. Treat this as a release blocker for any browser-facing endpoint that mutates state.
+
+## Cookies and sessions
+
+<Tabs>
+  <Tab title="Cookies only">
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_cookies()   // feature: cookies
+    .listen(3000)
+    .await;
+```
+
+  </Tab>
+  <Tab title="In-memory sessions">
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_session_memory()   // feature: session — implies cookies
+    .listen(3000)
+    .await;
+```
+
+  </Tab>
+</Tabs>
+
+Always pair cookie or session middleware with `use_csrf_protection` for any endpoint that accepts browser-originated mutations.
+
+## Guards and authentication
+
+nestrs does not bundle a JWT or Passport library. Instead, you implement `CanActivate` (HTTP guards) or `AuthStrategy` (credential-validation strategies) and compose them on controllers or individual routes.
+
+### CanActivate guard
+
+```rust
+use nestrs::prelude::*;
+use axum::http::request::Parts;
+
+pub struct AuthGuard;
+
+#[async_trait]
+impl CanActivate for AuthGuard {
+    async fn can_activate(&self, parts: &Parts) -> Result<(), GuardError> {
+        let token = parts
+            .headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| parse_authorization_bearer(v))
+            .ok_or_else(|| GuardError::unauthorized("missing token"))?;
+
+        validate_token(token)
+            .map_err(|_| GuardError::unauthorized("invalid token"))
+    }
+}
+
+#[controller(prefix = "/users")]
+#[use_guards(AuthGuard)]
+pub struct UsersController;
+```
+
+### BearerToken extractor
+
+For routes that unconditionally require a bearer token, use the `BearerToken` extractor directly — it returns `401` when the header is absent or malformed:
+
+```rust
+#[routes(state = AppState)]
+impl MeController {
+    #[get("/me")]
+    pub async fn me(BearerToken(token): BearerToken) -> String {
+        token
+    }
+}
+```
+
+Use `OptionalBearerToken` when the header is optional:
+
+```rust
+pub async fn maybe_authed(OptionalBearerToken(token): OptionalBearerToken) -> String {
+    token.unwrap_or_else(|| "anonymous".into())
+}
+```
+
+### AuthStrategyGuard
+
+`AuthStrategyGuard<S>` wraps any type that implements `AuthStrategy` and can be derived as `Default`. Wire it onto a controller or individual route with `#[use_guards]`:
+
+```rust
+pub struct JwtStrategy;
+
+impl Default for JwtStrategy {
+    fn default() -> Self { Self }
+}
+
+#[async_trait]
+impl AuthStrategy for JwtStrategy {
+    async fn validate(&self, parts: &Parts) -> Result<(), AuthError> {
+        // verify JWT from Authorization header
+        todo!()
+    }
+}
+
+#[controller(prefix = "/admin")]
+#[use_guards(AuthStrategyGuard<JwtStrategy>)]
+pub struct AdminController;
+```
+
+## Body limits and timeouts
+
+Set a maximum request body size and a per-request timeout for any public endpoint:
+
+```rust
+use std::time::Duration;
+
+NestFactory::create::<AppModule>()
+    .use_body_limit(1 * 1024 * 1024)          // 1 MiB
+    .use_request_timeout(Duration::from_secs(10))
+    .listen(3000)
+    .await;
+```
+
+## Production error sanitization
+
+By default nestrs forwards internal error details to the client. Call `enable_production_errors_from_env()` to suppress stack traces and internal messages whenever `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV` equals `production` or `prod`:
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_production_errors_from_env()
+    .listen(3000)
+    .await;
+```
+
+Call `enable_production_errors()` unconditionally if you want sanitization regardless of environment.
+
+## Pre-production checklist
+
+Run through this list before deploying a browser-facing or multi-tenant API:
+
+<AccordionGroup>
+<Accordion title="Headers and CORS">
+
+- `use_security_headers(SecurityHeaders::default())` is called, or `helmet_like()` for richer isolation.
+- CSP is set explicitly for HTML-serving endpoints.
+- `enable_cors(...)` uses an explicit origin allowlist — not `CorsOptions::permissive()`.
+- `allow_credentials(true)` is not combined with a wildcard origin.
+
+</Accordion>
+<Accordion title="CSRF and cookies">
+
+- Cookie or session flows have `use_csrf_protection(...)` wired.
+- The `csrf` Cargo feature is enabled alongside `cookies`.
+- No `tracing` WARN about missing CSRF at startup.
+
+</Accordion>
+<Accordion title="Rate limiting and timeouts">
+
+- `use_rate_limit(...)` is configured (or enforced at the edge).
+- `use_body_limit(...)` is set per endpoint class.
+- `use_request_timeout(...)` is set for public routes.
+
+</Accordion>
+<Accordion title="Errors and dependencies">
+
+- `enable_production_errors_from_env()` (or `enable_production_errors()`) is active.
+- `cargo audit` is passing locally and in CI.
+- Secrets are loaded from env / secret manager, not committed to source.
+- Logs do not contain tokens, passwords, or API keys.
+
+</Accordion>
+</AccordionGroup>
+
+The defaults for every control are listed in `docs/src/secure-defaults.md` (in the repository), which also includes the full secure-by-default matrix.

@@ -1,0 +1,144 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Nestrs",
+  "theme": "luma",
+  "colors": {
+    "primary": "#E8343A",
+    "light": "#FFC4C5",
+    "dark": "#030000"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Joshyahweh/nestrs"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/modules",
+              "concepts/controllers",
+              "concepts/providers",
+              "concepts/dependency-injection",
+              "concepts/middleware-pipeline"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/validation",
+              "guides/security",
+              "guides/observability",
+              "guides/api-versioning",
+              "guides/microservices",
+              "guides/graphql-websockets"
+            ]
+          },
+          {
+            "group": "Ecosystem",
+            "pages": [
+              "ecosystem/overview",
+              "ecosystem/database",
+              "ecosystem/caching",
+              "ecosystem/scheduling",
+              "ecosystem/openapi"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/overview",
+              "cli/generate"
+            ]
+          },
+          {
+            "group": "Migration",
+            "pages": [
+              "migration/from-nestjs"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Recipes",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "recipes/overview"
+            ]
+          },
+          {
+            "group": "Backend stacks",
+            "pages": [
+              "recipes/rest-prisma",
+              "recipes/rest-mongo",
+              "recipes/graphql-prisma",
+              "recipes/graphql-mongo",
+              "recipes/grpc-microservice",
+              "recipes/message-brokers",
+              "recipes/event-driven"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Application",
+            "pages": [
+              "api/nest-factory",
+              "api/nest-application"
+            ]
+          },
+          {
+            "group": "Macros",
+            "pages": [
+              "api/macros/routing",
+              "api/macros/di",
+              "api/macros/validation"
+            ]
+          },
+          {
+            "group": "Crates",
+            "pages": [
+              "api/crates/nestrs-core",
+              "api/crates/nestrs-microservices",
+              "api/crates/nestrs-openapi"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "description": "Nestrs brings the familiar NestJS module/controller/provider model to Rust with full Axum and Tower performance. Build fast, structured APIs in Rust.",
+  "favicon": "/images/nestrs.png",
+  "seo": {
+    "indexing": "all"
+  },
+  "interaction": {
+    "drilldown": false
+  },
+  "metadata": {
+    "timestamp": false
+  },
+  "background": {
+    "color": {
+      "dark": "#030000"
+    }
+  }
+}

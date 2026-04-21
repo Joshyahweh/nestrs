@@ -1,0 +1,95 @@
+---
+title: "nestrs ecosystem: optional modules and features"
+description: "nestrs optional modules cover caching, scheduling, queues, i18n, and databases. Enable each with a Cargo feature flag and register it like any other module."
+---
+
+nestrs keeps its core lean. Everything beyond the HTTP layer — caching, recurring tasks, queues, i18n, SQL databases, MongoDB, OpenAPI, and more — lives in optional feature flags or companion crates. You opt in explicitly: add the feature to `Cargo.toml`, import the matching module, and wire it into your `#[module]` declaration the same way you would any other provider.
+
+## Available modules
+
+<CardGroup cols={2}>
+  <Card title="CacheModule" icon="database" href="/ecosystem/caching">
+    In-process key/value cache with optional TTL. Swap the in-memory backend for Redis by enabling
+    the `cache-redis` feature. Exposes `CacheService` with `get`, `set`, `del`, and `ttl` operations.
+  </Card>
+  <Card title="ScheduleModule" icon="clock" href="/ecosystem/scheduling">
+    Run cron jobs and interval tasks inside your process. Backed by `tokio-cron-scheduler`. Declare
+    tasks with `#[cron("...")]` or `#[interval(ms)]` on a `#[schedule_routes]` impl block.
+  </Card>
+  <Card title="QueuesModule" icon="list" href="https://docs.rs/nestrs">
+    In-process baseline queue (Bull-style API). Enable the `queues` feature, declare processors with
+    `#[queue_processor("NAME")]`, and enqueue jobs via `QueuesService`.
+  </Card>
+  <Card title="I18nModule" icon="globe" href="https://docs.rs/nestrs">
+    Locale-aware responses. Call `NestApplication::use_i18n()` to activate locale detection from
+    query string or `Accept-Language`, then translate via catalogs in `I18nService`.
+  </Card>
+  <Card title="SqlxDatabaseModule" icon="server" href="/ecosystem/database">
+    Direct SQLx access via `AnyPool`. Enables `SqlxDatabaseService` with a shared pool and a
+    `ping` helper. Lighter than nestrs-prisma if you only need raw SQL.
+  </Card>
+  <Card title="nestrs-prisma" icon="table" href="/ecosystem/database">
+    Prisma-style schema-driven access. Ships `PrismaModule`, `PrismaService`, and the
+    `prisma_model!` macro for declarative repositories — no separate codegen step required.
+  </Card>
+  <Card title="MongoModule" icon="leaf" href="/ecosystem/database">
+    Official `mongodb` driver integration. Bootstrap with `MongoModule::for_root(uri)` and inject
+    `MongoService` to get typed collections and a `ping` helper.
+  </Card>
+  <Card title="nestrs-openapi" icon="book" href="/ecosystem/openapi">
+    OpenAPI 3.1 JSON document and Swagger UI. Auto-discovers routes from the `RouteRegistry`.
+    Customize with `#[openapi(summary, tag, responses)]` and `OpenApiOptions`.
+  </Card>
+</CardGroup>
+
+## Feature flag reference
+
+Add features to the `nestrs` dependency in your `Cargo.toml`. Features compose: you can combine any of them in a single project.
+
+| Feature | Enables |
+|---------|---------|
+| `cache` | `CacheModule`, `CacheService`, `CacheOptions::in_memory()` |
+| `cache-redis` | Redis backend for `CacheModule` (requires `cache`) |
+| `schedule` | `ScheduleModule`, `ScheduleRuntime`, `#[cron]`, `#[interval]` |
+| `queues` | `QueuesModule`, `QueuesService`, `#[queue_processor]` |
+| `database-sqlx` | `SqlxDatabaseModule`, `SqlxDatabaseService` |
+| `mongo` | `MongoModule`, `MongoService` |
+| `openapi` | `enable_openapi()` / `enable_openapi_with_options()` on `NestApplication` |
+| `graphql` | `enable_graphql()` on `NestApplication` (`async-graphql` backed) |
+| `microservices` | TCP and gRPC microservice transports |
+| `mvc` | Server-side template rendering |
+| `files` | File upload / static file serving helpers |
+| `http-client` | HTTP client utilities |
+
+<Note>
+`nestrs-prisma` is a separate crate, not a feature flag on `nestrs`. Add it as its own dependency with one of `sqlx-postgres`, `sqlx-mysql`, or `sqlx-sqlite`.
+</Note>
+
+## How to enable a module
+
+All optional modules follow the same pattern: enable the Cargo feature, then import the `DynamicModule` result in `#[module(imports = [...])]`.
+
+```toml
+# Cargo.toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["cache", "schedule"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust
+use nestrs::prelude::*;
+
+#[module(
+    imports = [
+        CacheModule::register(CacheOptions::in_memory()),
+        ScheduleModule::for_root(),
+    ],
+    providers = [AppService],
+    controllers = [AppController],
+)]
+struct AppModule;
+```
+
+<Tip>
+Run `nestrs doctor` in the CLI to check that your feature flags match what each module expects. Mismatched features usually produce "feature not enabled" link-time errors.
+</Tip>

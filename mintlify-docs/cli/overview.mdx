@@ -1,0 +1,269 @@
+---
+title: "nestrs CLI: scaffold and manage projects"
+description: "Install nestrs-scaffold, create new projects with nestrs new, generate code with nestrs generate, and diagnose your setup with nestrs doctor."
+---
+
+The nestrs CLI is published to crates.io as **`nestrs-scaffold`** — the binary you run is still `nestrs`. It scaffolds new single-crate applications, generates source files, and runs a lightweight diagnostic against your toolchain and `Cargo.toml`. Unlike the Nest CLI, it stays entirely within Cargo-native workflows and does not add Node-style scripts, monorepo management, or library packaging.
+
+## Install
+
+<Steps>
+  <Step title="Install from crates.io">
+    ```bash
+    cargo install nestrs-scaffold
+    ```
+  </Step>
+  <Step title="Verify the binary">
+    ```bash
+    nestrs --help
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The crates.io package is `nestrs-scaffold` because the name `nestrs-cli` is already taken. The installed binary is `nestrs` in either case.
+</Note>
+
+If you are working inside a clone of the nestrs repository, the workspace defines a Cargo alias so you can skip the global install:
+
+```bash
+cargo nestrs doctor
+cargo nestrs generate resource items --transport rest --path src
+```
+
+This alias is configured in `.cargo/config.toml` as `run -p nestrs-scaffold --bin nestrs --`.
+
+## Available commands
+
+| Command | Purpose |
+|---------|---------|
+| `nestrs new <name>` | Create a new single-crate app with `Cargo.toml`, `src/main.rs`, starter module/controller, `.env`, `.env.example`, `Dockerfile`, `.gitignore`, and `README.md`. |
+| `nestrs generate` / `nestrs g` | Generate resources, services, controllers, modules, DTOs, guards, pipes, filters, interceptors, strategies, resolvers, gateways, microservices, and transports. |
+| `nestrs doctor` | Print `rustc` and `cargo` versions, scan `Cargo.toml` for nestrs feature flags, and heuristically check `src/**/*.rs` for common misconfigurations. |
+
+## nestrs new
+
+`nestrs new <name>` creates a ready-to-run single-crate application. Run it from any directory — it creates a new subdirectory named after your project.
+
+```bash
+nestrs new billing-api
+cd billing-api
+cargo run
+```
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--no-git` | off | Skip `git init` after creating the project. |
+| `--strict` | off | Prepend `#![deny(unsafe_code)]` to `src/main.rs`. |
+| `--package-manager cargo` | `cargo` | Only `cargo` is supported. Other values are rejected. |
+
+<Tip>
+  Use `--dry-run` on generators before writing to an existing tree — but `nestrs new` always creates a fresh directory, so there is no equivalent flag for it.
+</Tip>
+
+### Generated project structure
+
+After `nestrs new billing-api`, your project contains:
+
+```
+billing-api/
+├── Cargo.toml
+├── Dockerfile
+├── README.md
+├── .env
+├── .env.example
+├── .gitignore
+└── src/
+    └── main.rs
+```
+
+<AccordionGroup>
+  <Accordion title="Cargo.toml">
+    ```toml
+    [package]
+    name = "billing-api"
+    version = "0.1.0"
+    edition = "2021"
+
+    [dependencies]
+    nestrs = "0.1"
+    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+    serde = { version = "1", features = ["derive"] }
+
+    [profile.release]
+    opt-level = 3
+    lto = "thin"
+    codegen-units = 1
+    strip = "symbols"
+    panic = "abort"
+    ```
+  </Accordion>
+
+  <Accordion title="src/main.rs">
+    The generated entry point wires up a `AppModule` with a single controller and service, a health check endpoint, metrics, and request tracing. The `--strict` flag adds `#![deny(unsafe_code)]` at the top.
+
+    ```rust
+    use nestrs::prelude::*;
+
+    #[dto]
+    pub struct PingDto {
+        #[IsString]
+        pub message: String,
+    }
+
+    #[controller(prefix = "/")]
+    pub struct AppController;
+
+    impl AppController {
+        #[get("/")]
+        pub async fn root() -> &'static str {
+            "Hello from nestrs"
+        }
+    }
+
+    #[derive(Default)]
+    #[injectable]
+    pub struct AppService;
+
+    impl_routes!(AppController, state AppService => [
+        GET "/" with () => AppController::root,
+    ]);
+
+    #[module(
+        controllers = [AppController],
+        providers = [AppService],
+    )]
+    pub struct AppModule;
+
+    #[tokio::main]
+    async fn main() {
+        let port = std::env::var("PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(3000);
+
+        NestFactory::create::<AppModule>()
+            .set_global_prefix("api")
+            .use_request_id()
+            .use_request_tracing(RequestTracingOptions::builder().skip_paths(["/metrics"]))
+            .enable_metrics("/metrics")
+            .enable_health_check("/health")
+            // OpenAPI + Swagger UI (add `features = ["openapi"]` on `nestrs` in Cargo.toml):
+            // .enable_openapi()
+            .enable_production_errors_from_env()
+            .listen_graceful(port)
+            .await;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title=".env and .env.example">
+    Both files are created with identical default content:
+
+    ```bash
+    PORT=3000
+    NESTRS_ENV=development
+    RUST_LOG=info
+    DATABASE_URL=file:./dev.db
+    ```
+
+    `.env` is listed in `.gitignore` so it stays local. Commit `.env.example` to source control.
+  </Accordion>
+
+  <Accordion title="Dockerfile">
+    A two-stage Docker build targeting `debian:bookworm-slim`. The binary name matches your project name.
+
+    ```dockerfile
+    FROM rust:1.75 AS builder
+    WORKDIR /app
+    COPY Cargo.toml Cargo.lock* ./
+    COPY src ./src
+    RUN cargo build --release
+
+    FROM debian:bookworm-slim
+    RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+    COPY --from=builder /app/target/release/billing-api /usr/local/bin/billing-api
+    ENV NESTRS_ENV=production
+    ENV PORT=3000
+    EXPOSE 3000
+    HEALTHCHECK CMD curl -f http://localhost:3000/health || exit 1
+    CMD ["/usr/local/bin/billing-api"]
+    ```
+  </Accordion>
+
+  <Accordion title="README.md">
+    A starter README with development, production, and Docker instructions. The app, health, and metrics URLs are pre-filled based on the generated `main.rs` defaults:
+
+    - App: `http://127.0.0.1:3000/api`
+    - Health: `http://127.0.0.1:3000/health`
+    - Metrics: `http://127.0.0.1:3000/metrics`
+  </Accordion>
+</AccordionGroup>
+
+## nestrs doctor
+
+`nestrs doctor` is a lightweight sanity check you run from the root of a nestrs crate (where `Cargo.toml` lives). It does not replace `cargo check` or your CI matrix — use it as a first-pass hint list.
+
+```bash
+nestrs doctor
+```
+
+### What it checks
+
+<Steps>
+  <Step title="Toolchain versions">
+    Runs `rustc --version` and `cargo --version` and prints the results.
+  </Step>
+  <Step title="Cargo.toml feature flags">
+    Reads the local `Cargo.toml` and reports which nestrs feature flags it detects: `openapi`, `otel`, `ws`, `graphql`, and `microservices`. It also queries `cargo metadata` to count the total resolved feature flags on the `nestrs` package.
+  </Step>
+  <Step title="Source file heuristics">
+    Recursively scans `src/**/*.rs` and flags common mismatches, such as:
+    - Calling `enable_openapi()` without the `openapi` feature enabled in `Cargo.toml`
+    - Referencing `configure_tracing_opentelemetry` without the `otel` feature
+    - Calling `enable_graphql` without the `graphql` feature
+    - Using `nestrs_openapi::` paths without the feature enabled
+  </Step>
+</Steps>
+
+Example output when no issues are found:
+
+```
+nestrs doctor
+
+rustc: rustc 1.78.0 (9b00956e5 2024-04-29)
+cargo: cargo 1.78.0 (54d8815d0 2024-04-09)
+
+Cargo.toml (nestrs-related hints):
+  - `nestrs` dependency found.
+    Features detected (string heuristic): openapi=false, otel=false, ws=false, graphql=false, microservices=false
+
+Source scan (heuristic):
+  - No obvious feature mismatches from quick scan.
+
+Done. This does not replace `cargo check` or security audits.
+```
+
+<Warning>
+  `nestrs doctor` uses string heuristics on your source files — it can produce false positives and will miss issues that only appear at compile time. Always follow up with `cargo check` and your full CI pipeline.
+</Warning>
+
+## Scope compared to the Nest CLI
+
+The Nest CLI covers application lifecycle management, monorepos, publishable library packages, and npm-style scripts. nestrs intentionally stays closer to Cargo and normal Rust workflows.
+
+<Note>
+  The nestrs CLI focuses on **file and code generation** and a **single-crate** `nestrs new` skeleton. It does not replace Cargo for workspaces, libraries, or task runners.
+</Note>
+
+| Nest CLI area | nestrs | What to use instead |
+|---------------|--------|---------------------|
+| `nest new` / app skeleton | Partial | `nestrs new` — single crate, opinionated starter. |
+| `nest generate` | Partial | `nestrs generate` — overlapping generators; naming and file trees differ. |
+| Workspaces (multiple apps/libs) | No | [Cargo workspaces](https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html) with `[workspace].members`. |
+| Publishable library packages | No | `cargo new --lib`, crates.io, path/git dependencies. |
+| Scripts (`npm run …`) | No | `cargo run --bin <name>`, [cargo-make](https://github.com/sagiegurari/cargo-make), [just](https://github.com/casey/just), or shell scripts. |
+| `nest build` / `nest start` | No | `cargo build`, `cargo run`; production: binary + process manager or container. |
+| CLI plugins | No | Fork or wrap `nestrs-scaffold`, or generate with your own templates. |

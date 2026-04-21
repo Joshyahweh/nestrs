@@ -1,0 +1,293 @@
+---
+title: "GraphQL and WebSocket APIs with nestrs"
+description: "Add a GraphQL endpoint with nestrs-graphql and async-graphql, or build real-time WebSocket gateways using nestrs-ws, #[ws_gateway], and #[subscribe_message]."
+---
+
+nestrs provides two optional protocol extensions: the `graphql` feature mounts a GraphQL endpoint on the same Axum router as your REST controllers, and the `ws` feature adds WebSocket gateways with the same `#[injectable]` provider injection and guard/pipe/interceptor cross-cutting you use everywhere else.
+
+## GraphQL
+
+### Setup
+
+Add the `graphql` feature to your `nestrs` dependency and add `async-graphql` and `nestrs-graphql`:
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["graphql"] }
+async-graphql = "7"
+```
+
+The `nestrs-graphql` crate is re-exported as `nestrs::graphql` when the feature is enabled.
+
+### Defining a schema
+
+Define your query and mutation types using `async-graphql` attributes and build a `Schema`. Then pass it to `enable_graphql`:
+
+```rust
+use nestrs::prelude::*;
+use async_graphql::{Object, Schema, EmptyMutation, EmptySubscription};
+
+pub struct QueryRoot;
+
+#[Object]
+impl QueryRoot {
+    async fn hello(&self) -> &str {
+        "Hello from nestrs GraphQL"
+    }
+
+    async fn add(&self, a: i32, b: i32) -> i32 {
+        a + b
+    }
+}
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let schema = Schema::build(QueryRoot, EmptyMutation, EmptySubscription)
+        .finish();
+
+    NestFactory::create::<AppModule>()
+        .enable_graphql(schema)
+        .listen(3000)
+        .await;
+}
+```
+
+This mounts `GET /graphql` (GraphQL Playground) and `POST /graphql` (query endpoint) on the same router as your REST routes. The global prefix and URI versioning settings apply to the GraphQL path the same way they apply to REST controllers.
+
+### Custom path and options
+
+Use `enable_graphql_with_path` to change the mount point:
+
+```rust
+.enable_graphql_with_path(schema, "/api/graphql")
+```
+
+Use `enable_graphql_with_options` to control Playground availability and other HTTP-surface settings:
+
+```rust
+use nestrs::graphql::GraphQlHttpOptions;
+
+.enable_graphql_with_options(
+    schema,
+    "/graphql",
+    GraphQlHttpOptions::default().disable_playground(),
+)
+```
+
+### Mutations and resolvers
+
+```rust
+use async_graphql::{Object, InputObject, Schema, SimpleObject};
+
+#[derive(InputObject)]
+pub struct CreateUserInput {
+    pub email: String,
+    pub name: String,
+}
+
+#[derive(SimpleObject)]
+pub struct User {
+    pub id: i64,
+    pub email: String,
+    pub name: String,
+}
+
+pub struct MutationRoot;
+
+#[Object]
+impl MutationRoot {
+    async fn create_user(&self, input: CreateUserInput) -> User {
+        User {
+            id: 1,
+            email: input.email,
+            name: input.name,
+        }
+    }
+}
+
+let schema = Schema::build(QueryRoot, MutationRoot, EmptySubscription)
+    .finish();
+```
+
+<Note>
+Federation, schema stitching, and codegen are outside the nestrs core. Use async-graphql's federation support and Apollo Router or GraphOS to compose subgraphs. nestrs exposes a single `/graphql` endpoint — treat it as one subgraph in your platform.
+</Note>
+
+<Tip>
+For DataLoader / N+1 prevention, use async-graphql's built-in `dataloader` feature or application-level batching in resolvers. The ecosystem is the same as a standalone async-graphql server.
+</Tip>
+
+---
+
+## WebSockets
+
+### Setup
+
+Add the `ws` feature:
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["ws"] }
+```
+
+`nestrs-ws` is re-exported as `nestrs::ws` when the feature is enabled.
+
+### Wire format
+
+WebSocket frames are JSON objects with the shape `{ "event": "name", "data": <json> }`. The server sends the same format back to clients. Unknown frames and error conditions are sent to the client on the special `"error"` event name (`nestrs::ws::WS_ERROR_EVENT`).
+
+### Defining a gateway
+
+Use `#[ws_gateway]` on a struct and `#[ws_routes]` on its `impl` block. Individual message handlers are annotated with `#[subscribe_message("event-name")]`:
+
+```rust
+use nestrs::prelude::*;
+use nestrs::ws::{WsClient, WsHandshake};
+
+#[ws_gateway(path = "/ws")]
+pub struct ChatGateway;
+
+#[ws_routes]
+impl ChatGateway {
+    #[subscribe_message("message")]
+    pub async fn on_message(
+        &self,
+        client: WsClient,
+        data: serde_json::Value,
+    ) {
+        let text = data["text"].as_str().unwrap_or("");
+        let _ = client.emit("message", serde_json::json!({ "text": text }));
+    }
+
+    #[subscribe_message("ping")]
+    pub async fn on_ping(&self, client: WsClient, _data: serde_json::Value) {
+        let _ = client.emit("pong", serde_json::json!({}));
+    }
+}
+```
+
+### Emitting to a client
+
+`WsClient::emit` serializes a value and sends it as a JSON frame:
+
+```rust
+client.emit("notification", serde_json::json!({
+    "type": "order_ready",
+    "order_id": 42,
+}))?;
+```
+
+`WsClient::emit_json` sends a pre-built `serde_json::Value` directly.
+
+### Guards, pipes, and interceptors
+
+Apply cross-cutting to WebSocket handlers with the `ws`-specific attributes:
+
+```rust
+use nestrs::ws::{WsCanActivate, WsHandshake, WsGuardError};
+
+pub struct WsAuthGuard;
+
+impl Default for WsAuthGuard { fn default() -> Self { Self } }
+
+#[async_trait::async_trait]
+impl WsCanActivate for WsAuthGuard {
+    async fn can_activate_ws(
+        &self,
+        handshake: &WsHandshake,
+        _event: &str,
+        _payload: &serde_json::Value,
+    ) -> Result<(), WsGuardError> {
+        let token = handshake
+            .headers()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok());
+
+        match token {
+            Some(t) if t.starts_with("Bearer ") => Ok(()),
+            _ => Err(WsGuardError::unauthorized("missing or invalid token")),
+        }
+    }
+}
+
+#[ws_gateway(path = "/ws")]
+#[use_ws_guards(WsAuthGuard)]
+pub struct ProtectedGateway;
+```
+
+<Warning>
+WebSocket JSON frames do **not** flow through `NestApplication::use_global_exception_filter` or `HttpException`. Guard and pipe failures are sent to the client on the `"error"` event with `statusCode`, `message`, and `error` fields. There is no separate `WsExceptionFilter` trait in core today — centralize error handling by wrapping `WsGateway::on_message` or using shared guard/pipe types.
+</Warning>
+
+### Error frame shapes
+
+| Condition | Frame sent to client |
+|---|---|
+| Guard rejected | `{ "statusCode": 401, "message": "...", "error": "Unauthorized" }` |
+| Pipe rejected | `{ "statusCode": 400, "message": "...", "error": "Bad Request" }` |
+| Unknown event (generated default arm) | `{ "event": "unknown_event", "message": "unknown event" }` |
+| Invalid payload (DTO deserialize failed) | `{ "event": "...", "message": "...", "details": "..." }` |
+| Malformed wire frame | `{ "message": "invalid websocket payload (expected {event,data})" }` |
+
+All errors are delivered on `WS_ERROR_EVENT` (`"error"`).
+
+<AccordionGroup>
+  <Accordion title="Full WebSocket example">
+
+```rust
+use nestrs::prelude::*;
+use nestrs::ws::{WsClient, WsHandshake, WsCanActivate, WsGuardError};
+
+pub struct TokenGuard;
+impl Default for TokenGuard { fn default() -> Self { Self } }
+
+#[async_trait::async_trait]
+impl WsCanActivate for TokenGuard {
+    async fn can_activate_ws(
+        &self,
+        handshake: &WsHandshake,
+        _event: &str,
+        _payload: &serde_json::Value,
+    ) -> Result<(), WsGuardError> {
+        handshake
+            .headers()
+            .get("authorization")
+            .map(|_| ())
+            .ok_or_else(|| WsGuardError::unauthorized("missing token"))
+    }
+}
+
+#[ws_gateway(path = "/chat")]
+#[use_ws_guards(TokenGuard)]
+pub struct ChatGateway;
+
+#[ws_routes]
+impl ChatGateway {
+    #[subscribe_message("join")]
+    pub async fn on_join(&self, client: WsClient, data: serde_json::Value) {
+        let room = data["room"].as_str().unwrap_or("general");
+        let _ = client.emit("joined", serde_json::json!({ "room": room }));
+    }
+
+    #[subscribe_message("message")]
+    pub async fn on_message(&self, client: WsClient, data: serde_json::Value) {
+        let _ = client.emit("message", data);
+    }
+}
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .listen(3000)
+        .await;
+}
+```
+
+  </Accordion>
+</AccordionGroup>

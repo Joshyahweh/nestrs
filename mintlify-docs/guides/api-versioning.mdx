@@ -1,0 +1,153 @@
+---
+title: "Version your nestrs API routes"
+description: "nestrs supports URI, header, and media-type versioning. Annotate individual routes with #[ver] or #[version] to control which version each handler responds to."
+---
+
+nestrs supports three versioning strategies that map directly to the NestJS `VersioningType` options: URI prefix, custom request header, and `Accept` media-type negotiation. You pick one strategy per application and optionally annotate individual controllers or routes to restrict them to specific versions.
+
+## URI versioning
+
+`enable_uri_versioning` nests all your routes under a version prefix. Requests to `/v1/users` are routed exactly like requests to `/users` in an unversioned app:
+
+```rust
+use nestrs::prelude::*;
+
+#[module(controllers = [UsersController], providers = [UsersService])]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .enable_uri_versioning("v1")
+        .listen(3000)
+        .await;
+}
+```
+
+With this setup a `GET /v1/users` request matches your `UsersController` handler for `GET /users`. The version prefix is applied globally — individual controllers can narrow to a specific version with `#[version]` (see below).
+
+## Header versioning
+
+`enable_header_versioning` reads the version from a request header (default `X-API-Version`) and rewrites the internal path before routing:
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_header_versioning("X-API-Version", Some("v1".to_string()))
+    .listen(3000)
+    .await;
+```
+
+The second argument is the default version to use when the header is absent. Pass `None` to treat unversioned requests as unversioned.
+
+You can also pass a full `ApiVersioningPolicy` through `enable_api_versioning` for more control:
+
+```rust
+use nestrs::prelude::*;
+
+NestFactory::create::<AppModule>()
+    .enable_api_versioning(ApiVersioningPolicy {
+        kind: VersioningType::Header,
+        header_name: Some("X-API-Version".to_string()),
+        default_version: Some("v1".to_string()),
+    })
+    .listen(3000)
+    .await;
+```
+
+## Media-type versioning
+
+`enable_media_type_versioning` parses the version from the `Accept` header using the `version=` parameter, for example `Accept: application/vnd.api+json;version=2`:
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_media_type_versioning(Some("v1".to_string()))
+    .listen(3000)
+    .await;
+```
+
+## Per-controller versioning with #[version]
+
+Annotate a controller struct with `#[version("v2")]` to bind all its routes to that version. When URI versioning is active, only `/v2/...` requests are matched. When header or media-type versioning is active, only requests carrying that version are matched:
+
+```rust
+use nestrs::prelude::*;
+
+#[controller(prefix = "/api")]
+pub struct AppController;
+
+#[version("v2")]
+#[controller(prefix = "/api")]
+pub struct AppControllerV2;
+
+#[routes(state = AppService)]
+impl AppController {
+    #[get("/")]
+    pub async fn root() -> &'static str {
+        "Hello World v1"
+    }
+}
+
+#[routes(state = AppService)]
+impl AppControllerV2 {
+    #[get("/")]
+    pub async fn root() -> &'static str {
+        "Hello World v2"
+    }
+}
+```
+
+## Per-route versioning with #[ver]
+
+Use `#[ver("v2")]` on a single handler to make that route available only for the given version, while the rest of the controller remains at the default version:
+
+```rust
+#[routes(state = AppService)]
+impl AppController {
+    #[get("/")]
+    pub async fn root() -> &'static str {
+        "Hello World"
+    }
+
+    #[get("/feature")]
+    #[ver("v2")]
+    pub async fn versioned_feature() -> &'static str {
+        "feature-route-v2"
+    }
+}
+```
+
+## Reading the resolved version in a handler
+
+The `NestApiVersion` extractor gives you the resolved version string for the current request. Use it in guards, interceptors, or handler logic:
+
+```rust
+use nestrs::prelude::*;
+
+#[routes(state = AppState)]
+impl DiagnosticsController {
+    #[get("/version")]
+    pub async fn which_version(
+        version: Option<axum::Extension<NestApiVersion>>,
+    ) -> String {
+        version
+            .map(|v| v.0 .0.clone())
+            .unwrap_or_else(|| "unversioned".to_string())
+    }
+}
+```
+
+<Note>
+`NestApiVersion` is inserted into request extensions by the versioning middleware for header and media-type strategies. For URI versioning the version is part of the path and is not separately injected.
+</Note>
+
+## Strategy comparison
+
+| Strategy | How version is carried | Client change required |
+|---|---|---|
+| `enable_uri_versioning("v1")` | URL prefix: `/v1/users` | Update base URL |
+| `enable_header_versioning("X-API-Version", ...)` | Request header | Add header |
+| `enable_media_type_versioning(...)` | `Accept` header param: `version=2` | Modify `Accept` |
+
+<Tip>
+URI versioning is the most cache-friendly strategy since each version has a distinct URL. Header and media-type versioning keep URLs stable but require clients to set the right header on every request.
+</Tip>

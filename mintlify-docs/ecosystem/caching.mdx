@@ -1,0 +1,181 @@
+---
+title: "Add caching to nestrs with CacheModule"
+description: "CacheModule gives you an injectable CacheService with get, set, del, and ttl. Swap the in-memory default for Redis by enabling the cache-redis Cargo feature."
+---
+
+`CacheModule` gives you an injectable `CacheService` that works out of the box with an in-memory store and optionally upgrades to Redis for multi-instance deployments. The API is the same regardless of backend: `get`, `set`, `del`, and `ttl`. Enable the `cache` feature in `Cargo.toml`, register the module with `CacheModule::register(CacheOptions::in_memory())`, and inject `CacheService` into any provider.
+
+## Enable the feature
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["cache"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+## Register CacheModule
+
+Pass `CacheOptions::in_memory()` to `CacheModule::register` in your module's `imports` list. The returned `DynamicModule` exports `CacheService` for injection.
+
+```rust
+use nestrs::prelude::*;
+
+#[module(
+    imports = [CacheModule::register(CacheOptions::in_memory())],
+    providers = [AppState],
+    controllers = [AppController],
+)]
+struct AppModule;
+```
+
+## Inject and use CacheService
+
+`CacheService` is injected as `Arc<CacheService>`. Use `get::<T>` for typed deserialization or `get_json` when you want a raw `serde_json::Value`.
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+struct AppState {
+    cache: Arc<CacheService>,
+}
+
+#[controller(prefix = "/cache")]
+struct AppController;
+
+#[routes(state = AppState)]
+impl AppController {
+    #[get("/")]
+    async fn read(State(state): State<Arc<AppState>>) -> String {
+        state
+            .cache
+            .get_json("hello")
+            .await
+            .unwrap_or(serde_json::Value::Null)
+            .to_string()
+    }
+}
+```
+
+## Operations reference
+
+<Steps>
+  <Step title="set — store a value with optional TTL">
+    `set` serializes any `Serialize` type and stores it under a key. Pass `Some(Duration::from_secs(60))` to expire the entry after 60 seconds, or `None` to keep it indefinitely.
+
+    ```rust
+    use std::time::Duration;
+
+    cache
+        .set("session:abc", &user_data, Some(Duration::from_secs(3600)))
+        .await?;
+    ```
+  </Step>
+  <Step title="get — retrieve a typed value">
+    `get::<T>` deserializes the stored JSON into your type. Returns `Ok(None)` when the key is missing or expired.
+
+    ```rust
+    let user: Option<UserData> = cache.get("session:abc").await?;
+    ```
+  </Step>
+  <Step title="get_json — retrieve raw JSON">
+    When you want the raw `serde_json::Value` without a concrete type, use `get_json`. Returns `None` on a cache miss or expiry.
+
+    ```rust
+    let value: Option<serde_json::Value> = cache.get_json("feature_flags").await;
+    ```
+  </Step>
+  <Step title="del — remove an entry">
+    `del` removes the key and returns `true` if the key existed, `false` if it was already absent.
+
+    ```rust
+    let removed: bool = cache.del("session:abc").await;
+    ```
+  </Step>
+  <Step title="ttl — inspect remaining lifetime">
+    `ttl` returns the `Duration` left before expiry, or `None` if the key has no TTL or does not exist.
+
+    ```rust
+    if let Some(remaining) = cache.ttl("session:abc").await {
+        println!("expires in {remaining:?}");
+    }
+    ```
+  </Step>
+</Steps>
+
+## CacheOptions
+
+`CacheOptions` is an enum with two variants. You select the backend at registration time, not at injection time.
+
+| Variant | Method | Description |
+|---------|--------|-------------|
+| `InMemory` | `CacheOptions::in_memory()` | Single-process store backed by a `tokio::sync::RwLock<HashMap>`. Zero dependencies. |
+| `Redis` | `CacheOptions::redis(url)` | Shared store backed by a multiplexed Redis connection. Requires the `cache-redis` feature. |
+
+## Redis backend
+
+Enable the `cache-redis` feature alongside `cache`, then pass `CacheOptions::redis(url)` to `register`. The Redis client is lazy — the connection is established on the first cache operation.
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["cache", "cache-redis"] }
+```
+
+```rust
+use nestrs::prelude::*;
+
+#[module(imports = [CacheModule::register(CacheOptions::redis("redis://localhost:6379"))])]
+struct AppModule;
+```
+
+### RedisCacheOptions with a key prefix
+
+For applications that share one Redis instance across multiple services, use `RedisCacheOptions` directly to add a prefix. All keys will be stored as `prefix:key`.
+
+```rust
+use nestrs::prelude::*;
+#[cfg(feature = "cache-redis")]
+use nestrs::cache::RedisCacheOptions;
+
+#[cfg(feature = "cache-redis")]
+let opts = CacheOptions::Redis(
+    RedisCacheOptions::new("redis://localhost:6379")
+        .with_prefix("myapp"),
+);
+
+#[module(imports = [CacheModule::register(opts)])]
+struct AppModule;
+```
+
+<Note>
+Redis TTLs use millisecond precision internally (via the `PX` option on `SET`) to match the granularity of the in-memory backend.
+</Note>
+
+## set_json — low-level raw JSON store
+
+If you already have a `serde_json::Value` and want to skip the serialization step, use `set_json` directly:
+
+```rust
+use serde_json::json;
+use std::time::Duration;
+
+cache
+    .set_json(
+        "feature_flags",
+        json!({ "dark_mode": true }),
+        Some(Duration::from_secs(300)),
+    )
+    .await;
+```
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---------|---------------|
+| `get` returns `None` immediately after `set` | The key may have been set with a very short TTL, or the value failed to serialize. |
+| Redis connection refused | Confirm the URL scheme (`redis://` or `rediss://`) and that the server is reachable. |
+| `feature not enabled` at compile time | Add both `cache` and `cache-redis` to the `features` list in `Cargo.toml`. |
+| Multiple services not sharing cache state | Use the Redis backend — in-memory state is not shared across processes or threads outside the single `Arc<CacheService>` instance. |

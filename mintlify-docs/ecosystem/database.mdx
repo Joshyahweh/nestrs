@@ -1,0 +1,383 @@
+---
+title: "Database integration with nestrs"
+description: "nestrs supports SQL via SqlxDatabaseModule for direct AnyPool queries or nestrs-prisma for Prisma-style schema-driven access. MongoDB support is also available."
+---
+
+nestrs gives you two SQL integration paths depending on how much structure you want. `SqlxDatabaseModule` (feature `database-sqlx`) wraps an SQLx `AnyPool` and is the right choice when you want direct control over SQL queries with minimal abstraction. `nestrs-prisma` adds a `PrismaModule`, a `PrismaService`, and the `prisma_model!` macro for a Prisma-style developer experience without requiring a separate codegen step. MongoDB lives under a third path via `MongoModule`.
+
+## Path 1: SqlxDatabaseModule (direct SQLx)
+
+`SqlxDatabaseModule` manages a single `AnyPool` shared across all injected consumers. Call `for_root` before `NestFactory::create` to register the URL, then import the module.
+
+### Cargo.toml
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["database-sqlx"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "postgres"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+### Environment variable
+
+```bash
+export DATABASE_URL="postgresql://user:password@127.0.0.1:5432/myapp"
+# or for SQLite:
+# export DATABASE_URL="sqlite:./dev.db"
+```
+
+### Module registration
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let _ = SqlxDatabaseModule::for_root(db_url);
+
+    NestFactory::create::<AppModule>()
+        .listen(3000)
+        .await;
+}
+
+#[module(
+    imports = [SqlxDatabaseModule],
+    providers = [UserService],
+    controllers = [UserController],
+)]
+struct AppModule;
+```
+
+### Injecting SqlxDatabaseService
+
+`SqlxDatabaseService` exposes the pool via `pool()` and a `ping()` health check. Use `pool()` to run any SQLx query directly.
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+pub struct UserService {
+    db: Arc<SqlxDatabaseService>,
+}
+
+impl UserService {
+    pub async fn health(&self) -> &'static str {
+        match self.db.ping().await {
+            Ok(_) => "up",
+            Err(_) => "degraded",
+        }
+    }
+
+    pub async fn user_count(&self) -> Result<i64, String> {
+        let pool = self.db.pool().await?;
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(row.0)
+    }
+}
+```
+
+---
+
+## Path 2: nestrs-prisma
+
+`nestrs-prisma` ships `PrismaModule` and `PrismaService` with higher-level helpers: `query_all_as` for typed row mapping, `execute` for DDL and DML, and `prisma_model!` for declarative repositories that generate `find_unique`, `find_many`, `create`, `update`, `delete`, and more.
+
+### Cargo.toml
+
+```toml
+[dependencies]
+nestrs = "0.3.8"
+nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+async-trait = "0.1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "postgres"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+Enable exactly one SQLx backend feature: `sqlx-postgres`, `sqlx-mysql`, or `sqlx-sqlite`. `async-trait` must be a direct dependency of any crate that uses `prisma_model!`.
+
+<Tabs>
+  <Tab title="PostgreSQL">
+    ```toml
+    nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+    ```
+    ```bash
+    export DATABASE_URL="postgresql://user:password@127.0.0.1:5432/myapp"
+    ```
+  </Tab>
+  <Tab title="MySQL">
+    ```toml
+    nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-mysql"] }
+    ```
+    ```bash
+    export DATABASE_URL="mysql://user:password@127.0.0.1:3306/myapp"
+    ```
+  </Tab>
+  <Tab title="SQLite">
+    ```toml
+    nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-sqlite"] }
+    sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "sqlite"] }
+    ```
+    ```bash
+    export DATABASE_URL="sqlite:./dev.db"
+    # or for tests:
+    # DATABASE_URL="sqlite::memory:?cache=shared"
+    ```
+  </Tab>
+</Tabs>
+
+### Schema
+
+Create a Prisma schema file at `prisma/schema.prisma`. nestrs-prisma reads the schema for optional sync but does not require the Prisma CLI at runtime.
+
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id    Int    @id @default(autoincrement())
+  email String @unique
+  name  String
+}
+```
+
+Apply the schema to your database:
+
+```bash
+npx prisma migrate dev
+# or for quick local work:
+npx prisma db push
+```
+
+### Bootstrap PrismaModule
+
+Call `PrismaModule::for_root_with_options` before `NestFactory::create` so the pool is ready before DI builds providers.
+
+```rust
+use nestrs::prelude::*;
+use nestrs_prisma::{PrismaModule, PrismaOptions};
+
+#[tokio::main]
+async fn main() {
+    let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
+    let _ = PrismaModule::for_root_with_options(
+        PrismaOptions::from_url(db_url)
+            .pool_min(1)
+            .pool_max(10),
+    );
+
+    NestFactory::create::<AppModule>()
+        .listen(3000)
+        .await;
+}
+
+#[module(
+    imports = [PrismaModule],
+    re_exports = [PrismaModule],
+)]
+pub struct DataModule;
+
+#[module(
+    imports = [DataModule],
+    controllers = [UserController],
+    providers = [UserService],
+)]
+pub struct AppModule;
+```
+
+### Raw queries with PrismaService
+
+`query_all_as` maps rows to any type that implements `sqlx::FromRow`. `execute` runs DDL or parameterless DML. `query_scalar` is useful for health checks.
+
+```rust
+use nestrs::prelude::*;
+use nestrs_prisma::PrismaService;
+use std::sync::Arc;
+
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct UserRow {
+    pub id: i64,
+    pub email: String,
+    pub name: String,
+}
+
+#[injectable]
+pub struct UserService {
+    prisma: Arc<PrismaService>,
+}
+
+impl UserService {
+    pub async fn health(&self) -> &'static str {
+        match self.prisma.query_scalar("SELECT 1").await {
+            Ok(_) => "up",
+            Err(_) => "degraded",
+        }
+    }
+
+    pub async fn list_users(&self) -> Result<Vec<UserRow>, String> {
+        self.prisma
+            .query_all_as(r#"SELECT "id", "email", "name" FROM "User" ORDER BY "id""#)
+            .await
+    }
+}
+```
+
+### Declarative repositories with prisma_model!
+
+`prisma_model!` generates a full repository from a table declaration. The macro expands a struct, `CreateInput`, `Where`, `Update`, `OrderBy`, and a `PrismaUserRepository` trait — all accessible via `prisma.user()`.
+
+```rust
+nestrs_prisma::prisma_model!(User => "users", {
+    id: i64,
+    email: String,
+    name: String,
+});
+```
+
+After the macro expands, you can use the full repository API:
+
+```rust
+impl UserService {
+    pub async fn create_user(&self, email: &str, name: &str) -> Result<UserRow, HttpException> {
+        let row = self
+            .prisma
+            .user()
+            .create(UserCreateInput {
+                email: email.into(),
+                name: name.into(),
+            })
+            .await
+            .map_err(HttpException::from)?;
+        Ok(UserRow { id: row.id, email: row.email, name: row.name })
+    }
+
+    pub async fn find_by_id(&self, id: i64) -> Result<UserRow, HttpException> {
+        let u = self
+            .prisma
+            .user()
+            .find_unique(user::id::equals(id))
+            .await
+            .map_err(HttpException::from)?
+            .ok_or_else(|| NotFoundException::new("user"))?;
+        Ok(UserRow { id: u.id, email: u.email, name: u.name })
+    }
+}
+```
+
+<Note>
+`PrismaError` implements `Into<HttpException>`. Map errors with `.map_err(HttpException::from)` or `?` when the return type is `Result<_, HttpException>`.
+</Note>
+
+### HTTP controller
+
+```rust
+#[controller(prefix = "/users", version = "v1")]
+pub struct UserController;
+
+#[routes(state = UserService)]
+impl UserController {
+    #[get("/")]
+    pub async fn list(State(s): State<Arc<UserService>>) -> Result<Json<Vec<UserRow>>, HttpException> {
+        s.list_users().await.map(Json).map_err(InternalServerErrorException::new)
+    }
+
+    #[get("/health/db")]
+    pub async fn db_health(State(s): State<Arc<UserService>>) -> &'static str {
+        s.health().await
+    }
+}
+```
+
+### Run the quickstart example
+
+The nestrs-prisma crate ships a full end-to-end example with two related models, CRUD operations, and schema sync:
+
+```bash
+cargo run -p nestrs-prisma --example quickstart --features "sqlx,sqlx-sqlite"
+```
+
+---
+
+## Path 3: MongoModule
+
+`MongoModule` wraps the official `mongodb` driver. Call `for_root` with a connection URI before `NestFactory::create`, then inject `MongoService` to access databases and collections.
+
+### Cargo.toml
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["mongo"] }
+mongodb = "3"
+bson = "3"
+futures-util = { version = "0.3", features = ["sink"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+### Bootstrap and inject
+
+```rust
+#[tokio::main]
+async fn main() {
+    let _ = nestrs::MongoModule::for_root(
+        std::env::var("MONGODB_URI").unwrap_or_else(|_| "mongodb://127.0.0.1:27017".into()),
+    );
+
+    NestFactory::create::<AppModule>()
+        .listen(3000)
+        .await
+        .expect("server");
+}
+
+#[module(imports = [MongoModule], controllers = [ProfileController], providers = [ProfileStore])]
+pub struct AppModule;
+```
+
+### Service with typed collections
+
+```rust
+use bson::doc;
+use futures_util::TryStreamExt;
+use nestrs::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProfileDoc {
+    pub email: String,
+    pub display_name: String,
+}
+
+#[injectable]
+pub struct ProfileStore {
+    mongo: nestrs::MongoService,
+}
+
+impl ProfileStore {
+    pub async fn find_by_email(&self, email: &str) -> Result<Option<ProfileDoc>, String> {
+        let db = self.mongo.database("app").await?;
+        let col = db.collection::<ProfileDoc>("profiles");
+        col.find_one(doc! { "email": email })
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+```
+
+### Troubleshooting
+
+| Symptom | What to check |
+|---------|---------------|
+| `sqlx` pool / TLS errors | `DATABASE_URL` scheme matches the `sqlx-*` feature; Postgres often needs `sslmode` in the URL. |
+| "feature not enabled" | Exactly one of `sqlx-postgres`, `sqlx-mysql`, or `sqlx-sqlite` on `nestrs-prisma`. |
+| In-memory SQLite flaky | Set `pool_max(1)` — in-memory SQLite works most reliably on a single connection. |
+| Macro / trait errors on `prisma_model!` | Add `async-trait` as a direct dependency in your `Cargo.toml`. |
+| "MongoModule must be called…" | `MongoModule::for_root` must run before `NestFactory::create` in the same process. |

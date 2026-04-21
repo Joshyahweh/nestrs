@@ -1,0 +1,180 @@
+---
+title: "Providers and services in nestrs"
+description: "Mark types as injectable with #[injectable], register them in modules, inject via State<Arc<T>>, and use custom factory providers for advanced construction."
+---
+
+Providers are the services, repositories, and utilities that your application logic depends on. In nestrs, any type can become a provider by implementing the `Injectable` trait — the `#[injectable]` proc-macro generates that implementation for you. The framework constructs and caches providers in the `ProviderRegistry`, then makes them available to controllers and other providers through Axum's `State` extractor.
+
+## Marking a type as injectable
+
+Apply `#[injectable]` to a struct to generate the `Injectable` trait implementation. nestrs calls `construct` to build the type, injecting any dependencies it finds in the registry:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+pub struct AppService {
+    prisma: Arc<PrismaService>,
+}
+```
+
+nestrs infers dependencies from the struct fields. Any field of type `Arc<T>` where `T` is a registered provider is resolved from the registry automatically.
+
+<Note>
+  `construct` is **synchronous**. Do not call `block_on` or perform I/O inside it — use `on_module_init` for async setup.
+</Note>
+
+## Provider scopes
+
+Control how long a provider instance lives with the `scope` argument:
+
+```rust
+// Default: one shared instance per application
+#[injectable]
+pub struct SingletonService;
+
+// New instance on every injection site / registry.get() call
+#[injectable(scope = "transient")]
+pub struct TransientService;
+
+// One instance per HTTP request (requires use_request_scope())
+#[injectable(scope = "request")]
+pub struct RequestScopedService;
+```
+
+| Scope | Lifetime | NestJS equivalent |
+|---|---|---|
+| `"singleton"` (default) | One per application container | `Scope.DEFAULT` |
+| `"transient"` | New instance per resolution | `Scope.TRANSIENT` |
+| `"request"` | One per HTTP request | `Scope.REQUEST` |
+
+## Registering providers in a module
+
+List your providers in the `providers` field of the enclosing module. Providers that other modules need must also appear in `exports`:
+
+```rust
+#[module(
+    controllers = [AppController, AppControllerV2],
+    providers   = [AppService],
+)]
+pub struct AppModule;
+```
+
+To share a provider across modules:
+
+```rust
+#[module(
+    controllers = [UserController],
+    providers   = [UserService],
+    exports     = [UserService],
+)]
+pub struct UserModule;
+
+#[module(
+    imports  = [UserModule],
+    providers = [AppService],
+)]
+pub struct AppModule;
+```
+
+## Injecting providers into controllers
+
+Controllers access their providers via Axum's `State` extractor. The `#[routes(state = T)]` macro wires the service type into the router:
+
+```rust
+#[routes(state = AppService)]
+impl AppController {
+    #[get("/")]
+    pub async fn root(State(service): State<Arc<AppService>>) -> &'static str {
+        service.get_hello()
+    }
+
+    #[get("/db-health")]
+    pub async fn db_health(
+        State(service): State<Arc<AppService>>,
+    ) -> Json<DbHealthResponse> {
+        Json(service.db_health().await)
+    }
+}
+```
+
+## Injecting providers into other providers
+
+When one provider depends on another, declare the dependency as an `Arc<T>` field and ensure both types are registered in the same module (or that the dependency is exported from an imported module):
+
+```rust
+#[injectable]
+pub struct AppService {
+    prisma: Arc<PrismaService>,
+}
+
+impl AppService {
+    pub async fn list_users(&self) -> Result<Vec<UserRow>, String> {
+        self.prisma
+            .query_all_as(r#"SELECT "id", "email", "name" FROM "User""#)
+            .await
+    }
+}
+```
+
+## Lifecycle hooks
+
+`Injectable` provides four async hooks (all default to no-ops):
+
+```rust
+use nestrs::prelude::*;
+use async_trait::async_trait;
+
+#[injectable]
+pub struct DatabaseService {
+    // fields ...
+}
+
+#[async_trait]
+impl Injectable for DatabaseService {
+    fn construct(registry: &ProviderRegistry) -> Arc<Self> {
+        Arc::new(Self { /* wire fields */ })
+    }
+
+    async fn on_module_init(&self) {
+        // Run after all singletons are constructed; safe to do async I/O here.
+    }
+
+    async fn on_application_shutdown(&self) {
+        // Close connections, flush buffers.
+    }
+}
+```
+
+<Warning>
+  Lifecycle hooks only run for **singleton** providers. Transient providers are constructed on demand and do not receive hook calls.
+</Warning>
+
+## Custom factory providers
+
+Use `register_use_factory` when construction order must be explicit or when you need to close a provider dependency cycle without calling `registry.get()` eagerly inside another type's `construct`:
+
+```rust
+use nestrs::core::{ProviderRegistry, ProviderScope};
+use std::sync::Arc;
+
+fn register_heavy(registry: &mut ProviderRegistry) {
+    registry.register_use_factory::<HeavyService>(ProviderScope::Singleton, |reg| {
+        let light = reg.get::<LightService>();
+        Arc::new(HeavyService::new(light))
+    });
+}
+```
+
+### All custom provider variants
+
+| Method | NestJS analogue | Notes |
+|---|---|---|
+| `register_use_value::<T>(Arc<T>)` | `useValue` | Pre-built singleton; no lifecycle hooks |
+| `register_use_factory::<T>(scope, \|reg\| Arc<T>)` | `useFactory` | Sync closure; call `reg.get()` for dependencies |
+| `register_use_class::<T>()` | `useClass` | Same as `register::<T>()` for normal `#[injectable]` types |
+
+<Tip>
+  Keep factory closures non-async. Defer I/O to `on_module_init` on the produced type, or to `ConfigurableModuleBuilder::for_root_async` for module-level configuration.
+</Tip>

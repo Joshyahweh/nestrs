@@ -1,0 +1,509 @@
+---
+title: "NestApplication: configure and launch your server"
+description: "Complete reference for every NestApplication builder method—routing, security, performance, observability, and launch—grouped by category."
+---
+
+`NestApplication` is returned by `NestFactory::create` and acts as a builder for your HTTP server. Every method returns `Self` so you can chain calls fluently. Nothing binds to a network socket until you call `listen`, `listen_graceful`, or `listen_with_shutdown`. Call `into_router()` when you want the composed Axum `Router` without starting a listener—useful in tests or custom server setups.
+
+```rust
+use nestrs::prelude::*;
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .set_global_prefix("api")
+        .enable_cors(CorsOptions::permissive())
+        .enable_health_check("/health")
+        .listen_graceful(3000)
+        .await;
+}
+```
+
+## Routing
+
+### `set_global_prefix`
+
+Nests all application routes under a URL prefix. Health checks (`/health`, `/ready`), metrics (`/metrics`), and static file mounts are **not** affected.
+
+```rust
+pub fn set_global_prefix(self, prefix: impl Into<String>) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .set_global_prefix("api") // all routes become /api/...
+    .listen(3000)
+    .await;
+```
+
+### `enable_uri_versioning`
+
+Nests application routes under a URI version segment.
+
+```rust
+pub fn enable_uri_versioning(self, version: impl Into<String>) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_uri_versioning("v1") // routes become /v1/...
+    .into_router();
+```
+
+### `enable_api_versioning`
+
+Enables header- or media-type-based versioning using an `ApiVersioningPolicy`. Sets `NestApiVersion` on each request for guards and interceptors to read.
+
+```rust
+pub fn enable_api_versioning(self, policy: ApiVersioningPolicy) -> Self
+```
+
+### `enable_header_versioning`
+
+Shorthand for header-based versioning. Reads the version from a request header (default: `X-API-Version`).
+
+```rust
+pub fn enable_header_versioning(
+    self,
+    header_name: impl Into<String>,
+    default_version: Option<String>,
+) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_header_versioning("X-API-Version", Some("1".to_string()))
+    .into_router();
+```
+
+### `enable_media_type_versioning`
+
+Shorthand for `Accept: ...;version=N` style versioning.
+
+```rust
+pub fn enable_media_type_versioning(self, default_version: Option<String>) -> Self
+```
+
+---
+
+## Security
+
+### `enable_cors`
+
+Installs a CORS layer using `tower-http`. Pass `CorsOptions::permissive()` for development or build a specific policy for production.
+
+```rust
+pub fn enable_cors(self, options: CorsOptions) -> Self
+```
+
+<Warning>
+Using `CorsOptions::permissive()` in a production environment (detected via `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV`) emits a `tracing::warn` log entry.
+</Warning>
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_cors(
+        CorsOptions::builder()
+            .allow_origins(["https://app.example.com"])
+            .allow_methods(["GET", "POST"])
+            .allow_headers(["content-type", "authorization"])
+            .allow_credentials(true)
+            .build(),
+    )
+    .into_router();
+```
+
+### `use_security_headers`
+
+Injects security-related response headers on every response.
+
+```rust
+pub fn use_security_headers(self, headers: SecurityHeaders) -> Self
+```
+
+`SecurityHeaders::default()` sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `X-XSS-Protection: 0`. `SecurityHeaders::helmet_like()` also adds `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `X-DNS-Prefetch-Control`, `X-Download-Options`, and `X-Permitted-Cross-Domain-Policies`.
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_security_headers(SecurityHeaders::helmet_like())
+    .into_router();
+```
+
+### `use_rate_limit`
+
+Installs a fixed-window rate limiter per client IP. Default: 100 requests per 60 seconds.
+
+```rust
+pub fn use_rate_limit(self, options: RateLimitOptions) -> Self
+```
+
+Distribute state across instances by adding `.redis(url, key_prefix)` to `RateLimitOptions` (requires the `cache-redis` feature).
+
+```rust
+use std::time::Duration;
+
+NestFactory::create::<AppModule>()
+    .use_rate_limit(
+        RateLimitOptions::builder()
+            .max_requests(200)
+            .window_secs(60)
+            .build(),
+    )
+    .into_router();
+```
+
+### `use_csrf_protection`
+
+Enables double-submit CSRF middleware on `POST`, `PUT`, `PATCH`, and `DELETE`. Requires the `csrf` feature. Must be paired with `use_cookies()`.
+
+```rust
+#[cfg(feature = "csrf")]
+pub fn use_csrf_protection(self, config: CsrfProtectionConfig) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_cookies()
+    .use_csrf_protection(CsrfProtectionConfig::default())
+    .into_router();
+```
+
+### `use_cookies`
+
+Enables `tower_cookies::CookieManagerLayer` for signed cookie handling. Requires the `cookies` feature.
+
+```rust
+#[cfg(feature = "cookies")]
+pub fn use_cookies(self) -> Self
+```
+
+### `use_session_memory`
+
+Enables in-memory server-side sessions via `tower_sessions`. Implies `use_cookies`. Requires the `session` feature.
+
+```rust
+#[cfg(feature = "session")]
+pub fn use_session_memory(self) -> Self
+```
+
+---
+
+## Performance
+
+### `use_request_timeout`
+
+Rejects requests that take longer than `duration` with `504 Gateway Timeout`.
+
+```rust
+pub fn use_request_timeout(self, duration: std::time::Duration) -> Self
+```
+
+```rust
+use std::time::Duration;
+
+NestFactory::create::<AppModule>()
+    .use_request_timeout(Duration::from_secs(30))
+    .into_router();
+```
+
+### `use_concurrency_limit`
+
+Caps the number of in-flight requests. Additional requests wait for capacity unless `use_load_shed` is also enabled, in which case they receive `503 Service Unavailable` immediately.
+
+```rust
+pub fn use_concurrency_limit(self, max_in_flight: usize) -> Self
+```
+
+### `use_load_shed`
+
+Enables Tower load shedding. Pair with `use_concurrency_limit` so overflow is rejected quickly rather than queued indefinitely.
+
+```rust
+pub fn use_load_shed(self) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_concurrency_limit(512)
+    .use_load_shed()
+    .into_router();
+```
+
+### `use_body_limit`
+
+Rejects request bodies larger than `max_bytes` with `413 Payload Too Large`.
+
+```rust
+pub fn use_body_limit(self, max_bytes: usize) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_body_limit(4 * 1024 * 1024) // 4 MB
+    .into_router();
+```
+
+### `use_compression`
+
+Enables gzip response compression via `tower-http`. Clients must advertise support with `Accept-Encoding: gzip`. Bodies smaller than 32 bytes are skipped.
+
+```rust
+pub fn use_compression(self) -> Self
+```
+
+### `use_request_decompression`
+
+Decodes `Content-Encoding: gzip` request bodies before they reach handlers. Unsupported encoding values yield `415 Unsupported Media Type`.
+
+```rust
+pub fn use_request_decompression(self) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_decompression()
+    .use_compression()
+    .into_router();
+```
+
+---
+
+## Observability
+
+### `use_request_tracing`
+
+Emits structured `tracing` log lines for each completed request with fields: `method`, `path`, `status`, `duration_ms`, and `request_id`.
+
+```rust
+pub fn use_request_tracing(self, options: RequestTracingOptions) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_id()
+    .use_request_tracing(
+        RequestTracingOptions::builder()
+            .skip_paths(["/metrics", "/health"]),
+    )
+    .into_router();
+```
+
+### `use_request_id`
+
+Assigns a stable `x-request-id` UUID to each request (propagated from the client if already present) and echoes it on the response.
+
+```rust
+pub fn use_request_id(self) -> Self
+```
+
+### `enable_metrics`
+
+Exposes a Prometheus scrape endpoint at `path` (default: `"/metrics"`) with RED metrics: `http_requests_total{method,status}`, `http_request_duration_seconds{method}`, and `http_requests_in_flight`.
+
+```rust
+pub fn enable_metrics(self, path: impl Into<String>) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_metrics("/metrics")
+    .into_router();
+```
+
+### `enable_health_check`
+
+Registers a minimal `GET` liveness probe at `path` that always returns `{"status":"ok"}` with status `200`.
+
+```rust
+pub fn enable_health_check(self, path: impl Into<String>) -> Self
+```
+
+The probe is mounted at the server root—not under `set_global_prefix` or `enable_uri_versioning`—so orchestrators reach it without repeating API prefixes.
+
+```rust
+NestFactory::create::<AppModule>()
+    .enable_health_check("/health")
+    .into_router();
+```
+
+### `enable_readiness_check`
+
+Registers a `GET` readiness probe at `path` that runs all `indicators` on each request. Returns `200` when all indicators report `Up`, or `503` with a Terminus-style JSON body when any reports `Down`.
+
+```rust
+pub fn enable_readiness_check<I>(
+    self,
+    path: impl Into<String>,
+    indicators: I,
+) -> Self
+where
+    I: IntoIterator<Item = Arc<dyn HealthIndicator>>,
+```
+
+```rust
+#[derive(Clone, Default)]
+struct DbIndicator;
+
+#[async_trait::async_trait]
+impl HealthIndicator for DbIndicator {
+    fn name(&self) -> &'static str { "db" }
+    async fn check(&self) -> HealthStatus { HealthStatus::Up }
+}
+
+let indicators: Vec<std::sync::Arc<dyn HealthIndicator>> =
+    vec![std::sync::Arc::new(DbIndicator)];
+
+NestFactory::create::<AppModule>()
+    .enable_readiness_check("/ready", indicators)
+    .into_router();
+```
+
+---
+
+## Launch
+
+### `listen`
+
+Binds to `port` on `127.0.0.1` (or the address set by `set_listen_ip`) and starts serving. Runs lifecycle hooks in order: `eager_init_singletons`, `on_module_init`, `on_application_bootstrap`, scheduled tasks, queue processors.
+
+```rust
+pub async fn listen(self, port: u16)
+```
+
+### `listen_graceful`
+
+Like `listen`, but stops on Ctrl+C (all platforms) or `SIGTERM` (Unix). In-flight requests are drained before the process exits.
+
+```rust
+pub async fn listen_graceful(self, port: u16)
+```
+
+### `listen_with_shutdown`
+
+Like `listen_graceful`, but accepts an arbitrary `Future` as the shutdown signal. Useful for custom signal handlers or test harnesses.
+
+```rust
+pub async fn listen_with_shutdown<F>(self, port: u16, shutdown: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+```
+
+### `into_router`
+
+Builds the `axum::Router` with all configured middleware and returns it without starting a server. Use this in integration tests or custom Axum server setups.
+
+```rust
+pub fn into_router(self) -> axum::Router
+```
+
+```rust
+// Integration test
+let router = NestFactory::create::<AppModule>()
+    .set_global_prefix("api")
+    .into_router();
+
+let resp = router
+    .oneshot(
+        axum::http::Request::builder()
+            .uri("/api/health")
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+assert_eq!(resp.status(), 200);
+```
+
+### `bind_all_interfaces`
+
+Sets the bind address to `0.0.0.0` so the server accepts connections on all IPv4 interfaces. Typical for containers and LAN access.
+
+```rust
+pub fn bind_all_interfaces(self) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .bind_all_interfaces()
+    .listen(3000)
+    .await;
+```
+
+---
+
+## Additional builder methods
+
+<AccordionGroup>
+  <Accordion title="use_global_layer — arbitrary Tower middleware">
+    Apply any Tower layer to the full app after all built-in middleware. The first call is the innermost layer; the last call is the outermost (first to see the incoming request).
+
+    ```rust
+    use axum::http::{HeaderName, HeaderValue};
+    use tower_http::set_header::SetResponseHeaderLayer;
+
+    NestFactory::create::<AppModule>()
+        .use_global_layer(|router| {
+            router.layer(SetResponseHeaderLayer::if_not_present(
+                HeaderName::from_static("x-app"),
+                HeaderValue::from_static("my-service"),
+            ))
+        })
+        .into_router();
+    ```
+  </Accordion>
+
+  <Accordion title="use_global_exception_filter — rewrite HttpException responses">
+    Register a global `ExceptionFilter` that runs for every response carrying an `HttpException`. The filter runs inside built-in layers such as CORS and rate limiting.
+
+    ```rust
+    #[derive(Clone, Default)]
+    struct MyFilter;
+
+    #[async_trait::async_trait]
+    impl ExceptionFilter for MyFilter {
+        async fn catch(&self, ex: HttpException) -> axum::response::Response {
+            ex.into_response()
+        }
+    }
+
+    NestFactory::create::<AppModule>()
+        .use_global_exception_filter(MyFilter)
+        .into_router();
+    ```
+  </Accordion>
+
+  <Accordion title="enable_production_errors — sanitize 5xx bodies">
+    Strips internal detail from JSON 5xx bodies: sets `message` to a generic string and removes the `errors` field. Call `enable_production_errors_from_env()` to activate this automatically when `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV` equals `production` or `prod`.
+
+    ```rust
+    NestFactory::create::<AppModule>()
+        .enable_production_errors_from_env()
+        .into_router();
+    ```
+  </Accordion>
+
+  <Accordion title="use_path_normalization — trailing slash handling">
+    Normalizes request paths before routing. `PathNormalization::TrimTrailingSlash` rewrites `/items/` → `/items`. Only applied by `listen` and `listen_graceful`; `into_router()` ignores this setting.
+
+    ```rust
+    NestFactory::create::<AppModule>()
+        .use_path_normalization(PathNormalization::TrimTrailingSlash)
+        .listen(3000)
+        .await;
+    ```
+  </Accordion>
+
+  <Accordion title="module_ref — dynamic provider resolution">
+    Returns a `ModuleRef` for type-keyed resolution against the composed provider graph after `NestFactory::create` has run but before `listen`.
+
+    ```rust
+    let app = NestFactory::create::<AppModule>();
+    let mref = app.module_ref();
+    let state: std::sync::Arc<AppState> = mref.get::<AppState>();
+    let _router = app.into_router();
+    ```
+  </Accordion>
+</AccordionGroup>

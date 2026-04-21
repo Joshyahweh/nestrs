@@ -1,0 +1,232 @@
+---
+title: "Generate OpenAPI docs for your nestrs API"
+description: "nestrs-openapi serves an OpenAPI 3.1 JSON document and Swagger UI for all routes registered via #[routes]. Enable it with one method call on NestApplication."
+---
+
+`nestrs-openapi` discovers all routes registered through `#[routes]` and `impl_routes!`, builds an OpenAPI 3.1 document, and serves it at `GET /openapi.json`. A Swagger UI page is available at `GET /docs`. You enable the whole thing with a single method call on `NestApplication` — no separate server, no build step.
+
+## What is generated automatically
+
+| Area | Behavior |
+|------|----------|
+| Paths and HTTP methods | Auto-discovered from the `RouteRegistry` |
+| `operationId` | Module path + handler function name |
+| `summary` | Humanized handler name; override with `#[openapi(summary = "...")]` |
+| `tags` | Inferred from the first path segment; override with `#[openapi(tag = "...")]` |
+| `responses` | Default `200 OK`; extend with `#[openapi(responses = ((404, "..."), ...))]` |
+| Request/response schemas | **Not auto-generated** — hand-author `components.schemas` or merge from `utoipa` |
+
+## Step-by-step setup
+
+<Steps>
+  <Step title="Enable the feature">
+    Add the `openapi` feature to your `nestrs` dependency, or add `nestrs-openapi` directly if you need the standalone router.
+
+    ```toml
+    [dependencies]
+    nestrs = { version = "0.3.8", features = ["openapi"] }
+    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+    ```
+  </Step>
+  <Step title="Call enable_openapi() before listen">
+    Chain `enable_openapi()` on the `NestApplication` returned by `NestFactory::create`. This registers `GET /openapi.json` and `GET /docs` on the same router as your API.
+
+    ```rust
+    use nestrs::prelude::*;
+
+    #[module]
+    struct AppModule;
+
+    #[tokio::main]
+    async fn main() {
+        NestFactory::create::<AppModule>()
+            .enable_openapi()
+            .listen(3000)
+            .await;
+    }
+    ```
+
+    Your API is now self-documenting. Open `http://localhost:3000/docs` in a browser to see the Swagger UI.
+  </Step>
+  <Step title="Annotate routes with #[openapi]">
+    Enrich individual handlers with a custom summary, tag, or response codes. Handlers without annotations get sensible defaults.
+
+    ```rust
+    #[controller(prefix = "/users", version = "v1")]
+    pub struct UserController;
+
+    #[routes(state = UserService)]
+    impl UserController {
+        #[get("/")]
+        #[openapi(summary = "List all users", tag = "users")]
+        pub async fn list(
+            State(s): State<Arc<UserService>>,
+        ) -> Result<Json<Vec<UserRow>>, HttpException> {
+            s.list_users().await.map(Json).map_err(InternalServerErrorException::new)
+        }
+
+        #[get("/:id")]
+        #[openapi(
+            summary = "Get a user by ID",
+            tag = "users",
+            responses = ((200, "User found"), (404, "User not found"))
+        )]
+        pub async fn get_one(
+            State(s): State<Arc<UserService>>,
+            axum::extract::Path(id): axum::extract::Path<i64>,
+        ) -> Result<Json<UserRow>, HttpException> {
+            s.find_by_id(id).await.map(Json)
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Customize with OpenApiOptions
+
+When you need to set the API title, version, server URLs, or security schemes, replace `enable_openapi()` with `enable_openapi_with_options(OpenApiOptions { ... })`.
+
+```rust
+use nestrs::prelude::*;
+use nestrs_openapi::OpenApiOptions;
+use serde_json::json;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .enable_openapi_with_options(OpenApiOptions {
+            title: "My API".into(),
+            version: "1.0.0".into(),
+            json_path: "/openapi.json".into(),
+            docs_path: "/docs".into(),
+            api_prefix: "/api/v1".into(),
+            servers: Some(vec![
+                json!({ "url": "https://api.example.com", "description": "Production" })
+            ]),
+            document_tags: Some(vec![
+                json!({ "name": "users", "description": "User operations" })
+            ]),
+            ..Default::default()
+        })
+        .listen(3000)
+        .await;
+}
+```
+
+All fields on `OpenApiOptions` have defaults — use `..Default::default()` and override only what you need.
+
+## Add schemas to components
+
+nestrs-openapi does not derive request/response schemas from Rust types. Provide them manually under `components.schemas`. The `#[openapi(responses = ...)]` attribute on handlers sets status codes and descriptions but not `content` or `$ref` links.
+
+```rust
+use nestrs_openapi::OpenApiOptions;
+use serde_json::json;
+
+OpenApiOptions {
+    components: Some(json!({
+        "schemas": {
+            "UserDto": {
+                "type": "object",
+                "required": ["id", "email"],
+                "properties": {
+                    "id": { "type": "string", "format": "uuid" },
+                    "email": { "type": "string", "format": "email" }
+                }
+            }
+        }
+    })),
+    ..Default::default()
+}
+```
+
+<Tip>
+If you want schemas derived from Rust types, add `utoipa` with its `ToSchema` and `IntoParams` derives, build a small `utoipa::OpenApi` fragment, serialize it to `serde_json::Value`, and merge it into `OpenApiOptions.components`. One OpenAPI document is served from nestrs; utoipa supplies the schema fragments.
+</Tip>
+
+## Global security scheme
+
+Declare a security scheme under `components.securitySchemes` and reference it in the root `security` array to apply it to all operations in the Swagger UI.
+
+```rust
+use nestrs_openapi::OpenApiOptions;
+use serde_json::json;
+
+OpenApiOptions {
+    components: Some(json!({
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT"
+            }
+        }
+    })),
+    security: Some(vec![json!({ "bearerAuth": [] })]),
+    ..Default::default()
+}
+```
+
+## Per-route security from #[roles]
+
+When handlers use `#[roles("admin")]`, the macro stores `roles` metadata in `MetadataRegistry`. Setting `infer_route_security_from_roles: true` tells nestrs-openapi to add a `security` array to those operations automatically, so Swagger UI shows a lock icon only on protected routes.
+
+```rust
+use nestrs_openapi::OpenApiOptions;
+use serde_json::json;
+
+OpenApiOptions {
+    components: Some(json!({
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT"
+            }
+        }
+    })),
+    security: None,                          // no global requirement
+    infer_route_security_from_roles: true,   // per-route, keyed off #[roles]
+    roles_security_scheme: "bearerAuth".into(),
+    ..Default::default()
+}
+```
+
+Routes with `#[roles("admin")]` get `"security": [{ "bearerAuth": [] }]` in the generated document. Routes without `#[roles]` are left unchanged.
+
+<Warning>
+`infer_route_security_from_roles` is a heuristic that reads metadata, not runtime guard types. Custom guards that do not set `roles` metadata will not trigger the security hint unless you also add `#[roles(...)]` or `#[set_metadata("roles", "...")]` on those handlers.
+</Warning>
+
+## Standalone router
+
+If you manage your own Axum router rather than using `NestApplication`, import `openapi_router` from `nestrs-openapi` directly and merge the returned `Router` into your app.
+
+```rust
+use axum::Router;
+use nestrs_openapi::{openapi_router, OpenApiOptions};
+use serde_json::json;
+
+fn docs_routes() -> Router {
+    openapi_router(OpenApiOptions {
+        title: "My API".into(),
+        version: "0.1.0".into(),
+        json_path: "/openapi.json".into(),
+        docs_path: "/docs".into(),
+        api_prefix: "/api/v1".into(),
+        ..Default::default()
+    })
+}
+```
+
+Set `api_prefix` so the documented paths in `openapi.json` match the actual URLs your application serves.
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---------|---------------|
+| `/docs` or `/openapi.json` returns 404 | Confirm `features = ["openapi"]` on `nestrs` and that `enable_openapi()` is called before `listen`. |
+| Routes missing from the document | Handlers must use `#[routes]` or `impl_routes!` to register in `RouteRegistry`. |
+| Schemas are empty | nestrs does not infer schemas from Rust types — populate `OpenApiOptions.components` manually or merge a `utoipa` fragment. |
+| Security not shown per-route | Set `infer_route_security_from_roles: true` and `roles_security_scheme`; add `#[roles(...)]` to the handler. |
+| Paths have wrong prefix | Set `api_prefix` on `OpenApiOptions` to match your `set_global_prefix` and controller `version`. |

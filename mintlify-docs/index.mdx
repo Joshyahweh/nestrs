@@ -1,0 +1,62 @@
+---
+title: "nestrs: NestJS-style framework for Rust"
+description: "nestrs brings the familiar NestJS module/controller/provider model to Rust with full Axum and Tower performance. Build fast, structured APIs in Rust."
+---
+
+nestrs is a Rust API framework that gives you the familiar NestJS architecture — modules, controllers, dependency injection, guards, pipes, and interceptors — while running on Axum and Tower for maximum throughput. If you know NestJS, you can be productive in nestrs from day one.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Build and run your first nestrs API in under 5 minutes.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Add nestrs to your Cargo project and choose the right feature flags.
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/modules">
+    Learn modules, controllers, providers, and how they fit together.
+  </Card>
+  <Card title="CLI Tool" icon="terminal" href="/cli/overview">
+    Scaffold projects and generate code with `nestrs new` and `nestrs generate`.
+  </Card>
+</CardGroup>
+
+## Why nestrs?
+
+nestrs lets you structure large Rust APIs the same way you'd structure a NestJS application — without reinventing the wheel. Route handlers, DI-injected services, validation pipelines, and middleware all compose in the same way whether your team comes from Rust or TypeScript backgrounds.
+
+<CardGroup cols={2}>
+  <Card title="Guides" icon="map" href="/guides/security">
+    Step-by-step guides for security, observability, microservices, and more.
+  </Card>
+  <Card title="Ecosystem" icon="puzzle-piece" href="/ecosystem/overview">
+    Add caching, scheduling, databases, GraphQL, and OpenAPI to your app.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/nest-factory">
+    Complete reference for NestFactory, NestApplication, and all macros.
+  </Card>
+  <Card title="NestJS Migration" icon="arrow-right-arrow-left" href="/migration/from-nestjs">
+    Coming from NestJS? See the side-by-side mapping of concepts and syntax.
+  </Card>
+</CardGroup>
+
+## Get started in 3 steps
+
+<Steps>
+  <Step title="Install the CLI">
+    ```bash
+    cargo install nestrs-scaffold
+    ```
+  </Step>
+  <Step title="Create a new project">
+    ```bash
+    nestrs new my-api
+    cd my-api
+    ```
+  </Step>
+  <Step title="Run your API">
+    ```bash
+    cargo run
+    # Server running at http://127.0.0.1:3000
+    ```
+  </Step>
+</Steps>

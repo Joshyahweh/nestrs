@@ -1,0 +1,339 @@
+---
+title: "Migrate from NestJS to nestrs"
+description: "A comprehensive side-by-side mapping of NestJS concepts—decorators, modules, guards, pipes, and more—to their nestrs equivalents in Rust."
+---
+
+Moving an HTTP API from NestJS to nestrs means trading TypeScript decorators for Rust proc macros, class-based providers for `Arc`-wrapped structs, and the Node.js runtime for Axum and Tower. The architectural ideas carry over almost directly—modules, controllers, guards, interceptors, pipes, and filters all have first-class analogues—but the implementation language is Rust, so some patterns look different even when they serve the same purpose.
+
+## Concept mapping at a glance
+
+| NestJS | nestrs | Notes |
+|--------|--------|-------|
+| `@Module(...)` | `#[module(controllers = [...], providers = [...], imports = [...], exports = [...])]` | Applied to a plain `struct` |
+| `@Controller('prefix')` | `#[controller(prefix = "/prefix", version = "v1")]` | Applied to a plain `struct` |
+| `@Injectable()` | `#[injectable]` | Applied to a `struct`; resolved as `Arc<T>` |
+| `@Get()`, `@Post()`, … | `#[get("path")]`, `#[post("path")]`, … | Inside a `#[routes(state = S)]` impl block |
+| `@Body()`, `@Param()`, `@Query()` | `#[param::body]`, `#[param::param]`, `#[param::query]` | With `#[use_pipes(ValidationPipe)]` for validated DTOs |
+| `@UseGuards(G)` | `#[use_guards(G)]` | `G` implements `CanActivate` |
+| `@UseInterceptors(I)` | `#[use_interceptors(I)]` | `I` implements `Interceptor` |
+| `@UsePipes(ValidationPipe)` | `#[use_pipes(ValidationPipe)]` | Validation is opt-in per route |
+| `@UseFilters(F)` | `#[use_filters(F)]` | `F` implements `ExceptionFilter` |
+| `@SetMetadata('k', 'v')` | `#[set_metadata("k", "v")]` | Stored in `MetadataRegistry` |
+| `@Roles('admin')` | `#[roles("admin")]` | Shorthand metadata for role guards |
+| `@HttpCode(201)` | `#[http_code(201)]` | Sets the response status code |
+| `@Header('k', 'v')` | `#[response_header("k", "v")]` | Adds a response header |
+| `@Redirect(url)` | `#[redirect("url")]` | Redirects the request |
+| `NestFactory.create(AppModule)` | `NestFactory::create::<AppModule>()` | Returns a `NestApplication` builder |
+| `app.setGlobalPrefix('api')` | `.set_global_prefix("api")` | Builder method on `NestApplication` |
+| `app.enableVersioning(...)` | `.enable_uri_versioning("v")` / `.enable_header_versioning(...)` | Multiple versioning strategies |
+| `app.listen(3000)` | `.listen(3000).await` | Async; also `listen_graceful` and `listen_with_shutdown` |
+
+## Side-by-side code: modules and controllers
+
+<Tabs>
+  <Tab title="NestJS">
+    ```typescript
+    import { Module, Controller, Get, Param } from '@nestjs/common';
+
+    @Controller('cats')
+    export class CatsController {
+      @Get(':id')
+      findOne(@Param('id') id: string) {
+        return { id };
+      }
+    }
+
+    @Module({ controllers: [CatsController] })
+    export class AppModule {}
+    ```
+  </Tab>
+  <Tab title="nestrs">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[derive(Default)]
+    #[injectable]
+    struct AppState;
+
+    #[controller(prefix = "/cats", version = "v1")]
+    struct CatsController;
+
+    #[routes(state = AppState)]
+    impl CatsController {
+        #[get("/:id")]
+        async fn find_one(
+            #[param::param] p: IdParam,
+        ) -> axum::Json<serde_json::Value> {
+            axum::Json(serde_json::json!({ "id": p.id }))
+        }
+    }
+
+    #[module(controllers = [CatsController], providers = [AppState])]
+    struct AppModule;
+    ```
+  </Tab>
+</Tabs>
+
+## Side-by-side code: injectable providers
+
+<Tabs>
+  <Tab title="NestJS">
+    ```typescript
+    import { Injectable } from '@nestjs/common';
+
+    @Injectable()
+    export class CatsService {
+      findAll() { return []; }
+    }
+
+    @Module({ providers: [CatsService], exports: [CatsService] })
+    export class CatsModule {}
+    ```
+  </Tab>
+  <Tab title="nestrs">
+    ```rust
+    use nestrs::prelude::*;
+    use std::sync::Arc;
+
+    #[injectable]
+    struct CatsService;
+
+    impl CatsService {
+        pub fn find_all(&self) -> Vec<String> { vec![] }
+    }
+
+    #[module(providers = [CatsService], exports = [CatsService])]
+    struct CatsModule;
+    ```
+  </Tab>
+</Tabs>
+
+## Side-by-side code: guards
+
+<Tabs>
+  <Tab title="NestJS">
+    ```typescript
+    import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+
+    @Injectable()
+    export class AuthGuard implements CanActivate {
+      canActivate(context: ExecutionContext): boolean {
+        const req = context.switchToHttp().getRequest();
+        return !!req.headers['authorization'];
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="nestrs">
+    ```rust
+    use nestrs::prelude::*;
+    use axum::http::request::Parts;
+
+    #[derive(Default)]
+    struct AuthGuard;
+
+    #[async_trait]
+    impl CanActivate for AuthGuard {
+        async fn can_activate(&self, parts: &Parts) -> Result<(), GuardError> {
+            if parts.headers.contains_key("authorization") {
+                Ok(())
+            } else {
+                Err(GuardError::unauthorized("Missing authorization header"))
+            }
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Side-by-side code: interceptors
+
+<Tabs>
+  <Tab title="NestJS">
+    ```typescript
+    import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
+    import { Observable } from 'rxjs';
+    import { tap } from 'rxjs/operators';
+
+    @Injectable()
+    export class LoggingInterceptor implements NestInterceptor {
+      intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+        const start = Date.now();
+        return next.handle().pipe(tap(() =>
+          console.log(`Duration: ${Date.now() - start}ms`)
+        ));
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="nestrs">
+    ```rust
+    use nestrs::prelude::*;
+    use axum::{extract::Request, middleware::Next, response::Response};
+
+    #[derive(Default)]
+    struct LoggingInterceptor;
+
+    #[async_trait]
+    impl Interceptor for LoggingInterceptor {
+        async fn intercept(&self, req: Request, next: Next) -> Response {
+            let start = std::time::Instant::now();
+            let resp = next.run(req).await;
+            tracing::info!("duration_ms={}", start.elapsed().as_millis());
+            resp
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Side-by-side code: DTO validation
+
+<Tabs>
+  <Tab title="NestJS">
+    ```typescript
+    import { IsEmail, IsString } from 'class-validator';
+
+    export class SignupDto {
+      @IsEmail()
+      email: string;
+
+      @IsString()
+      username: string;
+    }
+    ```
+  </Tab>
+  <Tab title="nestrs">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[dto]
+    struct SignupDto {
+        #[IsEmail]
+        email: String,
+
+        #[IsString]
+        username: String,
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Side-by-side code: metadata and roles
+
+<Tabs>
+  <Tab title="NestJS">
+    ```typescript
+    import { SetMetadata } from '@nestjs/common';
+    export const Roles = (...roles: string[]) => SetMetadata('roles', roles);
+    ```
+  </Tab>
+  <Tab title="nestrs">
+    ```rust
+    // #[roles] is a built-in macro shorthand for #[set_metadata("roles", "...")]
+    #[get("/admin")]
+    #[roles("admin")]
+    #[use_guards(XRoleMetadataGuard)]
+    async fn admin_only() -> &'static str { "ok" }
+    ```
+  </Tab>
+</Tabs>
+
+## Guards, interceptors, and filters — semantics
+
+All three cross-cutting concerns work before or around the route handler, just like NestJS:
+
+- **Guards** (`CanActivate`) answer "may this request proceed?" and run before the handler. Returning `Err(GuardError::Forbidden(...))` yields a 403 JSON response.
+- **Interceptors** (`Interceptor`) wrap the handler with `next.run(req)`. Use them for logging, timing, and header injection.
+- **Exception filters** (`ExceptionFilter`) rewrite responses that carry an `HttpException`. Register globally with `NestApplication::use_global_exception_filter` or per-route with `#[use_filters]`.
+
+The pipeline order per route is fixed: global layers → guards → interceptors → filters → handler. See the [middleware pipeline](/concepts/middleware-pipeline) page for the complete contract.
+
+## DTOs and validation
+
+NestJS uses `class-validator` and `class-transformer` for runtime validation. nestrs uses the `#[dto]` macro (which derives `serde::Deserialize` and `validator::Validate`) combined with `ValidatedBody<T>` or `#[use_pipes(ValidationPipe)]` on a handler.
+
+<Note>
+Unknown JSON fields are **rejected by default** — `#[dto]` emits `#[serde(deny_unknown_fields)]` automatically. Use `#[dto(allow_unknown_fields)]` to opt out when you intentionally accept forward-compatible clients.
+</Note>
+
+## Dependency injection differences
+
+NestJS uses TypeScript constructor injection detected at runtime via `reflect-metadata`. nestrs constructs providers at compile time via the `Injectable::construct` method generated by `#[injectable]`. Each injectable receives a `&ProviderRegistry` and returns an `Arc<Self>`, pulling its own dependencies with `registry.get::<DepType>()`.
+
+There is **no async constructor**. Perform async I/O in `on_module_init` (called by the framework before `listen` starts serving traffic) or use `ConfigurableModuleBuilder::for_root_async`.
+
+## Configuration (`ConfigModule` → Rust patterns)
+
+<Steps>
+  <Step title="Parse environment variables at startup">
+    Use `std::env`, [`dotenvy`](https://crates.io/crates/dotenvy), or [`confy`](https://crates.io/crates/confy) in `main` before calling `NestFactory::create`.
+  </Step>
+  <Step title="Pass options into a configurable module">
+    Use `ConfigurableModuleBuilder::for_root` or `for_root_async` so injectables receive `ModuleOptions<O, M>` from the registry.
+  </Step>
+  <Step title="Use a typed settings injectable per bounded context">
+    There is no global `ConfigService` token; create one `#[injectable]` settings struct per module if that suits your team's style.
+  </Step>
+</Steps>
+
+## Testing
+
+| NestJS (Jest / Supertest) | nestrs |
+|---------------------------|--------|
+| `TestingModule` | Build `NestFactory::create::<M>().into_router()` and use `tower::ServiceExt::oneshot` in tests |
+| Isolated metadata / routes | Enable the `test-hooks` feature and use registry clear helpers between tests |
+| `app.close()` | `listen_with_shutdown` drains in-flight requests on signal |
+
+```rust
+// Integration test pattern
+let router = NestFactory::create::<AppModule>().into_router();
+let response = router
+    .oneshot(
+        axum::http::Request::builder()
+            .uri("/cats/1")
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+assert_eq!(response.status(), 200);
+```
+
+## Packages and dependencies
+
+| NestJS / npm | Rust / Cargo |
+|-------------|-------------|
+| `package.json` + lockfile | `Cargo.toml` + `Cargo.lock` (commit lock for binaries) |
+| `@nestjs/platform-express` | The `nestrs` crate (Axum is the only HTTP platform) |
+| `@nestjs/swagger` | `nestrs-openapi` crate + `features = ["openapi"]` |
+| `@nestjs/microservices` | `nestrs-microservices` crate + transport feature flags |
+| `peerDependencies` | Cargo workspace `[patch]` / version alignment in root `Cargo.toml` |
+
+## What is not yet in nestrs
+
+<Warning>
+The following NestJS features have no nestrs equivalent at this time:
+
+- **Interactive TypeScript playground** — nestrs is a compiled Rust crate; there is no in-browser REPL.
+- **TypeScript-first API teaching tools** — the CLI (`nestrs-scaffold`) handles code generation but does not produce TypeScript stubs.
+- **`reflect-metadata`-style decorator introspection** — all metadata in nestrs is compile-time; there is no runtime annotation system for arbitrary fields.
+- **GraphQL subscriptions over WebSockets** — nestrs-graphql and nestrs-ws ship separately; parity is partial.
+</Warning>
+
+## What to read next
+
+<CardGroup cols={2}>
+  <Card title="NestFactory API" icon="play" href="/api/nest-factory">
+    Bootstrap methods including microservice transports
+  </Card>
+  <Card title="NestApplication API" icon="server" href="/api/nest-application">
+    Full reference for every builder method
+  </Card>
+  <Card title="Routing macros" icon="route" href="/api/macros/routing">
+    Controller, routes, and HTTP method macros
+  </Card>
+  <Card title="DI macros" icon="boxes-stacked" href="/api/macros/di">
+    Module, injectable, and metadata macros
+  </Card>
+</CardGroup>

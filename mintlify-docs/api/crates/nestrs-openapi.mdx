@@ -1,0 +1,246 @@
+---
+title: "nestrs-openapi: OpenAPI and Swagger UI"
+description: "Reference for nestrs-openapi: OpenApiOptions, enable_openapi, the #[openapi] macro, security scheme documentation, and the generated JSON spec endpoint."
+---
+
+`nestrs-openapi` generates an OpenAPI 3.1 specification from the routes registered in `RouteRegistry` and serves a Swagger UI at a configurable path. Enable it with a single call to `NestApplication::enable_openapi()` or `enable_openapi_with_options(options)`.
+
+```toml
+# Cargo.toml
+[dependencies]
+nestrs = { version = "*", features = ["openapi"] }
+```
+
+## Quick start
+
+```rust
+use nestrs::prelude::*;
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>()
+        .enable_openapi()  // mounts /openapi.json and /docs
+        .listen(3000)
+        .await;
+}
+```
+
+After starting the server:
+
+- `GET /openapi.json` — the generated OpenAPI 3.1 JSON spec
+- `GET /docs` — Swagger UI (served via CDN from `unpkg.com/swagger-ui-dist`)
+
+## `OpenApiOptions`
+
+Configures titles, paths, servers, security, and more.
+
+```rust
+pub struct OpenApiOptions {
+    pub title: String,           // default: "nestrs API"
+    pub version: String,         // default: CARGO_PKG_VERSION
+    pub json_path: String,       // default: "/openapi.json"
+    pub docs_path: String,       // default: "/docs"
+    pub api_prefix: String,      // set automatically from set_global_prefix / enable_uri_versioning
+    pub servers: Option<Vec<Value>>,
+    pub document_tags: Option<Vec<Value>>,
+    pub components: Option<Value>,
+    pub security: Option<Vec<Value>>,
+    pub infer_route_security_from_roles: bool,  // default: false
+    pub roles_security_scheme: String,          // default: "bearerAuth"
+}
+```
+
+<ParamField path="title" type="String">
+  The `info.title` field in the generated spec.
+</ParamField>
+<ParamField path="version" type="String">
+  The `info.version` field. Defaults to the value of `CARGO_PKG_VERSION` at compile time.
+</ParamField>
+<ParamField path="json_path" type="String">
+  The path where the OpenAPI JSON spec is served. Defaults to `"/openapi.json"`.
+</ParamField>
+<ParamField path="docs_path" type="String">
+  The path where Swagger UI is served. Defaults to `"/docs"`.
+</ParamField>
+<ParamField path="servers" type="Option<Vec<Value>>">
+  OpenAPI [Server Objects](https://spec.openapis.org/oas/v3.1.0#server-object). Pass a JSON array.
+</ParamField>
+<ParamField path="components" type="Option<Value>">
+  OpenAPI [Components Object](https://spec.openapis.org/oas/v3.1.0#components-object) for security schemes, schemas, and other reusable definitions.
+</ParamField>
+<ParamField path="security" type="Option<Vec<Value>>">
+  Root-level [Security Requirement Objects](https://spec.openapis.org/oas/v3.1.0#security-requirement-object) applied to all operations by default.
+</ParamField>
+<ParamField path="infer_route_security_from_roles" type="bool">
+  When `true`, routes with `#[roles]` metadata get an operation-level `security` entry referencing `roles_security_scheme`. Requires that scheme to be declared in `components.securitySchemes`.
+</ParamField>
+
+## `enable_openapi` vs `enable_openapi_with_options`
+
+```rust
+// Minimal — uses all defaults
+pub fn enable_openapi(self) -> Self
+
+// Full control
+pub fn enable_openapi_with_options(self, options: OpenApiOptions) -> Self
+```
+
+```rust
+use nestrs::prelude::*;
+use nestrs_openapi::OpenApiOptions;
+use serde_json::json;
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let options = OpenApiOptions {
+        title: "My API".to_string(),
+        version: "2.0.0".to_string(),
+        servers: Some(vec![
+            json!({ "url": "https://api.example.com", "description": "Production" }),
+            json!({ "url": "http://localhost:3000", "description": "Local" }),
+        ]),
+        components: Some(json!({
+            "securitySchemes": {
+                "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "JWT"
+                }
+            }
+        })),
+        security: Some(vec![json!({ "bearerAuth": [] })]),
+        ..OpenApiOptions::default()
+    };
+
+    NestFactory::create::<AppModule>()
+        .enable_openapi_with_options(options)
+        .listen(3000)
+        .await;
+}
+```
+
+## `#[openapi]` macro
+
+Annotate individual route handlers to override the auto-generated summary, set a tag, and declare response status codes.
+
+```rust
+#[routes(state = AppState)]
+impl UsersController {
+    #[get("/:id")]
+    #[openapi(
+        summary = "Get a user by ID",
+        tag = "users",
+        responses = (
+            (200, "User found"),
+            (404, "User not found"),
+        )
+    )]
+    async fn find_one(
+        #[param::param] params: UserIdParam,
+    ) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({ "id": params.id }))
+    }
+}
+```
+
+<ParamField path="summary" type="&str (optional)">
+  Human-readable summary for the operation. Defaults to a humanized version of the handler function name (e.g., `find_one` → `"Find one"`).
+</ParamField>
+<ParamField path="tag" type="&str (optional)">
+  Groups the operation in Swagger UI. Defaults to the first meaningful path segment after an optional version segment (e.g., `/v1/users/1` → `"users"`).
+</ParamField>
+<ParamField path="responses" type="((status, description), ...) (optional)">
+  Declares response status codes and their descriptions. Defaults to `200 OK` only when not specified.
+</ParamField>
+
+## What is generated automatically
+
+For each route registered in `RouteRegistry`, `nestrs-openapi` generates:
+
+- **`operationId`** — the full Rust module path + handler name (e.g., `my_app::controllers::UsersController::find_one`)
+- **`summary`** — humanized handler name or the `#[openapi(summary = ...)]` override
+- **`tags`** — inferred from the URL path or the `#[openapi(tag = ...)]` override
+- **`responses`** — `200 OK` by default, or the list from `#[openapi(responses = ...)]`
+
+## Security scheme documentation
+
+Add a `bearerAuth` scheme to `components.securitySchemes` and enable `infer_route_security_from_roles` to show the Swagger lock icon on routes protected with `#[roles]`:
+
+```rust
+use nestrs::prelude::*;
+use nestrs_openapi::OpenApiOptions;
+use serde_json::json;
+
+#[controller(prefix = "/api")]
+struct ApiController;
+
+#[routes(state = AppState)]
+impl ApiController {
+    #[get("/public")]
+    async fn public() -> &'static str { "no auth required" }
+
+    #[get("/private")]
+    #[roles("admin")]
+    async fn private() -> &'static str { "auth required" }
+}
+
+#[module(controllers = [ApiController], providers = [AppState])]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let options = OpenApiOptions {
+        components: Some(json!({
+            "securitySchemes": {
+                "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "JWT"
+                }
+            }
+        })),
+        infer_route_security_from_roles: true,
+        roles_security_scheme: "bearerAuth".to_string(),
+        ..OpenApiOptions::default()
+    };
+
+    NestFactory::create::<AppModule>()
+        .enable_openapi_with_options(options)
+        .listen(3000)
+        .await;
+}
+```
+
+The `/api/private` operation will include `security: [{ "bearerAuth": [] }]` in the generated spec, rendering the lock icon in Swagger UI.
+
+## Accessing the generated spec
+
+The spec is served as JSON at the `json_path` (default: `/openapi.json`) and is not mounted under `set_global_prefix` or `enable_uri_versioning`. You can fetch it directly:
+
+```bash
+curl http://localhost:3000/openapi.json | jq .
+```
+
+## What nestrs-openapi does not do
+
+<Note>
+`nestrs-openapi` does not generate JSON schemas from Rust types. Unlike `@nestjs/swagger` with `@ApiProperty`, there is no runtime type reflection. To add schemas to `components.schemas`, either hand-author them in `OpenApiOptions::components` or use a separate schema generation crate such as [`utoipa`](https://crates.io/crates/utoipa) or [`okapi`](https://crates.io/crates/okapi) and merge the output.
+</Note>
+
+The NestJS vs nestrs-openapi parity table:
+
+| NestJS / `@nestjs/swagger` | nestrs-openapi |
+|---------------------------|----------------|
+| `@ApiTags` | Inferred from URL path or `#[openapi(tag = "...")]` |
+| `@ApiOperation` | Auto summary or `#[openapi(summary = "...")]` |
+| `@ApiResponse` | Default `200 OK` or `#[openapi(responses = ...)]` |
+| DTO schema generation | **Not built-in** — hand-author `components.schemas` |
+| `@ApiBearerAuth` | `components.securitySchemes` + `infer_route_security_from_roles` |
+| Swagger UI | Yes — bundled at `docs_path` |
+| Plugins (NestJS CLI) | No |

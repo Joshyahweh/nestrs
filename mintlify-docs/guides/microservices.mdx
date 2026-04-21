@@ -1,0 +1,271 @@
+---
+title: "Build microservices with nestrs transports"
+description: "Run nestrs microservice servers over TCP, NATS, Redis, Kafka, MQTT, RabbitMQ, or gRPC. Connect services with ClientsModule and the #[message_pattern] macros."
+---
+
+The `nestrs-microservices` crate adds message-passing primitives on top of nestrs's DI and module system. You annotate handler impl blocks with `#[micro_routes]` and individual methods with `#[message_pattern]` or `#[event_pattern]`, then boot a transport server with one of the `NestFactory::create_microservice_*` constructors. The same module, provider, and injectable primitives you use for HTTP work exactly the same way in microservice mode.
+
+## Transport overview
+
+| Transport | Factory method | Feature flag | Best for |
+|---|---|---|---|
+| TCP | `NestFactory::create_microservice` | `microservices` | Simple in-process or LAN request/reply |
+| NATS | `NestFactory::create_microservice_nats` | `microservices-nats` | Low-ops, single-region messaging |
+| Redis | `NestFactory::create_microservice_redis` | `microservices-redis` | Teams already running Redis |
+| Kafka | _(via `KafkaMicroserviceServer`)_ | `microservices-kafka` | High-throughput streaming, Kafka/Redpanda |
+| MQTT | _(via `MqttMicroserviceServer`)_ | `microservices-mqtt` | Mobile / IoT fan-out |
+| RabbitMQ | `NestFactory::create_microservice_rabbitmq` | `microservices-rabbitmq` | AMQP work queues with per-request reply queues |
+| gRPC | `NestFactory::create_microservice_grpc` | `microservices-grpc` | Cross-language RPC with strong contracts |
+
+Add the features you need to `Cargo.toml`:
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["microservices", "microservices-nats"] }
+```
+
+## Defining message handlers
+
+Use `#[micro_routes]` on an `impl` block and `#[message_pattern]` / `#[event_pattern]` on individual methods. Message patterns expect a reply; event patterns are fire-and-forget:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[derive(Default)]
+#[injectable]
+pub struct OrdersService;
+
+impl OrdersService {
+    pub fn get_order(&self, id: u64) -> String {
+        format!("order-{id}")
+    }
+}
+
+pub struct OrdersController;
+
+#[micro_routes(state = OrdersService)]
+impl OrdersController {
+    #[message_pattern("orders.find_one")]
+    pub async fn find_one(
+        State(svc): State<Arc<OrdersService>>,
+        data: serde_json::Value,
+    ) -> String {
+        let id = data["id"].as_u64().unwrap_or(0);
+        svc.get_order(id)
+    }
+
+    #[event_pattern("orders.created")]
+    pub async fn on_created(data: serde_json::Value) {
+        tracing::info!("order created: {:?}", data);
+    }
+}
+```
+
+## Booting a TCP microservice
+
+```rust
+use nestrs::prelude::*;
+use nestrs::microservices::TcpMicroserviceOptions;
+
+#[module(
+    controllers = [OrdersController],
+    providers = [OrdersService],
+)]
+struct OrdersModule;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create_microservice::<OrdersModule>(
+        TcpMicroserviceOptions::bind("127.0.0.1:3001"),
+    )
+    .listen()
+    .await;
+}
+```
+
+## Booting a NATS microservice
+
+```rust
+use nestrs::prelude::*;
+use nestrs::microservices::NatsMicroserviceOptions;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create_microservice_nats::<OrdersModule>(
+        NatsMicroserviceOptions::new("nats://127.0.0.1:4222"),
+    )
+    .listen()
+    .await;
+}
+```
+
+## Hybrid HTTP + microservice mode
+
+Use `also_listen_http` to run the HTTP router and the microservice transport in the same process:
+
+```rust
+use nestrs::prelude::*;
+use nestrs::microservices::NatsMicroserviceOptions;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create_microservice_nats::<AppModule>(
+        NatsMicroserviceOptions::new("nats://127.0.0.1:4222"),
+    )
+    .also_listen_http(3000)
+    .configure_http(|app| {
+        app.set_global_prefix("api")
+            .use_request_tracing(RequestTracingOptions::builder())
+            .enable_health_check("/health")
+    })
+    .listen()
+    .await;
+}
+```
+
+`configure_http` gives you the full `NestApplication` builder so you can apply all the usual HTTP middleware.
+
+## Sending messages with ClientsModule
+
+Register downstream services in a module using `ClientsModule::register`. This exports a `ClientsService` (and a default `ClientProxy` when exactly one client is registered) into the DI container:
+
+```rust
+use nestrs::prelude::*;
+use nestrs::microservices::{ClientConfig, ClientsModule, TcpMicroserviceOptions};
+
+#[module(
+    imports = [
+        ClientsModule::register(&[
+            ClientConfig {
+                name: "ORDERS_SERVICE",
+                transport: Transport::Tcp(TcpMicroserviceOptions::bind("127.0.0.1:3001")),
+            },
+        ]),
+    ],
+    controllers = [GatewayController],
+    providers = [GatewayService],
+)]
+pub struct GatewayModule;
+```
+
+Inject `ClientsService` into a provider and use `send_json` for request/reply or `emit_json` for fire-and-forget:
+
+```rust
+use nestrs::prelude::*;
+use nestrs::microservices::ClientsService;
+use std::sync::Arc;
+
+#[injectable]
+pub struct GatewayService {
+    clients: Arc<ClientsService>,
+}
+
+impl GatewayService {
+    pub async fn get_order(&self, id: u64) -> serde_json::Value {
+        let client = self.clients.expect("ORDERS_SERVICE");
+        client
+            .send_json("orders.find_one", serde_json::json!({ "id": id }))
+            .await
+            .unwrap_or(serde_json::Value::Null)
+    }
+
+    pub async fn notify_created(&self, order: serde_json::Value) {
+        let client = self.clients.expect("ORDERS_SERVICE");
+        let _ = client.emit_json("orders.created", order).await;
+    }
+}
+```
+
+## gRPC transport
+
+Enable the `microservices-grpc` feature and use the gRPC-specific factory and options:
+
+```toml
+nestrs = { version = "0.3.8", features = ["microservices", "microservices-grpc"] }
+```
+
+```rust
+use nestrs::prelude::*;
+use nestrs::microservices::GrpcMicroserviceOptions;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create_microservice_grpc::<OrdersModule>(
+        GrpcMicroserviceOptions::bind("0.0.0.0:50051"),
+    )
+    .listen()
+    .await;
+}
+```
+
+For clients, use `GrpcTransportOptions` and chain `.with_request_timeout` for long-running RPCs:
+
+```rust
+use nestrs::microservices::{GrpcTransportOptions, ClientConfig, Transport};
+use std::time::Duration;
+
+ClientConfig {
+    name: "ORDERS_SERVICE",
+    transport: Transport::Grpc(
+        GrpcTransportOptions::new("http://orders-svc:50051")
+            .with_request_timeout(Duration::from_secs(30)),
+    ),
+}
+```
+
+<Note>
+The gRPC transport carries the same JSON wire format (`WireRequest` / `WireResponse`) inside protobuf bytes. Handler code is identical across transports — only the transport configuration changes.
+</Note>
+
+## Cross-cutting in micro handlers
+
+On `#[micro_routes]` handlers, the execution order is:
+
+```
+request → interceptors (outer → inner)
+        → guards
+        → pipes
+        → handler
+```
+
+Apply cross-cutting with the micro-specific attributes:
+
+```rust
+#[micro_routes(state = OrdersService)]
+#[use_micro_interceptors(LoggingInterceptor)]
+#[use_micro_guards(AuthGuard)]
+impl OrdersController {
+    // ...
+}
+```
+
+<Warning>
+There is no microservice exception-filter pipeline. Handlers return `Result<_, TransportError>`. Guards and pipes return `TransportError` for early rejection. This differs from the HTTP pipeline where `CanActivate` flows through `use_global_exception_filter`.
+</Warning>
+
+## Event bus (in-process)
+
+For in-process async events without a transport, use `EventBus` directly:
+
+```rust
+use nestrs::EventBus;
+
+// Subscribe
+EventBus::subscribe("user.created", |payload: serde_json::Value| async move {
+    tracing::info!("user created: {:?}", payload);
+});
+
+// Emit
+EventBus::emit("user.created", serde_json::json!({ "id": 42 })).await;
+```
+
+Handlers annotated with `#[on_event("...")]` inside an `#[event_routes]` impl block are auto-subscribed at app boot.
+
+## Reliability guidance
+
+- Use `emit_json` for integration events (`order.created`, `user.updated`) and include an `event_version` field for forward compatibility.
+- Use `send_json` for request/reply patterns where a response contract is required.
+- Assume at-least-once delivery — keep handlers idempotent and include correlation IDs in payload metadata.
+- Add a dead-letter or retry strategy per transport adapter.
+- For critical integration events, use the outbox pattern: write business state and an outbox row in one DB transaction, then publish asynchronously with retries.

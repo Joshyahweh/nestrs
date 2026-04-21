@@ -1,0 +1,227 @@
+---
+title: "nestrs modules: organize your application"
+description: "Learn how the #[module] macro organizes controllers and providers into composable feature modules, and how the module lifecycle drives startup and shutdown."
+---
+
+Modules are the fundamental unit of organization in nestrs. Every nestrs application has at least one root module, and larger applications divide their code into feature modules — each encapsulating a related set of controllers, providers, and imports. The `#[module]` proc-macro generates the `Module` and `ModuleGraph` trait implementations that `NestFactory` uses to build the provider registry and Axum router.
+
+## The `#[module]` macro
+
+Annotate a plain struct with `#[module]` to define a module. The macro accepts four optional fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `imports` | array of module types or `DynamicModule` expressions | Modules whose exported providers this module can use |
+| `controllers` | array of controller types | Axum route sets registered under this module |
+| `providers` | array of injectable types | Services available to controllers in this module |
+| `exports` | array of injectable types | Providers this module re-exports to importing modules |
+
+```rust
+use nestrs::prelude::*;
+
+#[module(
+    imports = [DataModule],
+    controllers = [AppController, AppControllerV2],
+    providers = [AppService],
+)]
+pub struct AppModule;
+```
+
+Modules that re-export another module's providers use `re_exports`:
+
+```rust
+#[module(
+    imports = [PrismaModule],
+    re_exports = [PrismaModule],
+)]
+pub struct DataModule;
+```
+
+## Composing feature modules
+
+<Steps>
+  <Step title="Define a feature module">
+    Create a module for a focused area of your application. List only the providers and controllers that belong to that feature.
+
+    ```rust
+    use nestrs::prelude::*;
+
+    #[injectable]
+    pub struct UserService;
+
+    #[controller(prefix = "/users")]
+    pub struct UserController;
+
+    #[routes(state = UserService)]
+    impl UserController {
+        #[get("/")]
+        pub async fn list(State(svc): State<Arc<UserService>>) -> &'static str {
+            "users"
+        }
+    }
+
+    #[module(
+        controllers = [UserController],
+        providers  = [UserService],
+        exports    = [UserService],
+    )]
+    pub struct UserModule;
+    ```
+  </Step>
+  <Step title="Import the feature module from your root module">
+    List the feature module in `imports`. Exported providers are absorbed into the importing module's registry.
+
+    ```rust
+    #[module(
+        imports  = [UserModule],
+        providers = [AppService],
+    )]
+    pub struct AppModule;
+    ```
+  </Step>
+  <Step title="Bootstrap the application">
+    Pass the root module to `NestFactory::create`. nestrs builds the full provider registry and Axum router automatically.
+
+    ```rust
+    #[tokio::main]
+    async fn main() {
+        NestFactory::create::<AppModule>()
+            .set_global_prefix("api")
+            .listen_graceful(3000)
+            .await;
+    }
+    ```
+  </Step>
+</Steps>
+
+## Dynamic modules
+
+Static `#[module]` declarations cover most use cases. When you need to configure a module at runtime — loading options from environment variables, a remote secrets store, or feature flags — use a `DynamicModule`.
+
+### `DynamicModule::from_module`
+
+Converts any static module into a `DynamicModule` at call time:
+
+```rust
+let dm = DynamicModule::from_module::<CacheModule>();
+```
+
+### `ConfigurableModuleBuilder`
+
+The `ConfigurableModuleBuilder` pattern mirrors NestJS's `forRoot` / `forRootAsync`:
+
+<Tabs>
+  <Tab title="Synchronous options">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[derive(Clone)]
+    struct ApiOptions {
+        base_url: String,
+    }
+
+    #[injectable]
+    struct HttpClientConfig {
+        opts: Arc<ModuleOptions<ApiOptions, ConfigModule>>,
+    }
+
+    #[module(providers = [HttpClientConfig], exports = [HttpClientConfig])]
+    struct ConfigModule;
+
+    fn build() -> DynamicModule {
+        ConfigurableModuleBuilder::<ApiOptions>::for_root::<ConfigModule>(ApiOptions {
+            base_url: "https://api.example.com".into(),
+        })
+    }
+    ```
+  </Tab>
+  <Tab title="Async options">
+    ```rust
+    use nestrs::core::{ConfigurableModuleBuilder, DynamicModule};
+
+    async fn build_module() -> DynamicModule {
+        ConfigurableModuleBuilder::<ApiOptions>::for_root_async::<AppModule, _, _>(|| async {
+            // Load from vault, KMS, or env before the DI graph is built.
+            ApiOptions {
+                base_url: std::env::var("API_BASE_URL")
+                    .unwrap_or_else(|_| "https://api.example.com".into()),
+            }
+        })
+        .await
+    }
+    ```
+
+    <Note>
+      `Injectable::construct` remains synchronous. Use `on_module_init` on the dependent service to perform any I/O that must run after the type is constructed.
+    </Note>
+  </Tab>
+</Tabs>
+
+### Lazy modules
+
+`DynamicModule::lazy::<M>()` runs `M::build()` at most once per process and shares the singleton cells across all callers. This is useful for shared infrastructure modules (databases, caches) that multiple feature modules import independently.
+
+```rust
+let shared = DynamicModule::lazy::<DatabaseModule>();
+```
+
+## Lifecycle sequence
+
+When you call `NestFactory::create` and then `listen` or `listen_graceful`, nestrs drives the provider registry through the following sequence for all singleton providers:
+
+<Steps>
+  <Step title="eager_init_singletons()">
+    Constructs every singleton in the registry synchronously. This is where circular provider dependency panics surface.
+  </Step>
+  <Step title="run_on_module_init().await">
+    Calls `on_module_init` on every singleton. Use this hook for async setup (opening database pools, warming caches) that must complete before the server accepts traffic.
+  </Step>
+  <Step title="run_on_application_bootstrap().await">
+    Calls `on_application_bootstrap` on every singleton. Use this for tasks that depend on all modules being fully initialized.
+  </Step>
+  <Step title="Server accepts requests">
+    The Axum TCP listener opens and the application begins serving traffic.
+  </Step>
+  <Step title="Shutdown: run_on_application_shutdown().await">
+    On SIGTERM or graceful shutdown, `on_application_shutdown` is called on every singleton.
+  </Step>
+  <Step title="Shutdown: run_on_module_destroy().await">
+    `on_module_destroy` is called last. Use this to close connections and flush buffers.
+  </Step>
+</Steps>
+
+<Warning>
+  Lifecycle hooks only run for **singleton** providers. Transient providers are constructed on demand and do not participate in the global hook sequence.
+</Warning>
+
+## Circular module imports
+
+If two modules import each other, nestrs detects the cycle and panics with:
+
+```
+Circular module dependency detected: A -> B -> ... -> A
+```
+
+Mark the back-edge import with `forward_ref` to break the cycle:
+
+```rust
+use nestrs::prelude::*;
+
+#[module(
+    imports = [BForwardModule],
+    controllers = [AController],
+    providers = [AState],
+)]
+struct AForwardModule;
+
+#[module(
+    imports = [forward_ref::<AForwardModule>()],
+    controllers = [BController],
+    providers = [BState],
+)]
+struct BForwardModule;
+```
+
+<Tip>
+  When possible, extract shared types into a third module and import that from both sides instead of introducing a circular reference.
+</Tip>

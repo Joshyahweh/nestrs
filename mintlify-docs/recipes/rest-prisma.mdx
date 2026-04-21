@@ -1,0 +1,343 @@
+---
+title: "Recipe A — REST + PostgreSQL + Prisma"
+description: "HTTP APIs with nestrs-prisma PrismaService, prisma_model!, REST CRUD, SQLite/Postgres/MySQL variants, hello-app demo."
+---
+
+**Goal:** `#[routes]` controllers + **[`PrismaService`](https://docs.rs/nestrs-prisma)** over SQLx—same mental model as NestJS + Prisma, with Rust macros.
+
+Canonical reference: **[backend-recipes.md — Recipe A](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/backend-recipes.md)**.
+
+## Cargo features (PostgreSQL)
+
+```toml
+nestrs = "0.3.8"
+nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+async-trait = "0.1"
+validator = { version = "0.20", features = ["derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "postgres"] }
+```
+
+<Tabs>
+  <Tab title="PostgreSQL">
+    Enable **`sqlx-postgres`** on **`nestrs-prisma`** (shown above). Use `DATABASE_URL` such as  
+    `postgresql://USER:PASSWORD@127.0.0.1:5432/myapp`.
+  </Tab>
+  <Tab title="SQLite (hello-app)">
+    Swap features to **`sqlx-sqlite`**, file URL `sqlite:./dev.db`, and prefer **`pool_max(1)`** for in-memory tests.
+  </Tab>
+  <Tab title="MySQL">
+    Use **`sqlx-mysql`** + `mysql://user:pass@host:3306/db`.
+  </Tab>
+</Tabs>
+
+## Bootstrap `PrismaModule`
+
+```rust
+use nestrs_prisma::{PrismaModule, PrismaOptions, PrismaService};
+
+let _ = PrismaModule::for_root_with_options(
+    PrismaOptions::from_url(std::env::var("DATABASE_URL").expect("DATABASE_URL"))
+        .pool_min(1)
+        .pool_max(10)
+        .schema_path("prisma/schema.prisma"),
+);
+```
+
+## `prisma_model!` CRUD (extra example)
+
+After declaring **`User`** with **`prisma_model!(User => "users", { … })`**:
+
+```rust
+use nestrs_prisma::SortOrder;
+
+pub async fn page_users(
+    prisma: &nestrs_prisma::PrismaService,
+    skip: i64,
+    take: i64,
+) -> Result<Vec<UserRow>, nestrs_prisma::PrismaError> {
+    prisma
+        .user()
+        .find_many_with_options(UserFindManyOptions {
+            r#where: UserWhere::and(vec![]),
+            order_by: Some(vec![user::id::order(SortOrder::Asc)]),
+            take: Some(take.clamp(1, 100)),
+            skip: Some(skip.max(0)),
+            distinct: None,
+        })
+        .await
+        .map(|rows| rows.into_iter().map(/* → UserRow */).collect())
+}
+```
+
+Expose **`GET /users?skip=&take=`** with **`ValidatedQuery`** and optionally add **`X-Total-Count`** from **`count`**.
+
+## REST CRUD route map
+
+| Operation | HTTP | Repository call |
+|-----------|------|-----------------|
+| Create | `POST /users/` | `user().create(UserCreateInput { … })` |
+| List | `GET /users/` | `find_many_with_options` (paging) |
+| One | `GET /users/:id` | `find_unique(user::id::equals(id))` |
+| Update | `PATCH /users/:id` | `update(user::id::equals(id), …)` |
+| Delete | `DELETE /users/:id` | `delete_many` / single delete per your macro |
+
+## Run the repo demo
+
+```bash
+cd examples/hello-app
+export DATABASE_URL="sqlite:${PWD}/dev.db"
+cargo run
+```
+
+```bash
+curl -s "http://127.0.0.1:3000/platform/v1/api/db-health"
+curl -s "http://127.0.0.1:3000/platform/v1/api/users-db"
+```
+
+Paths use **`set_global_prefix("platform")`** + controller **`version`** + **`prefix`**—see **`examples/hello-app/src/main.rs`** in the repo.
+
+## Production-grade REST CRUD
+
+These patterns mirror what teams ship behind API gateways (Kong, Envoy): predictable errors, bounded queries, and observability hooks—not “demo CRUD.”
+
+## End-to-end example: SaaS users API
+
+This is the kind of CRUD surface teams actually expose from an admin or back-office service: tenant-aware, validated, paginated, and conflict-safe.
+
+```rust
+use nestrs::prelude::*;
+use nestrs_prisma::{PrismaError, PrismaService, SortOrder};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use validator::Validate;
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreateUserDto {
+    #[validate(email)]
+    pub email: String,
+    #[validate(length(min = 2, max = 80))]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateUserDto {
+    #[validate(length(min = 2, max = 80))]
+    pub name: Option<String>,
+    pub active: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UsersPageQuery {
+    pub skip: Option<i64>,
+    pub take: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UserIdParam {
+    pub id: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserRow {
+    pub id: i64,
+    pub email: String,
+    pub name: String,
+    pub active: bool,
+}
+
+#[injectable]
+pub struct UserService {
+    prisma: Arc<PrismaService>,
+}
+
+impl UserService {
+    pub async fn create(
+        &self,
+        tenant_id: &str,
+        body: CreateUserDto,
+    ) -> Result<UserRow, HttpException> {
+        let row = self
+            .prisma
+            .user()
+            .create(UserCreateInput {
+                tenant_id: tenant_id.to_owned(),
+                email: body.email,
+                name: body.name,
+                active: true,
+            })
+            .await
+            .map_err(HttpException::from)?;
+        Ok(UserRow {
+            id: row.id,
+            email: row.email,
+            name: row.name,
+            active: row.active,
+        })
+    }
+
+    pub async fn list(
+        &self,
+        tenant_id: &str,
+        query: UsersPageQuery,
+    ) -> Result<Vec<UserRow>, HttpException> {
+        let rows = self
+            .prisma
+            .user()
+            .find_many_with_options(UserFindManyOptions {
+                r#where: UserWhere::and(vec![user::tenant_id::equals(tenant_id.to_owned())]),
+                order_by: Some(vec![user::id::order(SortOrder::Asc)]),
+                take: Some(query.take.unwrap_or(20).clamp(1, 100)),
+                skip: Some(query.skip.unwrap_or(0).max(0)),
+                distinct: None,
+            })
+            .await
+            .map_err(HttpException::from)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| UserRow {
+                id: row.id,
+                email: row.email,
+                name: row.name,
+                active: row.active,
+            })
+            .collect())
+    }
+
+    pub async fn update(
+        &self,
+        tenant_id: &str,
+        id: i64,
+        body: UpdateUserDto,
+    ) -> Result<UserRow, HttpException> {
+        let row = self
+            .prisma
+            .user()
+            .update(
+                user::id::equals(id),
+                UserUpdateInput {
+                    tenant_id: None,
+                    email: None,
+                    name: body.name,
+                    active: body.active,
+                },
+            )
+            .await
+            .map_err(|e| match e {
+                PrismaError::RowNotFound => NotFoundException::new("user not found"),
+                other => HttpException::from(other),
+            })?;
+
+        if row.tenant_id != tenant_id {
+            return Err(ForbiddenException::new("user not in tenant").into());
+        }
+
+        Ok(UserRow {
+            id: row.id,
+            email: row.email,
+            name: row.name,
+            active: row.active,
+        })
+    }
+}
+
+#[controller(prefix = "users", version = "v1")]
+pub struct UserController {
+    service: Arc<UserService>,
+}
+
+#[routes]
+impl UserController {
+    #[post("/")]
+    async fn create(
+        &self,
+        body: ValidatedBody<CreateUserDto>,
+    ) -> Result<Json<UserRow>, HttpException> {
+        let tenant_id = "org_123"; // Usually derived from auth middleware / request context.
+        Ok(Json(self.service.create(tenant_id, body.0).await?))
+    }
+
+    #[get("/")]
+    async fn list(
+        &self,
+        query: ValidatedQuery<UsersPageQuery>,
+    ) -> Result<Json<Vec<UserRow>>, HttpException> {
+        let tenant_id = "org_123";
+        Ok(Json(self.service.list(tenant_id, query.0).await?))
+    }
+
+    #[patch("/:id")]
+    async fn update(
+        &self,
+        path: ValidatedPath<UserIdParam>,
+        body: ValidatedBody<UpdateUserDto>,
+    ) -> Result<Json<UserRow>, HttpException> {
+        let tenant_id = "org_123";
+        Ok(Json(self.service.update(tenant_id, path.0.id, body.0).await?))
+    }
+}
+```
+
+If your app issues JWTs, **`tenant_id`** should come from the verified token or a guard, not from user input. That is the difference between “works locally” and “safe in production.”
+
+### Layering (controller → service → data)
+
+Keep **`#[routes]`** thin: parse/validate HTTP, delegate to an **`#[injectable]`** service that owns **`Arc<PrismaService>`**. That keeps transaction boundaries and mapping **`PrismaError`** → **`HttpException`** in one place.
+
+```rust
+//Sketch — names follow your prisma_model! expansion.
+#[injectable]
+struct UserService {
+    prisma: Arc<nestrs_prisma::PrismaService>,
+}
+
+impl UserService {
+    pub async fn create(&self, body: UserCreateDto) -> Result<UserRow, HttpException> {
+        let row = self
+            .prisma
+            .user()
+            .create(UserCreateInput {
+                email: body.email,
+                name: body.name,
+            })
+            .await
+            .map_err(HttpException::from)?; // UniqueViolation → Conflict (409), …
+        Ok(UserRow {
+            id: row.id,
+            email: row.email,
+            name: row.name,
+        })
+    }
+}
+```
+
+**[`PrismaError` → `HttpException`](https://docs.rs/nestrs-prisma)** maps unique violations to **`ConflictException`** (409), missing rows to **`NotFoundException`** (404), pool issues to **`ServiceUnavailableException`** (503). Surface those directly instead of wrapping everything as 500.
+
+### Pagination and list safety
+
+Always **clamp** `take` on the server (for example max **100**) and default **`skip`** to **0**. Return total row counts only when you need faceted UIs—otherwise **`count`** on large tables can dominate latency; consider approximate counts or cursor-based paging for very large lists.
+
+Expose query params through **`ValidatedQuery`** so invalid types never reach Prisma.
+
+### Idempotent creates (payments, orders)
+
+For **POST** endpoints that must not double-charge when the client retries, accept an **`Idempotency-Key`** header (standard pattern). Store **`(tenant_id, key) → response`** in Redis or a dedicated SQL table with a TTL; on replay, return the stored body and status without calling **`create`** again. nestrs does not ship a built-in idempotency middleware—you implement storage + lookup in your **`UserService`** (or a small **`IdempotencyStore`** injectable).
+
+### Headers and versioning
+
+Pair list responses with **`X-Total-Count`** only when clients require exact totals; otherwise prefer **`Link`** RFC 5988-style **`rel="next"`** for cursor or offset paging. Keep **`Api-Version`** or URI versioning aligned with **`#[controller(version = …)]`** so deprecations are explicit.
+
+### Operations checklist
+
+| Concern | Production habit |
+|---------|------------------|
+| Migrations | Run **`prisma migrate deploy`** in CI/CD before rolling pods; avoid applying DDL from app startup. |
+| Pool size | Size **`pool_max`** to `(expected concurrent requests × avg query time)` / **`target latency`**; monitor pool wait time in metrics. |
+| Timeouts | Put upper bounds on raw SQL helpers; kill runaway queries at the DB or proxy when possible. |
+| Rate limits | Use **`NestApplication::use_rate_limit`** on public CRUD surfaces to absorb abuse. |
+| Tracing | Attach **`tracing`** spans per request and include **`request_id`** from headers in logs when debugging 409/503 storms. |
+
+<Tip>
+  Map **`PrismaError`** with **`HttpException::from`** where **`Result<_, PrismaError>`** flows—see Recipe A § A.14 in the mdBook chapter for full filters.
+</Tip>

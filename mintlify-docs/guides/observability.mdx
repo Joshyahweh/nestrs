@@ -1,0 +1,198 @@
+---
+title: "Add metrics and tracing to nestrs apps"
+description: "Wire up structured request logs, Prometheus RED metrics, and optional OpenTelemetry span export in a few builder calls on NestApplication."
+---
+
+nestrs builds its observability story around three composable layers: a global `tracing` subscriber for structured logging, a request-tracing middleware that emits per-request spans and log lines, and an optional Prometheus scrape endpoint. A fourth layer — OpenTelemetry span export — is behind the `otel` feature flag and can be added without changing the rest of the pipeline.
+
+## Installing the tracing subscriber
+
+Call `configure_tracing` once, before `listen`, so all log output and request spans share the same pipeline. The log level is read from `NESTRS_LOG` first, then `RUST_LOG`, then the `default_directive` on `TracingConfig` (default `"info"`):
+
+```rust
+use nestrs::prelude::*;
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let tracing = TracingConfig::builder()
+        .format(TracingFormat::Json)           // Pretty for local dev
+        .default_directive("info,nestrs=debug");
+
+    NestFactory::create::<AppModule>()
+        .configure_tracing(tracing)
+        .listen(3000)
+        .await;
+}
+```
+
+`TracingFormat::Pretty` is the default and produces human-readable multi-line output. Switch to `TracingFormat::Json` in production for log aggregation platforms.
+
+## Request tracing middleware
+
+`use_request_tracing` adds a middleware that:
+- Records a completion log line with `method`, `path`, `status`, `duration_ms`, and `request_id` (when `use_request_id()` is also enabled).
+- Creates a `tracing` span named `http.server.request` for each request, with fields `http.request.method` and `http.route`.
+
+Skip high-volume infrastructure paths (metrics, health) to avoid flooding request logs:
+
+```rust
+NestFactory::create::<AppModule>()
+    .configure_tracing(TracingConfig::builder())
+    .use_request_id()
+    .use_request_tracing(
+        RequestTracingOptions::builder()
+            .skip_paths(["/metrics", "/health"])
+    )
+    .enable_metrics("/metrics")
+    .enable_health_check("/health")
+    .listen(3000)
+    .await;
+```
+
+<Note>
+`http.route` is set to the concrete request path at this middleware layer. Axum's route template (e.g. `/users/:id`) is not available here. For OTLP dashboards, treat the literal path as the closest stable route identifier unless you add a custom layer that sets a template field.
+</Note>
+
+## Prometheus metrics
+
+`enable_metrics` registers a Prometheus scrape handler at the path you provide (default `/metrics`). It tracks:
+- `http_request_duration_seconds` — histogram with standard buckets
+- `http_requests_total{method, status}` — counter
+- `http_requests_in_flight` — in-flight gauge
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_tracing(RequestTracingOptions::builder().skip_paths(["/metrics"]))
+    .enable_metrics("/metrics")
+    .listen(3000)
+    .await;
+```
+
+The `/metrics` path is mounted at the server root — it is not affected by `set_global_prefix` or `enable_uri_versioning`.
+
+## Health and readiness checks
+
+Use `enable_health_check` for a simple liveness probe that always returns `200`:
+
+```rust
+.enable_health_check("/health")
+```
+
+Use `enable_readiness_check` when you want to gate traffic on the health of dependencies. Implement `HealthIndicator` for each dependency and pass the indicators at startup:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+pub struct DatabaseHealth {
+    pool: Arc<sqlx::PgPool>,
+}
+
+#[async_trait]
+impl HealthIndicator for DatabaseHealth {
+    fn name(&self) -> &'static str { "database" }
+
+    async fn check(&self) -> HealthStatus {
+        match sqlx::query("SELECT 1").execute(self.pool.as_ref()).await {
+            Ok(_) => HealthStatus::Up,
+            Err(e) => HealthStatus::down(e.to_string()),
+        }
+    }
+}
+
+// In main:
+let db_health = Arc::new(DatabaseHealth { pool: pool.clone() });
+
+NestFactory::create::<AppModule>()
+    .enable_readiness_check("/ready", [db_health as Arc<dyn HealthIndicator>])
+    .listen(3000)
+    .await;
+```
+
+When any indicator returns `HealthStatus::Down`, the readiness endpoint returns `503` with a Terminus-style JSON summary containing `status`, `info`, `error`, and `details` keys.
+
+## OpenTelemetry (OTLP)
+
+Enable the `otel` feature to export spans to any OTLP-compatible collector (Jaeger, Tempo, Honeycomb, etc.):
+
+```toml
+[dependencies]
+nestrs = { version = "0.3.8", features = ["otel"] }
+```
+
+Replace `configure_tracing` with `configure_tracing_opentelemetry` and supply an `OpenTelemetryConfig`:
+
+```rust
+use nestrs::prelude::*;
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let tracing = TracingConfig::builder().format(TracingFormat::Json);
+    let otel = OpenTelemetryConfig::new("my-service")
+        .endpoint("http://localhost:4317")
+        .sample_ratio(1.0);
+
+    NestFactory::create::<AppModule>()
+        .configure_tracing_opentelemetry(tracing, otel)
+        .use_request_id()
+        .use_request_tracing(RequestTracingOptions::builder().skip_paths(["/metrics"]))
+        .enable_metrics("/metrics")
+        .listen(3000)
+        .await;
+}
+```
+
+When `endpoint` is not set, nestrs falls back to the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable, then to `http://localhost:4317`.
+
+<Tip>
+Use `try_init_tracing` or `try_init_tracing_opentelemetry` directly if you need to install the tracing subscriber outside of the `NestApplication` builder chain (for example in test harnesses or CLI tools).
+</Tip>
+
+## Environment variables reference
+
+| Variable | Role |
+|---|---|
+| `NESTRS_LOG` | Primary log filter directive. Overrides `RUST_LOG` and `TracingConfig::default_directive`. |
+| `RUST_LOG` | Fallback filter when `NESTRS_LOG` is unset (standard `tracing-subscriber` semantics). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector address when not set via `OpenTelemetryConfig::endpoint`. |
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| No log output | `configure_tracing` must run before `listen`. Check `NESTRS_LOG` / `RUST_LOG` and confirm nothing else installs a conflicting global subscriber. |
+| `/metrics` floods access logs | Add `/metrics` to `RequestTracingOptions::skip_paths`. |
+| Spans missing in Jaeger or Tempo | Confirm the `otel` feature is enabled, the endpoint URL is reachable, and the sampling ratio is > 0. Check that the collector receives traffic on the expected gRPC or HTTP port. |
+| High cardinality in `http.route` | Expected — path is the literal URI at this layer. Add a custom layer or a business metric if you need route-template labels in OTLP dashboards. |
+
+## Local dev vs production
+
+<Tabs>
+  <Tab title="Local development">
+
+```rust
+TracingConfig::builder()
+    .format(TracingFormat::Pretty)
+    .default_directive("debug,nestrs=trace")
+```
+
+  </Tab>
+  <Tab title="Production">
+
+```rust
+let tracing = TracingConfig::builder()
+    .format(TracingFormat::Json)
+    .default_directive("info");
+
+let otel = OpenTelemetryConfig::new("my-service")
+    .sample_ratio(0.1);  // sample 10% in high-volume prod
+```
+
+  </Tab>
+</Tabs>

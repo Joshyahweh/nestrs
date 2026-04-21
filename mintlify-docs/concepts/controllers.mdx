@@ -1,0 +1,218 @@
+---
+title: "Controllers and HTTP routing in nestrs"
+description: "Define route handlers with #[controller] and #[routes], use HTTP method macros, extract path and query parameters, and inject services via Axum's State extractor."
+---
+
+Controllers group related route handlers under a common URL prefix. In nestrs, a controller is a plain Rust struct annotated with `#[controller]`. Route handlers live in an `impl` block annotated with `#[routes]`. When the module builds, nestrs registers every handler in that `impl` block as an Axum route under the controller's prefix.
+
+## Defining a controller
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[controller(prefix = "/api")]
+pub struct AppController;
+```
+
+The `prefix` argument sets the base path for every route in the controller. Paths are joined with each handler's path, so `prefix = "/api"` + `#[get("/")]` produces `GET /api/`.
+
+### Optional attributes
+
+| Attribute | Description |
+|---|---|
+| `prefix = "..."` | Base path prepended to all route paths in this controller |
+| `version = "v1"` | URI version segment (requires `enable_uri_versioning` on `NestApplication`) |
+
+Use the `#[version]` attribute separately to apply a version to an entire controller struct:
+
+```rust
+#[version("v2")]
+#[controller(prefix = "/api")]
+pub struct AppControllerV2;
+```
+
+## Registering routes with `#[routes]`
+
+The `#[routes]` macro annotates an `impl` block and takes a `state` argument that names the injected service type. nestrs uses this to build an Axum router with the correct `State` type:
+
+```rust
+#[routes(state = AppService)]
+impl AppController {
+    #[get("/")]
+    pub async fn root(State(service): State<Arc<AppService>>) -> &'static str {
+        service.get_hello()
+    }
+}
+```
+
+<Note>
+  `state` must be a type registered in the same module's `providers` list. nestrs resolves it from the `ProviderRegistry` and injects it as Axum `State`.
+</Note>
+
+## HTTP method macros
+
+nestrs provides a macro for every HTTP method:
+
+| Macro | Method |
+|---|---|
+| `#[get("path")]` | GET |
+| `#[post("path")]` | POST |
+| `#[put("path")]` | PUT |
+| `#[patch("path")]` | PATCH |
+| `#[delete("path")]` | DELETE |
+| `#[options("path")]` | OPTIONS |
+| `#[head("path")]` | HEAD |
+| `#[all("path")]` | All methods |
+
+Each macro takes the route path as its argument. The path is appended to the controller's prefix.
+
+## Route examples
+
+### Basic GET and POST
+
+```rust
+#[routes(state = AppService)]
+impl AppController {
+    #[get("/")]
+    pub async fn root(State(service): State<Arc<AppService>>) -> &'static str {
+        service.get_hello()
+    }
+
+    #[post("/users")]
+    pub async fn create_user(
+        State(service): State<Arc<AppService>>,
+        ValidatedBody(dto): ValidatedBody<CreateUserDto>,
+    ) -> Result<Json<UserResponse>, HttpException> {
+        Ok(Json(service.create_user(dto)))
+    }
+}
+```
+
+### Path parameters
+
+Use Axum's `Path` extractor. Parameters are declared in the route path with a colon prefix (`:id`):
+
+```rust
+#[get("/users/:id")]
+pub async fn get_user(
+    State(service): State<Arc<UserService>>,
+    Path(id): Path<i64>,
+) -> Result<Json<UserRow>, HttpException> {
+    service.find_by_id(id).await
+        .map(Json)
+        .map_err(NotFoundException::new)
+}
+```
+
+### Query parameters
+
+Use Axum's `Query` extractor with a deserializable struct:
+
+```rust
+#[derive(serde::Deserialize)]
+pub struct SearchQuery {
+    pub q: String,
+    pub limit: Option<usize>,
+}
+
+#[get("/search")]
+pub async fn search(
+    State(service): State<Arc<SearchService>>,
+    Query(params): Query<SearchQuery>,
+) -> Json<Vec<SearchResult>> {
+    Json(service.search(&params.q, params.limit.unwrap_or(10)).await)
+}
+```
+
+### JSON request bodies
+
+Use Axum's `Json` extractor for unvalidated JSON, or `ValidatedBody` to run `validator` constraints automatically:
+
+<CodeGroup>
+
+```rust ValidatedBody (recommended)
+#[post("/users")]
+pub async fn create_user(
+    State(service): State<Arc<AppService>>,
+    ValidatedBody(dto): ValidatedBody<CreateUserDto>,
+) -> Result<Json<UserResponse>, HttpException> {
+    if dto.name.eq_ignore_ascii_case("admin") {
+        return Err(ConflictException::new("`admin` is reserved in this demo"));
+    }
+    Ok(Json(service.create_user(dto)))
+}
+```
+
+```rust Plain Json
+#[post("/items")]
+pub async fn create_item(
+    State(service): State<Arc<ItemService>>,
+    Json(body): Json<CreateItemDto>,
+) -> Json<ItemResponse> {
+    Json(service.create(body))
+}
+```
+
+</CodeGroup>
+
+## Response customization
+
+### Custom HTTP status code
+
+```rust
+#[get("/created-style")]
+#[http_code(201)]
+pub async fn created_style() -> &'static str {
+    "created-style"
+}
+```
+
+### Custom response headers
+
+```rust
+#[get("/header-style")]
+#[response_header("x-powered-by", "nestrs")]
+pub async fn header_style() -> &'static str {
+    "header-style"
+}
+```
+
+### Redirects
+
+```rust
+#[get("/docs")]
+#[redirect("https://docs.nestjs.com")]
+pub async fn docs() -> &'static str {
+    "docs"
+}
+```
+
+## Versioning a single route
+
+You can version a single route within a controller using `#[ver]` while leaving other routes at the controller's default version:
+
+```rust
+#[get("/feature")]
+#[ver("v2")]
+pub async fn versioned_feature() -> &'static str {
+    "feature-route-v2"
+}
+```
+
+## Registering the controller in a module
+
+Controllers must be listed in the `controllers` field of their module:
+
+```rust
+#[module(
+    imports  = [DataModule],
+    controllers = [AppController, AppControllerV2],
+    providers  = [AppService],
+)]
+pub struct AppModule;
+```
+
+<Tip>
+  A single controller can only be registered in one module. Shared logic belongs in a provider (service), not a controller.
+</Tip>

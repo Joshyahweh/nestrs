@@ -1,0 +1,208 @@
+---
+title: "Recipe B — REST + MongoDB"
+description: "MongoModule bootstrap, BSON ProfileDoc, indexes, CRUD routes, Docker, and GraphQL pairing (Recipe D)."
+---
+
+**Goal:** Official **`mongodb`** driver via **`MongoModule`** / **`MongoService`**—Nest-style bootstrap only (no Mongoose runtime).
+
+Full chapter: **[Recipe B in backend-recipes.md](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/backend-recipes.md)**.
+
+## Dependencies
+
+```toml
+nestrs = { version = "0.3.8", features = ["mongo"] }
+mongodb = "3"
+bson = "3"
+futures-util = { version = "0.3", features = ["sink"] }
+serde = { version = "1", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+## Bootstrap
+
+```rust
+let _ = nestrs::MongoModule::for_root(
+    std::env::var("MONGODB_URI").unwrap_or_else(|_| "mongodb://127.0.0.1:27017".into()),
+);
+```
+
+## Docker (local)
+
+```bash
+docker run --name nestrs-mongo -p 27017:27017 -d mongo:7
+export MONGODB_URI="mongodb://127.0.0.1:27017"
+```
+
+## Typed document with `_id` (CRUD reads)
+
+```rust
+use bson::oid::ObjectId;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProfileDoc {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub email: String,
+    pub display_name: String,
+}
+```
+
+## REST CRUD surface (example)
+
+| Method | Path | Notes |
+|--------|------|--------|
+| `GET` | `/v1/profiles/` | List + optional **`skip`** query |
+| `GET` | `/v1/profiles/:id` | **`ObjectId`** parse → **`find_one`** |
+| `POST` | `/v1/profiles/` | **`insert_one`** |
+| `PUT` | `/v1/profiles/` | **`replace_one`** upsert by email |
+| `PATCH` | `/v1/profiles/:id` | **`find_one_and_update`** + **`$set`** |
+| `DELETE` | `/v1/profiles/:id` | **`delete_one`** by **`_id`** |
+
+## Unique email index (startup)
+
+Use **`IndexModel`** + **`IndexOptions::builder().unique(true)`** once after **`MongoModule::for_root`**—see Recipe B § B.10 in the mdBook chapter.
+
+## Production MongoDB CRUD
+
+Document APIs in production usually add **tenant isolation**, **indexes that match queries**, and **honest partial updates**.
+
+## End-to-end example: customer profiles API
+
+This shape is common for B2B SaaS admin APIs where support agents need fast reads, partial updates, and soft failure handling around duplicate emails.
+
+```rust
+use bson::{doc, oid::ObjectId, DateTime};
+use mongodb::{
+    options::{FindOneAndUpdateOptions, ReturnDocument},
+    Collection,
+};
+use nestrs::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use validator::Validate;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProfileDoc {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub tenant_id: String,
+    pub email: String,
+    pub display_name: String,
+    pub status: String,
+    pub updated_at: DateTime,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreateProfileDto {
+    #[validate(email)]
+    pub email: String,
+    #[validate(length(min = 2, max = 80))]
+    pub display_name: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct PatchProfileDto {
+    #[validate(length(min = 2, max = 80))]
+    pub display_name: Option<String>,
+    pub status: Option<String>,
+}
+
+#[injectable]
+pub struct ProfileStore {
+    mongo: Arc<MongoService>,
+}
+
+impl ProfileStore {
+    async fn collection(&self) -> Result<Collection<ProfileDoc>, HttpException> {
+        let db = self
+            .mongo
+            .database("app")
+            .await
+            .map_err(InternalServerErrorException::new)?;
+        Ok(db.collection::<ProfileDoc>("profiles"))
+    }
+
+    pub async fn create(
+        &self,
+        tenant_id: &str,
+        body: CreateProfileDto,
+    ) -> Result<ProfileDoc, HttpException> {
+        let col = self.collection().await?;
+        let mut doc = ProfileDoc {
+            id: None,
+            tenant_id: tenant_id.to_owned(),
+            email: body.email,
+            display_name: body.display_name,
+            status: "active".into(),
+            updated_at: DateTime::now(),
+        };
+        let result = col
+            .insert_one(&doc)
+            .await
+            .map_err(InternalServerErrorException::new)?;
+        doc.id = result.inserted_id.as_object_id();
+        Ok(doc)
+    }
+
+    pub async fn patch(
+        &self,
+        tenant_id: &str,
+        id: ObjectId,
+        body: PatchProfileDto,
+    ) -> Result<ProfileDoc, HttpException> {
+        let col = self.collection().await?;
+        let updated = col
+            .find_one_and_update(
+                doc! { "_id": id, "tenant_id": tenant_id },
+                doc! {
+                    "$set": {
+                        "display_name": body.display_name,
+                        "status": body.status,
+                        "updated_at": DateTime::now(),
+                    }
+                },
+                FindOneAndUpdateOptions::builder()
+                    .return_document(ReturnDocument::After)
+                    .build(),
+            )
+            .await
+            .map_err(InternalServerErrorException::new)?;
+
+        updated.ok_or_else(|| NotFoundException::new("profile not found").into())
+    }
+}
+```
+
+Pair this with a compound unique index on **`tenant_id + email`** and a list index on **`tenant_id + updated_at desc`**. That covers the two most common production queries: “find by email” and “show recent profiles.”
+
+### Multi-tenant documents
+
+Model **`tenant_id`** (or **`org_id`**) on every document you query by scope. Create a **compound unique index** on **`(tenant_id, email)`** instead of globally unique email when the same email may exist under different tenants.
+
+```rust
+// Index keys (conceptual) — align field names with ProfileDoc / BSON.
+// { tenant_id: 1, email: 1 } unique
+// { tenant_id: 1, updated_at: -1 } for recent lists
+```
+
+### Queries that scale
+
+For **`GET /profiles`**, use **`find`** with **`projection`** to avoid shipping large blobs, **`limit` + `skip`** (or cursor **`_id`-based** paging for deep offsets), and **`hint`** only when you have verified **`explain("executionStats")`** on staging.
+
+### Writes under contention
+
+Use **`find_one_and_update`** with **`ReturnDocument::After`** when you need **compare-and-set** semantics (for example incrementing **`version`**). For **multiple collections** that must commit together (transfer between accounts), use a **MongoDB transaction** (**`Client::start_session`** + multi-doc updates)—keep transactions short.
+
+### Replica sets and resilience
+
+Point **`MONGODB_URI`** at the replica-set connection string (`mongodb+srv://…` on Atlas). Prefer **retryable reads/writes** for transient network errors; map **`WriteError`** categories to **`409`** (duplicate), **`404`** (filter matched nothing), **`503`** (not master / stepdown).
+
+### Observability
+
+Log **`inserted_id`** / **`matched_count`** at **`debug`** level; emit metrics for **`mongodb_operation_duration_seconds`** per operation name (`profiles.insert_one`, …).
+
+<Note>
+  Prisma CLI can target Mongo for **schema tooling**; Rust reads/writes still go through **`mongodb`** + BSON unless you add another layer.
+</Note>

@@ -1,0 +1,246 @@
+---
+title: "Get started with nestrs in under 5 minutes"
+description: "Scaffold a new nestrs project with the CLI, run the server, and make your first HTTP request — step by step from zero to a working API."
+---
+
+nestrs ships a CLI called `nestrs-scaffold` (binary: `nestrs`) that creates a fully-wired project skeleton for you. This guide uses the CLI path. If you prefer to add nestrs to an existing Cargo project, see [Installation](/installation) instead.
+
+<Steps>
+
+<Step title="Install the CLI">
+
+Install `nestrs-scaffold` from crates.io. The binary is named `nestrs`.
+
+```bash
+cargo install nestrs-scaffold
+```
+
+Verify the installation:
+
+```bash
+nestrs --help
+```
+
+You should see output like:
+
+```
+nestrs CLI (crate: nestrs-scaffold)
+
+Codegen and project skeletons for https://crates.io/crates/nestrs
+...
+```
+
+<Note>
+  `cargo install` compiles the CLI from source. This takes a minute the first time. Subsequent updates are faster because Cargo caches dependencies.
+</Note>
+
+</Step>
+
+<Step title="Create a new project">
+
+Run `nestrs new` with your project name:
+
+```bash
+nestrs new my-api
+cd my-api
+```
+
+The CLI creates the following structure:
+
+```
+my-api/
+├── Cargo.toml
+├── Dockerfile
+├── README.md
+├── .env
+├── .env.example
+├── .gitignore
+└── src/
+    └── main.rs
+```
+
+The generated `Cargo.toml` includes `nestrs`, `tokio`, and `serde` as dependencies:
+
+```toml
+[package]
+name = "my-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nestrs = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+```
+
+<Tip>
+  Use `nestrs new my-api --strict` to add `#![deny(unsafe_code)]` to the generated `src/main.rs`. Use `--no-git` to skip initialising a git repository.
+</Tip>
+
+</Step>
+
+<Step title="Explore the generated application">
+
+Open `src/main.rs`. The CLI generates a complete working application with a module, a controller, an injectable service, and a bootstrapped `NestFactory`:
+
+```rust
+use nestrs::prelude::*;
+
+#[dto]
+pub struct PingDto {
+    #[IsString]
+    pub message: String,
+}
+
+#[controller(prefix = "/")]
+pub struct AppController;
+
+impl AppController {
+    #[get("/")]
+    pub async fn root() -> &'static str {
+        "Hello from nestrs"
+    }
+}
+
+#[derive(Default)]
+#[injectable]
+pub struct AppService;
+
+impl_routes!(AppController, state AppService => [
+    GET "/" with () => AppController::root,
+]);
+
+#[module(
+    controllers = [AppController],
+    providers = [AppService],
+)]
+pub struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(3000);
+
+    NestFactory::create::<AppModule>()
+        .set_global_prefix("api")
+        .use_request_id()
+        .use_request_tracing(RequestTracingOptions::builder().skip_paths(["/metrics"]))
+        .enable_metrics("/metrics")
+        .enable_health_check("/health")
+        .enable_production_errors_from_env()
+        .listen_graceful(port)
+        .await;
+}
+```
+
+Notice the three building blocks:
+
+- **`AppService`** — marked `#[injectable]`, registered in `providers`. This is where your business logic lives.
+- **`AppController`** — marked `#[controller(prefix = "/")]`, registered in `controllers`. Route handlers go in its `impl` block.
+- **`AppModule`** — marked `#[module(...)]`, wires the controller and provider together and is handed to `NestFactory`.
+
+</Step>
+
+<Step title="Run the server">
+
+Start the development server:
+
+```bash
+cargo run
+```
+
+Cargo compiles the project and starts the server. On first run this takes longer while dependencies are downloaded and compiled. Watch for output like:
+
+```
+listening on 0.0.0.0:3000
+```
+
+The `.env` file sets `PORT=3000` by default, so the server binds to port 3000 unless you override it.
+
+</Step>
+
+<Step title="Make your first HTTP request">
+
+The generated app mounts routes under the `api` global prefix. Send a request to the root handler:
+
+<CodeGroup>
+
+```bash curl
+curl http://127.0.0.1:3000/api/
+```
+
+```bash HTTPie
+http GET http://127.0.0.1:3000/api/
+```
+
+</CodeGroup>
+
+You should receive:
+
+```
+Hello from nestrs
+```
+
+The scaffolded app also provides two built-in endpoints:
+
+| Endpoint | Response |
+|---|---|
+| `GET /health` | `{"status":"ok"}` |
+| `GET /metrics` | Prometheus text format |
+
+```bash
+curl http://127.0.0.1:3000/health
+curl http://127.0.0.1:3000/metrics
+```
+
+</Step>
+
+</Steps>
+
+## What the scaffold gives you
+
+Beyond the minimal app, the generated project is production-ready from the start:
+
+- **Request IDs** — every request gets a `x-request-id` header via `.use_request_id()`.
+- **Structured tracing** — request/response logging via `.use_request_tracing(...)`.
+- **Prometheus metrics** — exported at `/metrics` via `.enable_metrics(...)`.
+- **Health check** — responds at `/health` via `.enable_health_check(...)`.
+- **Production error sanitisation** — 5xx bodies are stripped in production when `NESTRS_ENV=production`.
+- **Dockerfile** — multi-stage build ready to containerise your app.
+
+## Building a richer example
+
+The hello-app example in the repository shows a more complete application with controller versioning, DTO validation, SQLx database access, and HTTP exception helpers:
+
+```bash
+git clone https://github.com/Joshyahweh/nestrs
+cargo run -p hello-app
+```
+
+Source lives at `examples/hello-app/src/main.rs`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Core concepts" icon="book" href="/concepts/modules">
+    Understand how modules, controllers, and providers compose into a full application.
+  </Card>
+  <Card title="Installation and features" icon="download" href="/installation">
+    Add optional capabilities — WebSockets, GraphQL, OpenAPI, caching, and more — via Cargo feature flags.
+  </Card>
+  <Card title="DTO validation" icon="shield-check" href="/guides/validation">
+    Use `#[dto]`, `#[IsEmail]`, `#[Length]`, and other validation macros to validate request bodies automatically.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/overview">
+    Generate controllers, services, guards, pipes, and more with `nestrs generate`.
+  </Card>
+</CardGroup>

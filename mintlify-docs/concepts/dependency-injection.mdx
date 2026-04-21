@@ -1,0 +1,184 @@
+---
+title: "Dependency injection in nestrs"
+description: "Understand how nestrs resolves providers at runtime through ProviderRegistry and ModuleRef, the three injection scopes, and how to use request-scoped providers."
+---
+
+nestrs ships a synchronous, type-safe dependency injection container built on Rust's `TypeId` system. When you call `NestFactory::create::<AppModule>()`, the framework traverses the module graph, builds a `ProviderRegistry` that maps each registered type to a factory, and injects dependencies by resolving `Arc<T>` fields from that registry. No runtime reflection, no string keys — every injection site is checked at compile time.
+
+## How the container works at runtime
+
+`ProviderRegistry` is the heart of the DI system. It stores one entry per provider type, keyed by `TypeId`. When a type is requested, the registry calls the factory (the generated `Injectable::construct`), caches the result if the scope is `Singleton`, and returns an `Arc<T>`.
+
+```rust
+// From nestrs-core/src/lib.rs
+pub struct ProviderRegistry {
+    entries: HashMap<TypeId, ProviderEntry>,
+}
+
+impl ProviderRegistry {
+    pub fn get<T>(&self) -> Arc<T>
+    where
+        T: Send + Sync + 'static,
+    { /* resolve, construct, downcast */ }
+}
+```
+
+The `Module` trait's `build()` method returns a `(ProviderRegistry, Router)` pair. `NestFactory` composes these pairs from the entire module graph into a single registry and a merged Axum router, then wraps the registry in an `Arc` that is injected as Axum `State`.
+
+## The three provider scopes
+
+| Scope | `ProviderScope` variant | Behavior | NestJS equivalent |
+|---|---|---|---|
+| Singleton | `ProviderScope::Singleton` | One shared `Arc<T>` per application; constructed once, cached in a `OnceLock` | `Scope.DEFAULT` |
+| Transient | `ProviderScope::Transient` | A fresh `Arc<T>` is constructed on every `registry.get::<T>()` call | `Scope.TRANSIENT` |
+| Request | `ProviderScope::Request` | One `Arc<T>` per HTTP request, stored in a task-local cache | `Scope.REQUEST` |
+
+Set the scope with the `#[injectable]` attribute:
+
+```rust
+use nestrs::prelude::*;
+
+#[injectable]
+pub struct SingletonService; // default
+
+#[injectable(scope = "transient")]
+pub struct TransientService;
+
+#[injectable(scope = "request")]
+pub struct PerRequestService;
+```
+
+## `ModuleRef` — dynamic resolution after build
+
+`ModuleRef` is a thin handle to the root `ProviderRegistry` after the module graph is constructed. Use it when you need to resolve providers dynamically — for example, in plugins or conditional code — without injecting them as struct fields:
+
+```rust
+use nestrs::core::{DiscoveryService, ModuleRef};
+
+// Obtain before calling into_router():
+// let mref: ModuleRef = app.module_ref();
+
+let discovery = DiscoveryService::new(mref);
+let _provider_ids = discovery.get_providers();
+let _route_specs = discovery.get_routes(); // useful for OpenAPI / diagnostics
+```
+
+`ModuleRef::get::<T>()` follows the same scope rules as the container: singletons return the cached instance, transients produce a new one.
+
+```rust
+// nestrs-core/src/module_ref.rs
+impl ModuleRef {
+    pub fn get<T: Send + Sync + 'static>(&self) -> Arc<T> {
+        self.registry.get()
+    }
+}
+```
+
+## `DiscoveryService`
+
+`DiscoveryService` exposes two introspection surfaces:
+
+- `get_providers()` — `Vec<TypeId>` of every registered provider
+- `get_provider_type_names()` — debug-friendly `Vec<&'static str>` type names
+- `get_routes()` — all HTTP routes from the global `RouteRegistry` (useful for OpenAPI generation and diagnostics)
+
+```rust
+use nestrs::core::{DiscoveryService, ModuleRef};
+
+let discovery = DiscoveryService::new(mref);
+for name in discovery.get_provider_type_names() {
+    println!("registered: {name}");
+}
+for route in discovery.get_routes() {
+    println!("{} {}", route.method, route.path);
+}
+```
+
+<Note>
+  nestrs discovery is `TypeId`- and route-list-oriented. Unlike NestJS, there is no reflection over arbitrary metadata attached to class decorators.
+</Note>
+
+## NestJS DI concept mapping
+
+| NestJS concept | nestrs equivalent |
+|---|---|
+| `@Injectable()` | `#[injectable]` |
+| `@Module({ providers })` | `#[module(providers = [...])]` |
+| Constructor injection | `Arc<T>` fields resolved by `Injectable::construct` |
+| `Scope.DEFAULT` | `ProviderScope::Singleton` (default) |
+| `Scope.TRANSIENT` | `ProviderScope::Transient` |
+| `Scope.REQUEST` | `ProviderScope::Request` |
+| `useValue` | `registry.register_use_value::<T>(Arc<T>)` |
+| `useFactory` | `registry.register_use_factory::<T>(scope, \|reg\| Arc<T>)` |
+| `useClass` | `registry.register_use_class::<T>()` |
+| `ModuleRef` | `ModuleRef` from `nestrs::core` |
+| `DiscoveryService` | `DiscoveryService` from `nestrs::core` |
+| `forwardRef` | `forward_ref::<T>()` in `#[module(imports = [...])]` |
+| `ConfigModule.forRoot` | `ConfigurableModuleBuilder::for_root::<M>(options)` |
+| `ConfigModule.forRootAsync` | `ConfigurableModuleBuilder::for_root_async::<M, _, _>(async_fn).await` |
+
+## Request-scoped providers
+
+Request scope gives each HTTP request its own instance of a provider, isolated from other concurrent requests. This is useful for per-request caches, correlation IDs, or any state that must not leak between requests.
+
+### Enabling request scope
+
+Call `use_request_scope()` on your `NestApplication` before listening:
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_request_scope()
+    .listen_graceful(3000)
+    .await;
+```
+
+### Marking a provider as request-scoped
+
+```rust
+#[injectable(scope = "request")]
+pub struct RequestContext {
+    pub request_id: String,
+}
+```
+
+### Extracting request-scoped providers in handlers
+
+Use the `RequestScoped<T>` Axum extractor:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[routes(state = AppService)]
+impl AppController {
+    #[get("/trace")]
+    pub async fn trace(
+        State(service): State<Arc<AppService>>,
+        RequestScoped(ctx): RequestScoped<RequestContext>,
+    ) -> String {
+        format!("request_id={}", ctx.request_id)
+    }
+}
+```
+
+nestrs stores the request-scoped cache in a `tokio::task_local!` variable. Every request gets a fresh, empty cache; the first call to `registry.get::<T>()` for a `Request`-scoped type within that task constructs and caches the instance for the lifetime of that request.
+
+<Warning>
+  Resolving a `Request`-scoped provider outside a request context (for example, during `eager_init_singletons`) **panics** because no task-local cache exists. Always enable `use_request_scope()` on the application before using the `RequestScoped` extractor.
+</Warning>
+
+## Circular provider dependencies
+
+If two providers each depend on the other, nestrs detects the cycle during construction and panics:
+
+```
+Circular provider dependency detected: TypeA -> TypeB -> TypeA
+```
+
+**Fixes:**
+
+- Split the shared concern into a third type that both depend on.
+- Defer work to `on_module_init` so `construct` only wires `Arc`s without triggering the cycle.
+- Use `register_use_factory` with a closure that resolves one side lazily on first use.
+
+There is no `forwardRef` for individual providers — cycles must be broken in code structure or initialization order.

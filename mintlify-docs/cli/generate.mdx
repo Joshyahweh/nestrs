@@ -1,0 +1,885 @@
+---
+title: "Generate code with nestrs generate"
+description: "Use nestrs generate (or nestrs g) to scaffold services, controllers, modules, DTOs, guards, pipes, filters, interceptors, and full CRUD resources."
+---
+
+`nestrs generate` (aliased as `nestrs g`) creates individual source files or full multi-file resource scaffolds from built-in templates. Every generated file uses real nestrs macros and compiles out of the box. For resource generators, the CLI also automatically wires the new module into your parent `main.rs`, `lib.rs`, or `mod.rs`.
+
+## Syntax
+
+```bash
+nestrs g <kind> <name> [flags]
+nestrs generate <kind> <name> [flags]
+```
+
+`<name>` is converted to `snake_case` for file names and field references and to `PascalCase` for struct names automatically.
+
+## Generator kinds and aliases
+
+| Full name | Short alias | Description |
+|-----------|-------------|-------------|
+| `resource` | `res` | Full CRUD scaffold: module, service, controller/resolver/gateway/transport, and two DTOs. |
+| `service` | `s` | Injectable service struct with a stub `name()` method. |
+| `controller` | `co` | Controller struct with a `prefix` attribute. |
+| `module` | `mo` | Module struct wiring a controller and service. |
+| `dto` | `dto` | DTO struct with `#[IsString]` and `#[Length]` validators. |
+| `guard` | `gu` | `CanActivate` implementation that returns `Ok(())` by default. |
+| `pipe` | `pi` | `PipeTransform<String>` implementation with pass-through logic. |
+| `filter` | `fi` | `ExceptionFilter` implementation that delegates to `HttpException::into_response`. |
+| `interceptor` | `in` | `Interceptor` implementation that calls `next.run(req)`. |
+| `strategy` | `st` | Bare strategy struct with a `name()` method. |
+| `resolver` | `r` | Bare resolver struct (GraphQL entry point placeholder). |
+| `gateway` | `ga` | Bare gateway struct (WebSocket entry point placeholder). |
+| `microservice` | `ms` | Microservice struct with a `transport()` method. |
+| `transport` | `tr` | Bare transport struct. |
+
+## Flags
+
+| Flag | Values | Description |
+|------|--------|-------------|
+| `--style` | `nest` (default), `rust` | Controls file naming. `nest` uses `name.kind.rs` (e.g., `users.controller.rs`); `rust` uses `name_kind.rs` (e.g., `users_controller.rs`). |
+| `--path` | any directory | Base directory for output. Defaults to `src`. |
+| `--dry-run` | — | Print what would be created without writing any files. |
+| `--force` | — | Overwrite files that already exist. |
+| `--quiet` | — | Suppress all console output. |
+| `--transport` | `rest`, `graphql`, `ws`, `grpc`, `microservice` | **Resource generators only.** Selects which transport layer to scaffold. Defaults to `rest`, or prompts interactively when stdin is a terminal. |
+| `--no-interactive` | — | **Resource generators only.** Skip the transport prompt and use `rest` when `--transport` is not provided. |
+
+<Tip>
+  Always run with `--dry-run` first when you are generating into an existing source tree. The CLI will print every file it would create — and show any parent module wiring — without touching the disk.
+</Tip>
+
+## File naming: `--style nest` vs `--style rust`
+
+<Tabs>
+  <Tab title="--style nest (default)">
+    Files are named `<stem>.<kind>.rs`, matching the Nest CLI convention:
+
+    ```
+    src/users/
+    ├── users.module.rs
+    ├── users.controller.rs
+    ├── users.service.rs
+    ├── create_users.dto.rs
+    ├── update_users.dto.rs
+    └── mod.rs
+    ```
+
+    The `mod.rs` uses `#[path = "..."]` attributes to load the dotted filenames.
+  </Tab>
+  <Tab title="--style rust">
+    Files are named `<stem>_<kind>.rs`, matching idiomatic Rust conventions:
+
+    ```
+    src/users/
+    ├── users_module.rs
+    ├── users_controller.rs
+    ├── users_service.rs
+    ├── create_users_dto.rs
+    ├── update_users_dto.rs
+    └── mod.rs
+    ```
+
+    The `mod.rs` uses plain `pub mod` declarations.
+  </Tab>
+</Tabs>
+
+## Automatic parent module wiring
+
+After generating a resource, the CLI searches the `--path` directory for `main.rs`, `lib.rs`, or `mod.rs` in that order. If it finds one, it appends:
+
+```rust
+pub mod users;
+use crate::users::UsersModule;
+```
+
+If no parent file is found, it prints the lines to add manually:
+
+```
+// ADD: pub mod users;
+// ADD: use crate::users::UsersModule;
+```
+
+<Note>
+  Automatic wiring only touches `main.rs`, `lib.rs`, or `mod.rs`. It will not modify arbitrary Rust files.
+</Note>
+
+## Resource generator: transport options
+
+The `resource` generator is the most complete generator — it creates a module, service, two DTOs, a `mod.rs`, and a transport-specific entry file in one command.
+
+```bash
+# Interactive prompt (when stdin is a terminal)
+nestrs g resource users
+
+# Explicit transport
+nestrs g resource users --transport rest --path src
+
+# Dry run first
+nestrs g resource users --transport graphql --path src --dry-run
+```
+
+Each transport produces a different entry file while sharing the same CRUD service and DTOs.
+
+### Generated files per transport
+
+| Transport | Entry file kind | File (nest style) |
+|-----------|-----------------|-------------------|
+| `rest` | `controller` | `users.controller.rs` |
+| `graphql` | `resolver` | `users.resolver.rs` |
+| `ws` | `gateway` | `users.gateway.rs` |
+| `grpc` | `grpc` | `users.grpc.rs` |
+| `microservice` | `transport` | `users.transport.rs` |
+
+## Generator templates
+
+The code below shows the exact template output for a generator named `users` (snake: `users`, pascal: `Users`). Real names are substituted at generation time.
+
+<AccordionGroup>
+  <Accordion title="service">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[derive(Default)]
+    #[injectable]
+    pub struct UsersService;
+
+    impl UsersService {
+        pub fn name(&self) -> &'static str {
+            "users"
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="controller">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[controller(prefix = "/users")]
+    pub struct UsersController;
+    ```
+  </Accordion>
+
+  <Accordion title="module">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[module(
+        controllers = [UsersController],
+        providers = [UsersService],
+    )]
+    pub struct UsersModule;
+    ```
+  </Accordion>
+
+  <Accordion title="dto">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[dto]
+    pub struct UsersDto {
+        #[IsString]
+        #[Length(min = 1, max = 120)]
+        pub name: String,
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="guard">
+    ```rust
+    use nestrs::prelude::*;
+
+    /// Use in `impl_routes!`: `with (UsersGuard)` or `controller_guards(UsersGuard)`.
+    #[derive(Default)]
+    pub struct UsersGuard;
+
+    #[async_trait]
+    impl CanActivate for UsersGuard {
+        async fn can_activate(
+            &self,
+            _parts: &axum::http::request::Parts,
+        ) -> Result<(), GuardError> {
+            Ok(())
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="pipe">
+    ```rust
+    use nestrs::prelude::*;
+
+    /// Customize `Input` / `Output` / `Error` for your use case.
+    #[derive(Default)]
+    pub struct UsersPipe;
+
+    #[async_trait]
+    impl PipeTransform<String> for UsersPipe {
+        type Output = String;
+        type Error = HttpException;
+
+        async fn transform(&self, value: String) -> Result<Self::Output, Self::Error> {
+            Ok(value)
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="filter">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[derive(Default)]
+    pub struct UsersFilter;
+
+    #[async_trait]
+    impl ExceptionFilter for UsersFilter {
+        async fn catch(&self, ex: HttpException) -> axum::response::Response {
+            ex.into_response()
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="interceptor">
+    ```rust
+    use nestrs::prelude::*;
+
+    #[derive(Default)]
+    pub struct UsersInterceptor;
+
+    #[async_trait]
+    impl Interceptor for UsersInterceptor {
+        async fn intercept(
+            &self,
+            req: axum::extract::Request,
+            next: axum::middleware::Next,
+        ) -> axum::response::Response {
+            next.run(req).await
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="strategy">
+    ```rust
+    pub struct UsersStrategy;
+
+    impl UsersStrategy {
+        pub fn name(&self) -> &'static str {
+            "users"
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="resolver (standalone)">
+    The standalone `resolver` generator produces a bare stub. For a full GraphQL CRUD resolver, use `nestrs g resource users --transport graphql`.
+
+    ```rust
+    pub struct UsersResolver;
+    ```
+  </Accordion>
+
+  <Accordion title="gateway (standalone)">
+    The standalone `gateway` generator produces a bare stub. For a full WebSocket gateway, use `nestrs g resource users --transport ws`.
+
+    ```rust
+    pub struct UsersGateway;
+    ```
+  </Accordion>
+
+  <Accordion title="microservice (standalone)">
+    ```rust
+    use nestrs::prelude::*;
+
+    pub struct UsersMicroservice;
+
+    impl UsersMicroservice {
+        pub fn transport(&self) -> &'static str {
+            "message-based"
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="transport (standalone)">
+    The standalone `transport` generator produces a bare stub. For full message patterns, use `nestrs g resource users --transport microservice` or `--transport grpc`.
+
+    ```rust
+    pub struct UsersTransport;
+    ```
+  </Accordion>
+
+  <Accordion title="resource --transport rest (CRUD service)">
+    Shared across all transport kinds. Uses an in-memory `HashMap` store — swap it for a real database in production.
+
+    ```rust
+    use nestrs::prelude::*;
+    use serde::Serialize;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    /// JSON / HTTP / message payload view of a `Users` row.
+    #[derive(Clone, Serialize)]
+    pub struct UsersResponse {
+        pub id: u64,
+        pub name: String,
+    }
+
+    /// In-memory CRUD store (swap for a real database in production).
+    #[injectable]
+    pub struct UsersService {
+        store: Arc<RwLock<HashMap<u64, UsersResponse>>>,
+        next_id: Arc<RwLock<u64>>,
+    }
+
+    impl Default for UsersService {
+        fn default() -> Self {
+            Self {
+                store: Arc::new(RwLock::new(HashMap::new())),
+                next_id: Arc::new(RwLock::new(1)),
+            }
+        }
+    }
+
+    impl UsersService {
+        pub async fn list(&self) -> Vec<UsersResponse> {
+            let g = self.store.read().await;
+            g.values().cloned().collect()
+        }
+
+        pub async fn get(&self, id: u64) -> Option<UsersResponse> {
+            self.store.read().await.get(&id).cloned()
+        }
+
+        pub async fn create(&self, name: String) -> UsersResponse {
+            let mut idg = self.next_id.write().await;
+            let id = *idg;
+            *idg += 1;
+            let row = UsersResponse { id, name };
+            self.store.write().await.insert(id, row.clone());
+            row
+        }
+
+        pub async fn update(&self, id: u64, name: String) -> Result<UsersResponse, HttpException> {
+            let mut g = self.store.write().await;
+            let entry = g
+                .get_mut(&id)
+                .ok_or_else(|| NotFoundException::new("not found"))?;
+            entry.name = name;
+            Ok(entry.clone())
+        }
+
+        pub async fn delete(&self, id: u64) -> Result<(), HttpException> {
+            self.store
+                .write()
+                .await
+                .remove(&id)
+                .ok_or_else(|| NotFoundException::new("not found"))?;
+            Ok(())
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="resource --transport rest (controller)">
+    The REST controller registers five routes and includes optional OpenAPI attributes. Add `features = ["openapi"]` to `nestrs` in `Cargo.toml` and chain `.enable_openapi()` on `NestFactory` to activate the `/openapi.json` endpoint.
+
+    ```rust
+    use nestrs::prelude::*;
+    use std::sync::Arc;
+    use super::users_service::{UsersResponse, UsersService};
+
+    #[dto]
+    pub struct UsersIdParam {
+        #[validate(range(min = 1))]
+        pub id: u64,
+    }
+
+    #[controller(prefix = "/users")]
+    pub struct UsersController;
+
+    #[routes(state = UsersService)]
+    impl UsersController {
+        #[openapi(summary = "List Users rows", tag = "users", responses = ((200, "OK")))]
+        #[get("/")]
+        #[serialize]
+        async fn list(State(s): State<Arc<UsersService>>) -> Vec<UsersResponse> {
+            s.list().await
+        }
+
+        #[openapi(
+            summary = "Get Users by id",
+            tag = "users",
+            responses = ((200, "Found"), (404, "Not found"))
+        )]
+        #[get("/:id")]
+        #[serialize]
+        #[use_pipes(ValidationPipe)]
+        async fn get_one(
+            State(s): State<Arc<UsersService>>,
+            #[param::param] p: UsersIdParam,
+        ) -> Result<UsersResponse, HttpException> {
+            s.get(p.id)
+                .await
+                .ok_or_else(|| NotFoundException::new("not found"))
+        }
+
+        #[openapi(summary = "Create Users", tag = "users", responses = ((200, "Created")))]
+        #[post("/")]
+        #[serialize]
+        #[use_pipes(ValidationPipe)]
+        async fn create(
+            State(s): State<Arc<UsersService>>,
+            #[param::body] body: super::create_users_dto::CreateUsersDto,
+        ) -> UsersResponse {
+            s.create(body.name).await
+        }
+
+        #[openapi(
+            summary = "Update Users",
+            tag = "users",
+            responses = ((200, "Updated"), (404, "Not found"))
+        )]
+        #[put("/:id")]
+        #[serialize]
+        #[use_pipes(ValidationPipe)]
+        async fn update(
+            State(s): State<Arc<UsersService>>,
+            #[param::param] p: UsersIdParam,
+            #[param::body] body: super::update_users_dto::UpdateUsersDto,
+        ) -> Result<UsersResponse, HttpException> {
+            s.update(p.id, body.name).await
+        }
+
+        #[openapi(
+            summary = "Delete Users",
+            tag = "users",
+            responses = ((200, "Deleted"), (404, "Not found"))
+        )]
+        #[delete("/:id")]
+        #[serialize]
+        #[use_pipes(ValidationPipe)]
+        async fn delete(
+            State(s): State<Arc<UsersService>>,
+            #[param::param] p: UsersIdParam,
+        ) -> Result<&'static str, HttpException> {
+            s.delete(p.id).await?;
+            Ok("deleted")
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="resource --transport graphql (resolver)">
+    Requires `nestrs = { version = "...", features = ["graphql"] }` and `async-graphql = "=7.0.17"` in `Cargo.toml`. Wire the schema in `main.rs` via `app.enable_graphql(schema)`.
+
+    ```rust
+    use async_graphql::{Context, Object, SimpleObject};
+    use nestrs::prelude::*;
+    use std::sync::Arc;
+    use super::users_service::{UsersResponse, UsersService};
+
+    #[derive(SimpleObject, Clone)]
+    pub struct UsersGqlRow {
+        pub id: u64,
+        pub name: String,
+    }
+
+    impl From<UsersResponse> for UsersGqlRow {
+        fn from(r: UsersResponse) -> Self {
+            Self { id: r.id, name: r.name }
+        }
+    }
+
+    #[derive(Default)]
+    pub struct UsersGqlQuery;
+
+    #[Object]
+    impl UsersGqlQuery {
+        async fn users_list(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<UsersGqlRow>> {
+            let s = ctx.data::<Arc<UsersService>>()?;
+            Ok(s.list().await.into_iter().map(Into::into).collect())
+        }
+
+        async fn users_get(&self, ctx: &Context<'_>, id: u64) -> async_graphql::Result<Option<UsersGqlRow>> {
+            let s = ctx.data::<Arc<UsersService>>()?;
+            Ok(s.get(id).await.map(Into::into))
+        }
+    }
+
+    #[derive(Default)]
+    pub struct UsersGqlMutation;
+
+    #[Object]
+    impl UsersGqlMutation {
+        async fn users_create(&self, ctx: &Context<'_>, name: String) -> async_graphql::Result<UsersGqlRow> {
+            let s = ctx.data::<Arc<UsersService>>()?;
+            Ok(s.create(name).await.into())
+        }
+
+        async fn users_update(
+            &self,
+            ctx: &Context<'_>,
+            id: u64,
+            name: String,
+        ) -> async_graphql::Result<UsersGqlRow> {
+            let s = ctx.data::<Arc<UsersService>>()?;
+            s.update(id, name)
+                .await
+                .map_err(|e| async_graphql::Error::new(e.message.clone()))
+                .map(Into::into)
+        }
+
+        async fn users_delete(&self, ctx: &Context<'_>, id: u64) -> async_graphql::Result<bool> {
+            let s = ctx.data::<Arc<UsersService>>()?;
+            s.delete(id)
+                .await
+                .map_err(|e| async_graphql::Error::new(e.message.clone()))?;
+            Ok(true)
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="resource --transport ws (gateway)">
+    Requires `nestrs = { version = "...", features = ["ws"] }`. Client frames use `{ "event": "...", "data": { ... } }` JSON envelopes.
+
+    ```rust
+    use nestrs::prelude::*;
+    use std::sync::Arc;
+    use super::users_service::UsersService;
+
+    #[ws_gateway(path = "/users/ws")]
+    #[injectable]
+    pub struct UsersGateway {
+        service: Arc<UsersService>,
+    }
+
+    #[ws_routes]
+    impl UsersGateway {
+        #[subscribe_message("users.list")]
+        async fn list(&self, client: nestrs::ws::WsClient, _payload: serde_json::Value) {
+            let rows = self.service.list().await;
+            let _ = client.emit("users.list.ok", rows);
+        }
+
+        #[subscribe_message("users.get")]
+        async fn get_one(&self, client: nestrs::ws::WsClient, payload: serde_json::Value) {
+            let id = payload.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let body = match self.service.get(id).await {
+                Some(row) => serde_json::json!({ "ok": true, "item": row }),
+                None => serde_json::json!({ "ok": false, "error": "not_found" }),
+            };
+            let _ = client.emit_json("users.get.ok", body);
+        }
+
+        #[subscribe_message("users.create")]
+        async fn create(&self, client: nestrs::ws::WsClient, payload: serde_json::Value) {
+            let name = payload
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let row = self.service.create(name).await;
+            let _ = client.emit("users.create.ok", row);
+        }
+
+        #[subscribe_message("users.update")]
+        async fn update(&self, client: nestrs::ws::WsClient, payload: serde_json::Value) {
+            let id = payload.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let name = payload
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let body = match self.service.update(id, name).await {
+                Ok(row) => serde_json::json!({ "ok": true, "item": row }),
+                Err(e) => serde_json::json!({ "ok": false, "error": e.message }),
+            };
+            let _ = client.emit_json("users.update.ok", body);
+        }
+
+        #[subscribe_message("users.delete")]
+        async fn delete(&self, client: nestrs::ws::WsClient, payload: serde_json::Value) {
+            let id = payload.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let body = match self.service.delete(id).await {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(e) => serde_json::json!({ "ok": false, "error": e.message }),
+            };
+            let _ = client.emit_json("users.delete.ok", body);
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="resource --transport grpc (transport)">
+    Requires `nestrs` features `microservices` and `microservices-grpc`. Bootstrap with `NestFactory::create_microservice_grpc::<RootModule>(...)`.
+
+    ```rust
+    use nestrs::prelude::*;
+    use std::sync::Arc;
+    use super::users_service::{UsersResponse, UsersService};
+
+    #[dto]
+    struct UsersGetReq {
+        #[validate(range(min = 1))]
+        id: u64,
+    }
+
+    #[dto]
+    struct UsersDeleteReq {
+        #[validate(range(min = 1))]
+        id: u64,
+    }
+
+    #[dto]
+    struct UsersUpdateMsgReq {
+        #[validate(range(min = 1))]
+        id: u64,
+        #[IsString]
+        #[Length(min = 1, max = 120)]
+        name: String,
+    }
+
+    /// HTTP health routes + request/reply message patterns for `Users`.
+    #[controller(prefix = "/users")]
+    pub struct UsersHttpController;
+
+    #[routes(state = UsersService)]
+    impl UsersHttpController {
+        #[get("/health")]
+        async fn health() -> &'static str {
+            "ok"
+        }
+    }
+
+    #[injectable]
+    pub struct UsersTransport {
+        service: Arc<UsersService>,
+    }
+
+    #[micro_routes]
+    impl UsersTransport {
+        #[message_pattern("users.list")]
+        async fn list(&self) -> Result<Vec<UsersResponse>, HttpException> {
+            Ok(self.service.list().await)
+        }
+
+        #[message_pattern("users.get")]
+        async fn get(&self, req: UsersGetReq) -> Result<UsersResponse, HttpException> {
+            self.service
+                .get(req.id)
+                .await
+                .ok_or_else(|| NotFoundException::new("not found"))
+        }
+
+        #[message_pattern("users.create")]
+        async fn create(
+            &self,
+            body: super::create_users_dto::CreateUsersDto,
+        ) -> Result<UsersResponse, HttpException> {
+            Ok(self.service.create(body.name).await)
+        }
+
+        #[message_pattern("users.update")]
+        async fn update(&self, req: UsersUpdateMsgReq) -> Result<UsersResponse, HttpException> {
+            self.service.update(req.id, req.name).await
+        }
+
+        #[message_pattern("users.delete")]
+        async fn delete(&self, req: UsersDeleteReq) -> Result<(), HttpException> {
+            self.service.delete(req.id).await
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="resource --transport microservice (transport)">
+    Requires the `microservices` feature. Bootstrap with `NestFactory::create_microservice::<RootModule>(...)`. The generated code is identical to the gRPC transport except for the bootstrap method and the excluded `microservices-grpc` feature requirement.
+
+    ```rust
+    use nestrs::prelude::*;
+    use std::sync::Arc;
+    use super::users_service::{UsersResponse, UsersService};
+
+    #[dto]
+    struct UsersGetReq {
+        #[validate(range(min = 1))]
+        id: u64,
+    }
+
+    #[dto]
+    struct UsersDeleteReq {
+        #[validate(range(min = 1))]
+        id: u64,
+    }
+
+    #[dto]
+    struct UsersUpdateMsgReq {
+        #[validate(range(min = 1))]
+        id: u64,
+        #[IsString]
+        #[Length(min = 1, max = 120)]
+        name: String,
+    }
+
+    #[controller(prefix = "/users")]
+    pub struct UsersHttpController;
+
+    #[routes(state = UsersService)]
+    impl UsersHttpController {
+        #[get("/health")]
+        async fn health() -> &'static str {
+            "ok"
+        }
+    }
+
+    #[injectable]
+    pub struct UsersTransport {
+        service: Arc<UsersService>,
+    }
+
+    #[micro_routes]
+    impl UsersTransport {
+        #[message_pattern("users.list")]
+        async fn list(&self) -> Result<Vec<UsersResponse>, HttpException> {
+            Ok(self.service.list().await)
+        }
+
+        #[message_pattern("users.get")]
+        async fn get(&self, req: UsersGetReq) -> Result<UsersResponse, HttpException> {
+            self.service
+                .get(req.id)
+                .await
+                .ok_or_else(|| NotFoundException::new("not found"))
+        }
+
+        #[message_pattern("users.create")]
+        async fn create(
+            &self,
+            body: super::create_users_dto::CreateUsersDto,
+        ) -> Result<UsersResponse, HttpException> {
+            Ok(self.service.create(body.name).await)
+        }
+
+        #[message_pattern("users.update")]
+        async fn update(&self, req: UsersUpdateMsgReq) -> Result<UsersResponse, HttpException> {
+            self.service.update(req.id, req.name).await
+        }
+
+        #[message_pattern("users.delete")]
+        async fn delete(&self, req: UsersDeleteReq) -> Result<(), HttpException> {
+            self.service.delete(req.id).await
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="resource DTOs (create and update)">
+    Both DTOs are generated for every resource regardless of transport.
+
+    ```rust
+    // create_users.dto.rs (nest style) / create_users_dto.rs (rust style)
+    use nestrs::prelude::*;
+
+    #[dto]
+    pub struct CreateUsersDto {
+        #[IsString]
+        #[Length(min = 1, max = 120)]
+        pub name: String,
+    }
+    ```
+
+    ```rust
+    // update_users.dto.rs (nest style) / update_users_dto.rs (rust style)
+    use nestrs::prelude::*;
+
+    #[dto]
+    pub struct UpdateUsersDto {
+        #[IsString]
+        #[Length(min = 1, max = 120)]
+        pub name: String,
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="resource module (per transport)">
+    The `#[module]` declaration varies by transport to wire the correct providers and controllers.
+
+    <CodeGroup>
+
+    ```rust rest
+    use nestrs::prelude::*;
+
+    #[module(
+        controllers = [UsersController],
+        providers = [UsersService],
+    )]
+    pub struct UsersModule;
+    ```
+
+    ```rust graphql
+    use nestrs::prelude::*;
+
+    #[module(
+        providers = [UsersService],
+    )]
+    pub struct UsersModule;
+    ```
+
+    ```rust ws
+    use nestrs::prelude::*;
+
+    #[module(
+        controllers = [UsersGateway],
+        providers = [UsersService, UsersGateway],
+    )]
+    pub struct UsersModule;
+    ```
+
+    ```rust grpc / microservice
+    use nestrs::prelude::*;
+
+    #[module(
+        controllers = [UsersHttpController],
+        providers = [UsersService, UsersTransport],
+        microservices = [UsersTransport],
+    )]
+    pub struct UsersModule;
+    ```
+
+    </CodeGroup>
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+<CodeGroup>
+
+```bash generate a REST resource
+nestrs g resource invoices --transport rest --path src
+```
+
+```bash generate a WebSocket resource
+nestrs g resource notifications --transport ws --path src
+```
+
+```bash generate individual files
+nestrs g service payments --path src
+nestrs g guard auth --path src
+nestrs g dto create-payment --path src
+```
+
+```bash dry run before committing
+nestrs g resource orders --transport grpc --path src --dry-run
+```
+
+</CodeGroup>
+
+<Warning>
+  The generator will refuse to overwrite existing files unless you pass `--force`. Run with `--dry-run` first to preview output and avoid accidentally clobbering files in an existing module directory.
+</Warning>

@@ -1,0 +1,197 @@
+---
+title: "Install nestrs and configure Cargo features"
+description: "Add nestrs to your Cargo.toml, set up the tokio async runtime, choose optional feature flags, and configure release profile settings for production builds."
+---
+
+nestrs is available on [crates.io](https://crates.io/crates/nestrs). Add it to your project by editing `Cargo.toml` directly, or use `cargo add`. This page covers the minimum required setup, the tokio runtime configuration, and the full table of optional feature flags.
+
+## Minimum supported Rust version
+
+nestrs requires **Rust 1.88** or later. Run `rustup update stable` to ensure your toolchain is current before adding the dependency.
+
+## Adding nestrs to your project
+
+nestrs depends on tokio for its async runtime. You must enable the `macros` and `rt-multi-thread` features on tokio alongside nestrs:
+
+<CodeGroup>
+
+```toml Cargo.toml
+[dependencies]
+nestrs = "0.3.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```bash cargo add
+cargo add nestrs
+cargo add tokio --features macros,rt-multi-thread
+```
+
+</CodeGroup>
+
+Your `main` function must be annotated with `#[tokio::main]`:
+
+```rust
+use nestrs::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>().listen_graceful(3000).await;
+}
+```
+
+<Note>
+  If you use DTO validation with `#[dto]` and its field-level macros, also add `serde` and `validator`:
+
+  ```toml
+  serde = { version = "1", features = ["derive"] }
+  validator = { version = "0.20", features = ["derive"] }
+  ```
+</Note>
+
+## Optional feature flags
+
+nestrs has a `default = []` feature set — nothing optional is enabled unless you ask for it. Enable features by adding them to the `features` list on the `nestrs` dependency:
+
+```toml
+nestrs = { version = "0.3.8", features = ["openapi", "cache-redis"] }
+```
+
+The table below lists every available feature flag and what it adds to your project.
+
+### Transport and protocol features
+
+| Feature | What it enables |
+|---|---|
+| `ws` | WebSocket gateway helpers via `nestrs-ws` |
+| `graphql` | async-graphql router integration via `nestrs-graphql` |
+| `openapi` | OpenAPI spec generation and Swagger UI via `nestrs-openapi` |
+
+### Microservices features
+
+| Feature | What it enables |
+|---|---|
+| `microservices` | Base microservices support: transport traits, event bus (`nestrs-microservices` + `nestrs-events`) |
+| `microservices-nats` | NATS transport (implies `microservices`, adds `async-nats`) |
+| `microservices-redis` | Redis pub/sub transport (implies `microservices`, adds `redis`) |
+| `microservices-kafka` | Kafka transport (implies `microservices`) |
+| `microservices-mqtt` | MQTT transport (implies `microservices`) |
+| `microservices-rabbitmq` | RabbitMQ transport (implies `microservices`) |
+| `microservices-grpc` | gRPC-style transport (implies `microservices`) |
+
+<Note>
+  All `microservices-*` features automatically enable the base `microservices` feature. You do not need to list both.
+</Note>
+
+### Data and storage features
+
+| Feature | What it enables |
+|---|---|
+| `cache-redis` | Redis-backed caching via the `redis` crate |
+| `database-sqlx` | SQLx integration for Postgres, SQLite, and other databases |
+| `mongo` | MongoDB integration via the `mongodb` crate |
+
+### HTTP and request handling features
+
+| Feature | What it enables |
+|---|---|
+| `cookies` | Cookie extraction and setting via `tower-cookies` |
+| `session` | Session middleware via `tower-sessions` (implies `cookies`) |
+| `csrf` | CSRF protection (implies `cookies`, adds `subtle`) |
+| `http-client` | HTTP client via `reqwest` (JSON support, rustls TLS) |
+| `files` | Static file serving via `tokio-util` |
+| `mvc` | Server-side template rendering via `minijinja` |
+
+### Infrastructure features
+
+| Feature | What it enables |
+|---|---|
+| `schedule` | Cron-style task scheduling via `tokio-cron-scheduler` and `linkme` |
+| `queues` | In-process job queues via `linkme` |
+| `otel` | OpenTelemetry tracing export (OTLP/gRPC) via `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`, and `tracing-opentelemetry` |
+
+## Common configuration examples
+
+<CodeGroup>
+
+```toml Minimal API
+[dependencies]
+nestrs = "0.3.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```toml REST API with OpenAPI
+[dependencies]
+nestrs = { version = "0.3.8", features = ["openapi"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
+```
+
+```toml Full-stack with auth
+[dependencies]
+nestrs = { version = "0.3.8", features = ["openapi", "session", "csrf", "database-sqlx"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
+```
+
+```toml Microservices with NATS
+[dependencies]
+nestrs = { version = "0.3.8", features = ["microservices-nats"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```toml GraphQL with WebSockets
+[dependencies]
+nestrs = { version = "0.3.8", features = ["graphql", "ws"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```toml Observability with OpenTelemetry
+[dependencies]
+nestrs = { version = "0.3.8", features = ["otel"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+</CodeGroup>
+
+## Release profile recommendations
+
+The CLI-generated `Cargo.toml` includes a tuned release profile. Add this to your own `Cargo.toml` for optimised production builds:
+
+```toml
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+```
+
+<Warning>
+  `panic = "abort"` skips stack unwinding on panic. This reduces binary size and can improve performance, but means destructors do not run on panic. Evaluate this setting against your application's requirements before enabling it.
+</Warning>
+
+## Environment variables
+
+nestrs reads a `.env` file at startup via `dotenvy`. Create a `.env` file in your project root to configure the runtime:
+
+```bash
+PORT=3000
+NESTRS_ENV=development
+RUST_LOG=info
+DATABASE_URL=file:./dev.db
+```
+
+Set `NESTRS_ENV=production` to activate production error sanitisation when you call `.enable_production_errors_from_env()` in `main`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build and run your first nestrs project from scratch using the CLI.
+  </Card>
+  <Card title="Core concepts" icon="book" href="/concepts/modules">
+    Learn how modules, controllers, and providers compose into a structured application.
+  </Card>
+</CardGroup>

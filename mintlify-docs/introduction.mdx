@@ -1,0 +1,123 @@
+---
+title: "What is nestrs? NestJS architecture for Rust"
+description: "nestrs brings the NestJS module/controller/provider model to Rust, built on Axum and Tower for full async performance without sacrificing structure."
+---
+
+nestrs is a Rust web framework that lets you build structured APIs using the same architectural patterns as NestJS — modules, controllers, providers, and dependency injection — while running on [Axum](https://github.com/tokio-rs/axum) and [Tower](https://github.com/tower-rs/tower). If your team already knows NestJS, nestrs gives you the same mental model with Rust's performance and safety guarantees.
+
+## Why nestrs exists
+
+Large Rust web applications tend to grow into ad-hoc routing files and scattered shared state. nestrs gives you a principled way to organize that code: every feature lives in a module, handlers live in controllers, and shared logic lives in injectable providers. The framework handles wiring them together so you focus on business logic.
+
+<CardGroup cols={2}>
+  <Card title="Get started in minutes" icon="rocket" href="/quickstart">
+    Scaffold a new project with the CLI and hit your first endpoint in under 5 minutes.
+  </Card>
+  <Card title="Add nestrs to existing projects" icon="download" href="/installation">
+    Add the crate and configure Cargo feature flags for the capabilities you need.
+  </Card>
+  <Card title="Migrate from NestJS" icon="arrow-right-arrow-left" href="/migration/from-nestjs">
+    Side-by-side mapping of NestJS decorators to nestrs macros and patterns.
+  </Card>
+  <Card title="Explore the ecosystem" icon="puzzle-piece" href="/ecosystem/overview">
+    GraphQL, OpenAPI, WebSockets, microservices, caching, scheduling, and more.
+  </Card>
+</CardGroup>
+
+## The module / controller / provider model
+
+nestrs organises your application into three building blocks that map directly onto NestJS concepts.
+
+| NestJS | nestrs | Purpose |
+|---|---|---|
+| `@Module()` | `#[module(...)]` | Groups controllers and providers into a feature slice |
+| `@Controller()` / `@Get()` | `#[controller(...)]` + `#[routes]` impl | Defines HTTP route handlers |
+| `@Injectable()` provider | `#[injectable]` on a struct | Shared service injected into handlers via Axum `State` |
+| `NestFactory.create()` | `NestFactory::create::<AppModule>()` | Bootstraps the application |
+
+A minimal application wires these together in a few dozen lines of Rust:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+struct Greeter;
+
+impl Greeter {
+    fn hello(&self) -> &'static str {
+        "Hello, nestrs!"
+    }
+}
+
+#[controller(prefix = "/")]
+#[routes(state = Greeter)]
+impl HelloController {
+    #[get("/")]
+    async fn hello(State(g): State<Arc<Greeter>>) -> &'static str {
+        g.hello()
+    }
+}
+
+#[module(controllers = [HelloController], providers = [Greeter])]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    NestFactory::create::<AppModule>().listen_graceful(3000).await;
+}
+```
+
+<Note>
+  nestrs assumes comfort with Rust ownership, `async`/`await`, and Cargo. It does not replicate NestJS's TypeScript-first teaching path — it maps NestJS patterns onto idiomatic Rust.
+</Note>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Dependency injection" icon="network-wired" href="/concepts/dependency-injection">
+    Register providers once in a module; nestrs resolves and injects them automatically into your handlers.
+  </Card>
+  <Card title="Route macros" icon="route" href="/concepts/controllers">
+    `#[get]`, `#[post]`, `#[put]`, `#[delete]`, and `#[patch]` decorators on handler functions inside a `#[routes]` impl block.
+  </Card>
+  <Card title="DTO validation" icon="shield-check" href="/guides/validation">
+    `#[dto]` + `#[IsEmail]`, `#[Length]`, and other validation macros powered by the `validator` crate.
+  </Card>
+  <Card title="Middleware pipeline" icon="layer-group" href="/concepts/middleware-pipeline">
+    Tower middleware layers — CORS, rate limiting, request IDs, tracing, and compression — applied through the `NestApplication` builder.
+  </Card>
+  <Card title="API versioning" icon="code-branch" href="/guides/api-versioning">
+    `#[version(...)]` on a controller and `#[ver(...)]` on individual routes for URI-segment versioning.
+  </Card>
+  <Card title="Microservices" icon="sitemap" href="/guides/microservices">
+    Transport adapters for NATS, Redis, Kafka, MQTT, RabbitMQ, and gRPC through the `microservices` feature family.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/guides/observability">
+    Built-in Prometheus metrics endpoint, request tracing, and OpenTelemetry export via the `otel` feature.
+  </Card>
+  <Card title="CLI scaffolding" icon="terminal" href="/cli/overview">
+    `nestrs new` and `nestrs generate` create projects and resource skeletons in seconds.
+  </Card>
+</CardGroup>
+
+## Ecosystem crates
+
+nestrs is a thin façade over a set of focused crates. You can depend on them individually or pull them in through feature flags on the main `nestrs` crate.
+
+| Crate | Role |
+|---|---|
+| [`nestrs-core`](https://crates.io/crates/nestrs-core) | DI container, module traits, route registry |
+| [`nestrs-macros`](https://crates.io/crates/nestrs-macros) | `#[module]`, `#[controller]`, `#[get]`, and all other proc-macros |
+| [`nestrs-events`](https://crates.io/crates/nestrs-events) | In-process event bus |
+| [`nestrs-cqrs`](https://crates.io/crates/nestrs-cqrs) | Command and query buses |
+| [`nestrs-ws`](https://crates.io/crates/nestrs-ws) | WebSocket gateway helpers |
+| [`nestrs-graphql`](https://crates.io/crates/nestrs-graphql) | async-graphql router integration |
+| [`nestrs-openapi`](https://crates.io/crates/nestrs-openapi) | OpenAPI spec generation and Swagger UI |
+| [`nestrs-microservices`](https://crates.io/crates/nestrs-microservices) | Transport adapters: NATS, Redis, Kafka, MQTT, RabbitMQ, gRPC |
+| [`nestrs-prisma`](https://crates.io/crates/nestrs-prisma) | Prisma-oriented database module |
+| [`nestrs-scaffold`](https://crates.io/crates/nestrs-scaffold) | CLI — install with `cargo install nestrs-scaffold`, binary name `nestrs` |
+
+<Tip>
+  You rarely need to add these crates directly. Enable the corresponding feature flag on `nestrs` in your `Cargo.toml` and the framework activates the right integration. See [Installation](/installation) for the full feature flag reference.
+</Tip>

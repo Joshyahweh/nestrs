@@ -1,0 +1,242 @@
+---
+title: "Recipe E — gRPC microservice + Prisma"
+description: "micro_routes message_pattern handlers over gRPC JSON wire, PrismaService, hybrid also_listen_http, TCP alternative."
+---
+
+**Goal:** **`#[micro_routes]`** + **`#[message_pattern]`** over **gRPC** with **[JSON wire payloads](https://docs.rs/nestrs-microservices)** inside protobuf—aligned with **`nestrs_microservices::wire`**.
+
+Full snippets: **[Recipe E](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/backend-recipes.md)**.
+
+## Cargo.toml
+
+```toml
+nestrs = { version = "0.3.8", features = ["microservices", "microservices-grpc"] }
+nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+## Handler + module
+
+```rust
+#[injectable]
+struct SqlMicroHandler {
+    prisma: Arc<PrismaService>,
+}
+
+#[micro_routes]
+impl SqlMicroHandler {
+    #[message_pattern("sql.ping")]
+    async fn ping(&self, _req: SqlPingReq) -> Result<SqlPingRes, HttpException> {
+        let sample = self
+            .prisma
+            .query_scalar("SELECT 1")
+            .await
+            .map_err(|e| InternalServerErrorException::new(e))?;
+        Ok(SqlPingRes { sample })
+    }
+}
+
+#[module(
+    imports = [PrismaModule],
+    providers = [SqlMicroHandler],
+    microservices = [SqlMicroHandler],
+)]
+pub struct AppModule;
+```
+
+## Listen (gRPC)
+
+```rust
+use std::net::{Ipv4Addr, SocketAddr};
+
+let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 50051));
+NestFactory::create_microservice_grpc::<AppModule>(
+    nestrs::microservices::GrpcMicroserviceOptions::bind(addr),
+)
+.listen()
+.await;
+```
+
+## Hybrid: gRPC + HTTP
+
+```rust
+NestFactory::create_microservice_grpc::<AppModule>(/* … */)
+    .also_listen_http(3000)
+    .configure_http(|nest| nest.set_global_prefix("api").enable_graphql(schema));
+```
+
+## Micro CRUD patterns
+
+| Pattern | Role |
+|---------|------|
+| `user.create` | **`UserCreateInput`** after **`prisma_model!`** |
+| `user.get` | **`find_unique(user::id::equals(id))`** |
+| `user.list` | **`find_many_with_options`** + skip/take |
+| `user.update` / `user.delete` | **`update`** / **`delete_many`** |
+
+Version JSON payloads (`schema_version`) when multiple deploys share a broker.
+
+## Production microservice RPC
+
+### Wire payload envelope (JSON inside gRPC)
+
+Teams standardize on a **small envelope** inside the JSON wire body so gateways, logs, and tracing line up across services:
+
+```json
+{
+  "schema_version": 1,
+  "correlation_id": "req_9f3c…",
+  "tenant_id": "org_42",
+  "payload": { "email": "ops@example.com", "name": "Ops" }
+}
+```
+
+Handlers read **`payload`** into **`UserCreateReq`**; middleware or a shared helper copies **`correlation_id`** into **`tracing`** spans. **`schema_version`** lets you reject or branch old mobile apps without breaking the gRPC method name.
+
+### Example: `user.create` handler
+
+```rust
+#[injectable]
+struct UserRpc {
+    prisma: Arc<PrismaService>,
+}
+
+#[derive(serde::Deserialize)]
+struct UserCreateReq {
+    email: String,
+    name: String,
+}
+
+#[derive(serde::Serialize)]
+struct UserCreateRes {
+    id: String,
+    email: String,
+    name: String,
+}
+
+#[micro_routes]
+impl UserRpc {
+    #[message_pattern("user.create")]
+    async fn create_user(
+        &self,
+        req: UserCreateReq,
+    ) -> Result<UserCreateRes, HttpException> {
+        let row = self
+            .prisma
+            .user()
+            .create(UserCreateInput {
+                email: req.email,
+                name: req.name,
+            })
+            .await
+            .map_err(HttpException::from)?;
+        Ok(UserCreateRes {
+            id: row.id.to_string(),
+            email: row.email,
+            name: row.name,
+        })
+    }
+}
+```
+
+Duplicate email surfaces as **`ConflictException`** via **`PrismaError`** mapping—callers should map **409** to “retry with different input,” not infinite retry.
+
+### End-to-end example: internal orders service
+
+This is a realistic split many teams run in production:
+
+- **Public HTTP API** receives a checkout request.
+- **Orders RPC service** owns order writes.
+- **Billing** and **inventory** call into it through gRPC or a broker transport.
+
+```rust
+use nestrs::prelude::*;
+use nestrs_prisma::PrismaService;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+#[derive(Debug, Deserialize)]
+pub struct CreateOrderRpcReq {
+    pub tenant_id: String,
+    pub customer_id: String,
+    pub sku: String,
+    pub quantity: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateOrderRpcRes {
+    pub order_id: String,
+    pub status: String,
+}
+
+#[injectable]
+pub struct OrdersRpcHandler {
+    prisma: Arc<PrismaService>,
+}
+
+#[micro_routes]
+impl OrdersRpcHandler {
+    #[message_pattern("orders.create")]
+    async fn create_order(
+        &self,
+        req: CreateOrderRpcReq,
+    ) -> Result<CreateOrderRpcRes, HttpException> {
+        let row = self
+            .prisma
+            .order()
+            .create(OrderCreateInput {
+                tenant_id: req.tenant_id,
+                customer_id: req.customer_id,
+                sku: req.sku,
+                quantity: req.quantity.into(),
+                status: "pending".into(),
+            })
+            .await
+            .map_err(HttpException::from)?;
+
+        Ok(CreateOrderRpcRes {
+            order_id: row.id.to_string(),
+            status: row.status,
+        })
+    }
+
+    #[message_pattern("orders.get")]
+    async fn get_order(&self, req: GetOrderRpcReq) -> Result<OrderRpcRow, HttpException> {
+        let row = self
+            .prisma
+            .order()
+            .find_unique(order::id::equals(req.id))
+            .await
+            .map_err(HttpException::from)?
+            .ok_or_else(|| NotFoundException::new("order not found"))?;
+
+        Ok(OrderRpcRow {
+            id: row.id.to_string(),
+            tenant_id: row.tenant_id,
+            status: row.status,
+        })
+    }
+}
+```
+
+In production, make **one service the owner of each write model**. If orders are written by `orders-rpc`, do not also let `billing-api` write the `orders` table directly just because it shares the same database cluster.
+
+### Deploy and connectivity
+
+| Topic | Typical production setup |
+|-------|---------------------------|
+| **Addressing** | Kubernetes **Headless Service** + **ClusterIP** for stable DNS (`user-rpc:50051`); clients use **`ClientProxy`** + **`GrpcTransportOptions`** toward that host. |
+| **mTLS** | Terminate TLS at the mesh (Linkerd/Istio) or configure TLS on the listener—nestrs options follow your platform’s certs rotation. |
+| **Scaling** | Scale **listener** pods horizontally; **Prisma pool_max** per pod must fit DB **`max_connections`** ÷ replica count. |
+| **Hybrid HTTP** | **`also_listen_http`** exposes **health** + **metrics** on a side port while gRPC stays internal-only—load balancers hit **`/health`** without opening GraphQL to the mesh. |
+
+### Naming patterns
+
+Use **dot-separated** pattern names that mirror bounded contexts: **`billing.invoice.issue`**, **`inventory.stock.reserve`**—same strings in OpenTelemetry span names and API catalogs.
+
+<Tip>
+  Swap **`NestFactory::create_microservice_grpc`** for **`NestFactory::create_microservice`** (**TCP**) during local dev—the **same** handler impl stays valid.
+</Tip>

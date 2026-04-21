@@ -1,0 +1,77 @@
+---
+title: "Recipe D — GraphQL + MongoDB"
+description: "GraphQL resolvers over MongoService, SimpleObject mapping, single-file bootstrap, BSON mutations."
+---
+
+**Goal:** **`async-graphql`** + **`MongoService`** for document reads/writes without Prisma in the Rust path.
+
+Canonical walkthrough: **[Recipe D](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/backend-recipes.md)** (`D.11` single-file sample).
+
+## Cargo.toml
+
+```toml
+nestrs = { version = "0.3.8", features = ["graphql", "mongo"] }
+mongodb = "3"
+bson = "3"
+async-graphql = "=7.0.17"
+futures-util = { version = "0.3", features = ["sink"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+## Resolver shape
+
+| Query / mutation | Typical driver API |
+|------------------|-------------------|
+| `mongoPing` | `MongoService::ping()` |
+| `profileCount` | `estimated_document_count()` |
+| `profiles(take)` | `find` + **`TryStreamExt`** |
+| `seedProfile` | **`insert_one(ProfileDoc)`** |
+| `updateProfileByEmail` | **`update_one`** + **`$set`** |
+| `deleteProfileByEmail` | **`delete_one`** |
+
+After **`MongoModule::for_root`**, **`Arc::new(MongoService)`** is enough for **`QueryRoot`** / **`MutationRoot`**—connection state lives in module statics (`MongoService` is a unit handle).
+
+## Curl smoke tests
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/graphql \
+  -H 'content-type: application/json' \
+  -d '{"query":"mutation { seedProfile(email: \"a@b.com\", displayName: \"Ada\") }"}'
+
+curl -s -X POST http://127.0.0.1:3000/graphql \
+  -H 'content-type: application/json' \
+  -d '{"query":"{ mongoPing profileCount profiles(take: 5) { email } }"}'
+```
+
+GraphQL exposes fields in **camelCase** (`display_name` → `displayName`).
+
+## Production GraphQL + Mongo
+
+### Authorization at the resolver boundary
+
+Treat Mongo collections like any other datastore: derive **`tenant_id`** (or **`viewer_id`**) from GraphQL **`Context`** (populated by an HTTP guard), and **always** merge it into filter documents:
+
+```rust
+// Pseudocode — build filters from ctx, not from raw client args alone.
+doc! { "tenant_id": tenant_id, "email": email }
+```
+
+Never rely on clients to pass **`tenant_id`** without verifying it matches the authenticated principal.
+
+### Performance and safety
+
+| Practice | Why |
+|----------|-----|
+| **Projection** | Use **`find`** with **`Projection`** so large embedded arrays are not shipped to every list query. |
+| **Pagination** | Cap **`take`** (for example **50**) and prefer **`_id`-based cursor** paging over large **`skip`** values on hot collections. |
+| **N+1** | When resolvers chain (user → orders → items), use **`DataLoader`** or eager **`lookup`** patterns—nestrs does not auto-batch Mongo calls. |
+| **Indexes** | Same compound indexes as **Recipe B** (tenant + email, tenant + **`updated_at`** desc). |
+
+### Writes
+
+Use **`update_one`** with **`$set`** for partial patches; reserve **`replace_one`** for true “overwrite document” semantics. Return **`modified_count`** / **`matched_count`** so mutations can expose **`success: Boolean!`** vs **`NotFound`** extensions.
+
+<Note>
+  Pair with **Recipe B** for REST + same BSON types; reuse **`ProfileDoc`** everywhere for consistent serialization.
+</Note>

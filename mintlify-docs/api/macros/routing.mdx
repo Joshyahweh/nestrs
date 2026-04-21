@@ -1,0 +1,270 @@
+---
+title: "HTTP routing macros in nestrs"
+description: "Reference for every HTTP routing macro in nestrs: controller, routes, HTTP method macros, response shaping, versioning, SSE, and impl_routes!."
+---
+
+nestrs uses proc macros to map Rust structs and impl blocks onto Axum routes. The pattern mirrors NestJS decorators but compiles to zero-overhead Axum router registrations. Every macro described here is re-exported from `nestrs::prelude::*`.
+
+A typical controller looks like this:
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/cats", version = "v1")]
+struct CatsController;
+
+#[routes(state = AppState)]
+impl CatsController {
+    #[get("/:id")]
+    async fn find_one(
+        #[param::param] p: IdParam,
+    ) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({ "id": p.id }))
+    }
+}
+
+#[module(controllers = [CatsController], providers = [AppState])]
+struct AppModule;
+```
+
+## `#[controller]`
+
+Marks a struct as a nestrs controller. Sets the route prefix and optional API version for all routes registered in the associated `#[routes]` impl block.
+
+```rust
+#[controller(prefix = "/prefix", version = "v1")]
+struct MyController;
+```
+
+<ParamField path="prefix" type="&str">
+  URL prefix applied to all routes in this controller. May include path segments with leading slash.
+</ParamField>
+<ParamField path="version" type="&str (optional)">
+  Route version string used by route-level versioning (e.g., `"v1"`). Works together with `#[ver]` on individual handlers.
+</ParamField>
+
+## `#[routes]`
+
+Expands an impl block on a controller struct into Axum route registrations. Must appear on the impl block directly following a `#[controller]`-annotated struct.
+
+```rust
+#[routes(state = AppState)]
+impl CatsController {
+    // handler methods go here
+}
+```
+
+<ParamField path="state" type="Type">
+  The Axum application state type injected into handler parameters. Must implement `Clone` and be registered as a provider.
+</ParamField>
+
+## HTTP method macros
+
+All HTTP method macros accept a path string as their argument and are applied to async methods inside a `#[routes]` impl block.
+
+| Macro | HTTP method |
+|-------|-------------|
+| `#[get("path")]` | GET |
+| `#[post("path")]` | POST |
+| `#[put("path")]` | PUT |
+| `#[patch("path")]` | PATCH |
+| `#[delete("path")]` | DELETE |
+| `#[options("path")]` | OPTIONS |
+| `#[head("path")]` | HEAD |
+| `#[all("path")]` | All methods (wildcard) |
+
+Path segments follow Axum syntax: `/:param` for path parameters, `/*wildcard` for catch-all segments.
+
+```rust
+#[routes(state = AppState)]
+impl ItemsController {
+    #[get("/")]
+    async fn list() -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!([]))
+    }
+
+    #[post("/")]
+    async fn create(
+        #[param::body] body: CreateItemDto,
+    ) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({ "created": true }))
+    }
+
+    #[get("/:id")]
+    async fn find_one(
+        #[param::param] params: ItemIdParam,
+    ) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({ "id": params.id }))
+    }
+
+    #[delete("/:id")]
+    async fn remove(
+        #[param::param] params: ItemIdParam,
+    ) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({ "deleted": params.id }))
+    }
+}
+```
+
+## Parameter extraction attributes
+
+Inside a `#[routes]` impl block, method parameters can be annotated to declare their extraction source:
+
+| Attribute | Axum equivalent | Notes |
+|-----------|-----------------|-------|
+| `#[param::body]` | `Json<T>` | JSON request body; pair with `#[use_pipes(ValidationPipe)]` for validation |
+| `#[param::query]` | `Query<T>` | URL query string; pair with `#[use_pipes(ValidationPipe)]` |
+| `#[param::param]` | `Path<T>` | URL path parameters; pair with `#[use_pipes(ValidationPipe)]` |
+| `#[param::headers]` | `HeaderMap` | Raw request headers |
+| `#[param::req]` | `Request` | Full Axum request object |
+| `#[param::ip]` | `ClientIp` | Best-effort client IP extraction |
+
+```rust
+#[routes(state = AppState)]
+impl SignupController {
+    #[post("/signup")]
+    #[use_pipes(ValidationPipe)]
+    async fn signup(#[param::body] dto: SignupDto) -> &'static str {
+        let _ = dto;
+        "ok"
+    }
+}
+```
+
+## Response shaping macros
+
+### `#[http_code]`
+
+Sets the HTTP status code for a successful handler response.
+
+```rust
+#[post("/items")]
+#[http_code(201)]
+async fn create() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({ "id": 1 }))
+}
+```
+
+### `#[response_header]`
+
+Adds a response header to the handler's response.
+
+```rust
+#[get("/download")]
+#[response_header("Content-Disposition", "attachment; filename=\"file.pdf\"")]
+async fn download() -> Vec<u8> {
+    vec![]
+}
+```
+
+### `#[redirect]`
+
+Redirects the request to a different URL.
+
+```rust
+#[get("/old-path")]
+#[redirect("/new-path")]
+async fn redirect_handler() {}
+```
+
+## Route versioning macros
+
+### `#[ver]` / `#[version]`
+
+Overrides the version for an individual route handler. Works in combination with the `version` set on `#[controller]`.
+
+```rust
+#[controller(prefix = "/items", version = "v1")]
+struct ItemsController;
+
+#[routes(state = AppState)]
+impl ItemsController {
+    #[get("/")]
+    async fn list_v1() -> &'static str { "v1" }
+
+    #[get("/")]
+    #[ver("v2")]
+    async fn list_v2() -> &'static str { "v2" }
+}
+```
+
+## `#[raw_body]`
+
+Marks a handler parameter to receive the raw request body bytes instead of a deserialized value.
+
+```rust
+#[routes(state = AppState)]
+impl WebhookController {
+    #[post("/webhook")]
+    async fn receive(#[raw_body] body: RawBody) -> &'static str {
+        let _ = body;
+        "received"
+    }
+}
+```
+
+## `#[sse]`
+
+Marks a handler as a Server-Sent Events endpoint. The handler return type must implement the SSE stream interface from `nestrs::sse`.
+
+```rust
+use nestrs::prelude::*;
+use nestrs::sse;
+
+#[routes(state = AppState)]
+impl EventsController {
+    #[get("/events")]
+    #[sse]
+    async fn stream() -> impl axum::response::IntoResponse {
+        sse::Sse::new(futures::stream::once(async {
+            Ok::<_, std::convert::Infallible>(
+                sse::Event::default().data("hello"),
+            )
+        }))
+    }
+}
+```
+
+## Cross-cutting handler attributes
+
+These attributes apply pipeline steps to individual route handlers and can be combined:
+
+| Attribute | Purpose |
+|-----------|---------|
+| `#[use_guards(GuardType)]` | Run `GuardType::can_activate` before the handler |
+| `#[use_interceptors(InterceptorType)]` | Wrap the handler with `InterceptorType::intercept` |
+| `#[use_pipes(ValidationPipe)]` | Transform/validate parameters before the handler |
+| `#[use_filters(FilterType)]` | Catch `HttpException` values after the handler |
+
+```rust
+#[routes(state = AppState)]
+impl DemoController {
+    #[get("/secure")]
+    #[use_guards(AuthGuard)]
+    #[use_interceptors(LoggingInterceptor)]
+    async fn secure_handler() -> &'static str { "ok" }
+}
+```
+
+## `impl_routes!` macro
+
+`impl_routes!` is the lower-level macro that `#[routes]` expands into. You can use it directly for explicit route registration without proc macro expansion on the impl block.
+
+```rust
+impl_routes! {
+    state = AppState,
+    controller = CatsController,
+    routes = [
+        GET "/:id" with () => CatsController::find_one,
+        POST "/" with () => CatsController::create,
+    ]
+}
+```
+
+<Note>
+The `impl_routes!` macro also accepts `controller_guards (G)` to apply a guard to all routes in the block, running outside route-level guards in the pipeline order.
+</Note>

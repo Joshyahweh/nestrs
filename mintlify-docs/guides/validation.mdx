@@ -1,0 +1,279 @@
+---
+title: "Validate request data with DTOs in nestrs"
+description: "Define validated request shapes with #[dto] and field attributes. Bind them to handlers via ValidatedBody, ValidatedPath, and ValidatedQuery extractors."
+---
+
+nestrs ships a `#[dto]` proc-macro that turns a plain Rust struct into a fully-typed, validated Data Transfer Object. It derives `Deserialize`, `Serialize`, `Validate` (from the `validator` crate), and `NestDto` — and it enables a set of NestJS-style field attributes (`#[IsEmail]`, `#[Length]`, etc.) so your validation intent is visible at the declaration site rather than buried in implementation code.
+
+## Defining a DTO
+
+Annotate a struct with `#[dto]` and add validation attributes to each field:
+
+```rust
+use nestrs::prelude::*;
+
+#[dto]
+pub struct CreateUserDto {
+    #[IsEmail]
+    pub email: String,
+
+    #[Length(min = 1, max = 80)]
+    pub name: String,
+
+    #[Min(1)]
+    pub age: i32,
+
+    #[IsUrl]
+    pub website: Option<String>,
+}
+```
+
+`#[dto]` expands to a struct with `#[serde(deny_unknown_fields)]` by default. Any JSON body that contains a key not declared on the struct returns a `400 Bad Request` before your handler runs.
+
+<Note>
+`#[IsString]` is a readability marker only — Rust's type system already enforces that a `String` field is a string. It compiles to no validation code.
+</Note>
+
+## Available validation attributes
+
+| Attribute | Equivalent validator rule | Notes |
+|---|---|---|
+| `#[IsEmail]` | `validate(email)` | |
+| `#[IsUrl]` | `validate(url)` | |
+| `#[IsUUID]` | `validate(uuid)` | |
+| `#[IsString]` | _(no-op)_ | Readability marker |
+| `#[IsBoolean]` | _(no-op)_ | Readability marker |
+| `#[IsNotEmpty]` | `validate(length(min = 1))` | |
+| `#[IsPositive]` | `validate(range(min = 1))` | |
+| `#[IsNegative]` | `validate(range(max = -1))` | |
+| `#[Min(n)]` | `validate(range(min = n))` | |
+| `#[Max(n)]` | `validate(range(max = n))` | |
+| `#[MinLength(n)]` | `validate(length(min = n))` | |
+| `#[MaxLength(n)]` | `validate(length(max = n))` | |
+| `#[Length(min = m, max = n)]` | `validate(length(min = m, max = n))` | |
+| `#[ValidateNested]` | `validate(nested)` | Recurse into a nested DTO field |
+| `#[Matches(REGEX)]` | `validate(regex = REGEX)` | |
+| `#[Contains(pat)]` | `validate(contains(pat))` | |
+| `#[IsOptional]` | _(no-op — use `Option<T>`)_ | Stripped at compile time |
+
+You can also use raw `validator` attributes directly: `#[validate(range(min = 0))]` works on any `#[dto]` field.
+
+## Using ValidatedBody in a controller
+
+Pair `ValidatedBody<T>` with your DTO type as an Axum extractor. nestrs validates the deserialized value before your handler body runs and returns `422 Unprocessable Entity` on failure:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[dto]
+pub struct CreateUserDto {
+    #[IsEmail]
+    pub email: String,
+    #[Length(min = 1, max = 80)]
+    pub name: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct UserResponse {
+    pub email: String,
+    pub name: String,
+}
+
+#[controller(prefix = "/users")]
+pub struct UsersController;
+
+#[routes(state = UsersService)]
+impl UsersController {
+    #[post("/")]
+    pub async fn create(
+        State(svc): State<Arc<UsersService>>,
+        ValidatedBody(dto): ValidatedBody<CreateUserDto>,
+    ) -> Json<UserResponse> {
+        Json(svc.create(dto))
+    }
+}
+```
+
+## ValidatedPath and ValidatedQuery
+
+The same pattern applies to path parameters and query strings:
+
+<CodeGroup>
+
+```rust validated path
+#[dto]
+pub struct ItemParams {
+    #[validate(range(min = 1))]
+    pub id: i64,
+}
+
+#[routes(state = AppState)]
+impl ItemsController {
+    #[get("/items/:id")]
+    pub async fn get_item(
+        ValidatedPath(params): ValidatedPath<ItemParams>,
+    ) -> String {
+        params.id.to_string()
+    }
+}
+```
+
+```rust validated query
+#[dto]
+pub struct SearchQuery {
+    #[IsString]
+    #[MinLength(3)]
+    pub term: String,
+}
+
+#[routes(state = AppState)]
+impl SearchController {
+    #[get("/search")]
+    pub async fn search(
+        ValidatedQuery(q): ValidatedQuery<SearchQuery>,
+    ) -> String {
+        q.term
+    }
+}
+```
+
+</CodeGroup>
+
+## Nested DTOs with ValidateNested
+
+Use `#[ValidateNested]` on a field whose type is itself a `#[dto]` struct to trigger recursive validation:
+
+```rust
+use nestrs::prelude::*;
+
+#[dto]
+pub struct AddressDto {
+    #[IsString]
+    #[IsNotEmpty]
+    pub city: String,
+}
+
+#[dto]
+pub struct RegisterDto {
+    #[IsEmail]
+    pub email: String,
+
+    #[ValidateNested]
+    pub address: AddressDto,
+}
+```
+
+<Warning>
+Recursive validation only fires if the nested struct also derives `Validate`. `#[dto]` handles this automatically — but if you hand-write a nested struct, make sure it derives `validator::Validate`.
+</Warning>
+
+## Using ValidationPipe explicitly
+
+`ValidatedBody`, `ValidatedPath`, and `ValidatedQuery` run validation inline as part of extraction. If you prefer the NestJS `#[use_pipes(ValidationPipe)]` style you can use it with `#[param::body]` / `#[param::query]` / `#[param::param]`:
+
+```rust
+#[routes(state = AppState)]
+impl UsersController {
+    #[post("/signup")]
+    #[use_pipes(ValidationPipe)]
+    pub async fn signup(#[param::body] dto: SignupDto) -> &'static str {
+        "ok"
+    }
+}
+```
+
+Both styles produce the same `422` response shape when validation fails.
+
+## Allowing unknown fields
+
+By default `#[dto]` adds `#[serde(deny_unknown_fields)]` so clients cannot send undocumented keys. To opt out:
+
+```rust
+#[dto(allow_unknown_fields)]
+pub struct LooseDto {
+    #[IsString]
+    pub name: String,
+}
+```
+
+<Tip>
+Keep `deny_unknown_fields` enabled (the default) for public-facing APIs to prevent clients from smuggling extra data and to catch typos in field names early.
+</Tip>
+
+## Error response shape
+
+A failed validation returns `422 Unprocessable Entity` with a JSON body:
+
+```json
+{
+  "statusCode": 422,
+  "message": "Validation failed",
+  "errors": [
+    {
+      "field": "email",
+      "constraints": {
+        "email": "email must be a valid email address"
+      }
+    }
+  ]
+}
+```
+
+<AccordionGroup>
+  <Accordion title="Full example: DTO + controller + module">
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[dto]
+pub struct CreateUserDto {
+    #[IsEmail]
+    pub email: String,
+    #[Length(min = 1, max = 80)]
+    pub name: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct UserResponse {
+    pub email: String,
+    pub name: String,
+}
+
+#[derive(Default)]
+#[injectable]
+pub struct UsersService;
+
+impl UsersService {
+    pub fn create(&self, dto: CreateUserDto) -> UserResponse {
+        UserResponse {
+            email: dto.email,
+            name: dto.name,
+        }
+    }
+}
+
+#[controller(prefix = "/users")]
+pub struct UsersController;
+
+#[routes(state = UsersService)]
+impl UsersController {
+    #[post("/")]
+    pub async fn create(
+        State(svc): State<Arc<UsersService>>,
+        ValidatedBody(dto): ValidatedBody<CreateUserDto>,
+    ) -> Result<Json<UserResponse>, HttpException> {
+        Ok(Json(svc.create(dto)))
+    }
+}
+
+#[module(
+    controllers = [UsersController],
+    providers = [UsersService],
+)]
+pub struct UsersModule;
+```
+
+  </Accordion>
+</AccordionGroup>

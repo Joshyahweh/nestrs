@@ -1,0 +1,254 @@
+---
+title: "Dependency injection macros in nestrs"
+description: "Reference for the nestrs DI macros: #[module], #[injectable] with scope variants, #[set_metadata], and #[roles] for handler metadata."
+---
+
+nestrs DI is built on four proc macros that together replace NestJS's decorator-based injection system. The `#[module]` macro declares the composition graph; `#[injectable]` marks types as providers resolved through `Arc`; `#[set_metadata]` and `#[roles]` attach string metadata to route handlers for guards and other pipeline components to read.
+
+All macros are re-exported from `nestrs::prelude::*`.
+
+## `#[module]`
+
+Declares a struct as an application module. Generates the `Module` trait implementation that builds the `ProviderRegistry` and Axum `Router` by walking the import graph.
+
+```rust
+#[module(
+    controllers = [ControllerA, ControllerB],
+    providers   = [ServiceA, ServiceB],
+    imports     = [OtherModule],
+    exports     = [ServiceA],
+)]
+struct MyModule;
+```
+
+<ParamField path="controllers" type="[Type, ...]">
+  Controller structs annotated with `#[controller]` to register into the module's router.
+</ParamField>
+<ParamField path="providers" type="[Type, ...]">
+  Injectable structs annotated with `#[injectable]` to register into the module's provider registry.
+</ParamField>
+<ParamField path="imports" type="[Type, ...] (optional)">
+  Other module types or `DynamicModule` expressions whose exported providers are absorbed into this module's registry.
+</ParamField>
+<ParamField path="exports" type="[Type, ...] (optional)">
+  Provider types from this module's registry to re-export so importing modules can resolve them.
+</ParamField>
+
+```rust
+use nestrs::prelude::*;
+
+#[injectable]
+struct CatsService;
+
+#[controller(prefix = "/cats")]
+struct CatsController;
+
+#[routes(state = CatsService)]
+impl CatsController {
+    #[get("/")]
+    async fn list(
+        axum::extract::State(svc): axum::extract::State<std::sync::Arc<CatsService>>,
+    ) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!([]))
+    }
+}
+
+#[module(
+    controllers = [CatsController],
+    providers   = [CatsService],
+    exports     = [CatsService],
+)]
+struct CatsModule;
+
+#[module(imports = [CatsModule])]
+struct AppModule;
+```
+
+### Dynamic module imports
+
+The `imports` list also accepts `DynamicModule` expressions, which lets you conditionally include modules:
+
+```rust
+use nestrs::prelude::*;
+
+#[module(imports = [
+    CatsModule,
+    ConfigurableModuleBuilder::<MyOptions>::for_root::<DbModule>(my_options),
+])]
+struct AppModule;
+```
+
+## `#[injectable]`
+
+Marks a struct as a provider that the DI container can construct and resolve as `Arc<Self>`. Generates the `Injectable` trait implementation with a `construct` method that the `ProviderRegistry` calls.
+
+```rust
+#[injectable]
+struct MyService {
+    dep: std::sync::Arc<OtherService>,
+}
+```
+
+The generated `construct` implementation calls `registry.get::<OtherService>()` for each field of type `Arc<T>` where `T` itself implements `Injectable`.
+
+### Scope variants
+
+The default scope is `Singleton` (one instance per application container). Override it with the `scope` argument:
+
+```rust
+// One instance per application (default)
+#[injectable]
+struct SingletonService;
+
+// New instance on every injection
+#[injectable(scope = "transient")]
+struct TransientService;
+
+// One instance per request (requires NestApplication::use_request_scope)
+#[injectable(scope = "request")]
+struct RequestScopedService;
+```
+
+<ParamField path="scope" type="&str (optional)">
+  One of `"singleton"` (default), `"transient"`, or `"request"`. Request scope requires `NestApplication::use_request_scope()` to be called before `listen`.
+</ParamField>
+
+### Lifecycle hooks
+
+Override any of these async methods on your type to hook into the application lifecycle:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+struct DbService;
+
+#[async_trait]
+impl Injectable for DbService {
+    fn construct(registry: &ProviderRegistry) -> Arc<Self> {
+        Arc::new(Self)
+    }
+
+    async fn on_module_init(&self) {
+        // Called after the registry is built, before the server starts
+        tracing::info!("DbService: connecting to database");
+    }
+
+    async fn on_application_shutdown(&self) {
+        tracing::info!("DbService: closing connections");
+    }
+}
+```
+
+<Note>
+`construct` is synchronous. Perform async I/O in `on_module_init` or use `ConfigurableModuleBuilder::for_root_async` to await initialization before the DI graph constructs singletons.
+</Note>
+
+### Full example with cross-module injection
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+struct ConfigService;
+
+impl ConfigService {
+    pub fn get_dsn(&self) -> &str { "postgres://localhost/app" }
+}
+
+#[injectable]
+struct UserRepository {
+    config: Arc<ConfigService>,
+}
+
+impl UserRepository {
+    pub fn new(config: Arc<ConfigService>) -> Self {
+        Self { config }
+    }
+}
+
+#[module(providers = [ConfigService, UserRepository], exports = [UserRepository])]
+struct InfraModule;
+
+#[module(imports = [InfraModule])]
+struct AppModule;
+```
+
+## `#[set_metadata]`
+
+Attaches a key-value string pair to the route handler's entry in `MetadataRegistry`. Evaluated at route registration time (compile-time macro expansion + runtime registration via `impl_routes!`).
+
+```rust
+#[get("/feature")]
+#[set_metadata("feature_flag", "new_ui")]
+async fn feature_handler() -> &'static str { "ok" }
+```
+
+<ParamField path="key" type="&str">
+  Metadata key. Used by guards and middleware to look up the value via `MetadataRegistry::get(handler_key, key)`.
+</ParamField>
+<ParamField path="value" type="&str">
+  Metadata value. All values are plain strings; serialize JSON yourself for structured data.
+</ParamField>
+
+Read metadata in a guard using the `HandlerKey` extension inserted by the router:
+
+```rust
+use nestrs::core::MetadataRegistry;
+
+// Inside a CanActivate implementation:
+let key: &HandlerKey = parts.extensions.get::<HandlerKey>().unwrap();
+let flag = MetadataRegistry::get(key.0, "feature_flag");
+```
+
+## `#[roles]`
+
+Shorthand for `#[set_metadata("roles", "...")]`. Sets the `roles` metadata key to a comma-separated string of role names. Intended to be consumed by role-aware guards such as `XRoleMetadataGuard`.
+
+```rust
+#[get("/admin")]
+#[roles("admin")]
+#[use_guards(XRoleMetadataGuard)]
+async fn admin_only() -> &'static str { "ok" }
+```
+
+<ParamField path="roles" type="&str, ...">
+  One or more role names as string literals. Multiple values are joined with commas in the metadata store.
+</ParamField>
+
+### Worked example: role-protected route
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/api", version = "v1")]
+struct DocsController;
+
+#[routes(state = AppState)]
+impl DocsController {
+    /// Public route — no guard needed.
+    #[get("/public")]
+    async fn public() -> &'static str { "anyone can see this" }
+
+    /// Admin-only route — `XRoleMetadataGuard` reads `#[roles]` from `MetadataRegistry`.
+    #[get("/admin-only")]
+    #[roles("admin")]
+    #[use_guards(XRoleMetadataGuard)]
+    async fn admin_only() -> &'static str { "admins only" }
+}
+
+#[module(controllers = [DocsController], providers = [AppState])]
+struct AppModule;
+```
+
+Send `x-role: admin` to receive `200`. Sending any other role value yields `403`.
+
+<Tip>
+Keep `#[roles]` on handlers even when enforcement lives in a different guard—it doubles as documentation of intent and is picked up by `nestrs-openapi` when `infer_route_security_from_roles` is enabled.
+</Tip>

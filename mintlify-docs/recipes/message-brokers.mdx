@@ -1,0 +1,202 @@
+---
+title: "Recipe F — Microservices + message brokers"
+description: "NATS, Redis, RabbitMQ listeners via NestFactory; ClientProxy callers; Kafka listener notes; ClientsModule multi-broker HTTP apps."
+---
+
+This recipe condenses **[Recipe F](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/backend-recipes.md)** and overlaps [Microservices](/guides/microservices)—use both.
+
+## NestFactory helpers
+
+| Transport | Feature | Bootstrap |
+|-----------|---------|-----------|
+| TCP | `microservices` | `NestFactory::create_microservice` |
+| NATS | `microservices-nats` | `create_microservice_nats` |
+| Redis | `microservices-redis` | `create_microservice_redis` |
+| RabbitMQ | `microservices-rabbitmq` | `create_microservice_rabbitmq` |
+| gRPC JSON | `microservices-grpc` | `create_microservice_grpc` |
+| Kafka | `microservices-kafka` | **`KafkaMicroserviceServer`** (manual wiring) |
+
+All decode the same **`WireRequest`** JSON ([**wire**](https://docs.rs/nestrs-microservices/latest/nestrs_microservices/wire/index.html)).
+
+## NATS listener + Docker
+
+```bash
+docker run --name nestrs-nats -p 4222:4222 -d nats:2-alpine
+```
+
+```rust
+NestFactory::create_microservice_nats::<AppModule>(
+    nestrs::microservices::NatsMicroserviceOptions::new(
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into()),
+    ),
+)
+.listen()
+.await;
+```
+
+## Client caller (`ClientProxy`)
+
+```rust
+use nestrs::microservices::{ClientProxy, NatsTransport, NatsTransportOptions};
+use std::sync::Arc;
+
+let proxy = ClientProxy::new(Arc::new(NatsTransport::new(
+    NatsTransportOptions::new("nats://127.0.0.1:4222"),
+)));
+let pong = proxy
+    .send("sql.ping", &serde_json::json!({"check": 1}))
+    .await?;
+```
+
+## Redis listener + emit
+
+```rust
+NestFactory::create_microservice_redis::<AppModule>(
+    nestrs::microservices::RedisMicroserviceOptions::new("redis://127.0.0.1:6379")
+        .with_prefix("myapp"),
+)
+.listen()
+.await;
+```
+
+```rust
+proxy.emit("order.created", &serde_json::json!({"id": 1})).await?;
+```
+
+## RabbitMQ
+
+```rust
+NestFactory::create_microservice_rabbitmq::<AppModule>(
+    nestrs::microservices::RabbitMqMicroserviceOptions::new("amqp://guest:guest@127.0.0.1:5672/")
+        .with_work_queue("users.rpc"),
+)
+.listen()
+.await;
+```
+
+## `ClientsModule` (HTTP app calling brokers)
+
+Merge **`ClientsModule::register(&[ ClientConfig::nats(...), ClientConfig::redis(...) ])`** as a **`DynamicModule`** via **`NestFactory::create_with_modules`**—see **[`dynamic_modules.rs`](https://github.com/Joshyahweh/nestrs/blob/main/nestrs/tests/dynamic_modules.rs)**.
+
+## Kafka advanced
+
+There is **no** `NestFactory::create_microservice_kafka` yet—run **`KafkaMicroserviceServer::new`** with handler vec mirrored from **`NestFactory::create_microservice`** internals, or use **`ClientConfig::kafka`** for outbound **`send`/`emit`**.
+
+## Production broker architecture
+
+### Naming and isolation
+
+| Pattern | Example | Use |
+|---------|---------|-----|
+| **Subject / routing key** | `prod.billing.events.v1.order.placed` | Environment + domain + version + event—humans can grep logs. |
+| **RPC queue** | `prod.users.rpc` (RabbitMQ work queue) | Single consumer group processing **`send`** workloads. |
+| **Redis prefix** | `myapp:rpc:` + handler id | **`RedisMicroserviceOptions::with_prefix`** avoids collisions when several systems share one cluster. |
+
+## End-to-end example: checkout API + brokered backends
+
+This is a realistic topology for production:
+
+- `checkout-api` is public HTTP.
+- `orders-rpc` handles synchronous order creation.
+- `audit-worker` receives fire-and-forget events.
+- `notifications-worker` fans out emails and webhooks.
+
+```rust
+use nestrs::microservices::{
+    ClientConfig, ClientsModule, ClientsService, NatsTransportOptions, RedisTransportOptions,
+};
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+let clients = ClientsModule::register(&[
+    ClientConfig::nats(
+        "ORDERS_RPC",
+        NatsTransportOptions::new(
+            std::env::var("NATS_URL")
+                .unwrap_or_else(|_| "nats://nats.messaging.svc.cluster.local:4222".into()),
+        ),
+    ),
+    ClientConfig::redis(
+        "AUDIT_BUS",
+        RedisTransportOptions::new(
+            std::env::var("REDIS_URL")
+                .unwrap_or_else(|_| "redis://redis.messaging.svc.cluster.local:6379".into()),
+        ),
+    ),
+]);
+
+#[injectable]
+pub struct CheckoutFacade {
+    clients: Arc<ClientsService>,
+}
+
+impl CheckoutFacade {
+    pub async fn place_order(&self, req: CheckoutReq) -> Result<CheckoutRes, HttpException> {
+        let created: OrderCreated = self
+            .clients
+            .expect("ORDERS_RPC")
+            .send("orders.create", &req)
+            .await
+            .map_err(InternalServerErrorException::new)?;
+
+        self.clients
+            .expect("AUDIT_BUS")
+            .emit(
+                "audit.order.created",
+                &serde_json::json!({
+                    "order_id": created.order_id,
+                    "tenant_id": req.tenant_id,
+                    "actor_id": req.actor_id,
+                }),
+            )
+            .await
+            .map_err(InternalServerErrorException::new)?;
+
+        Ok(CheckoutRes {
+            order_id: created.order_id,
+            status: created.status,
+        })
+    }
+}
+```
+
+This split is useful when **one call needs a reply** (`send("orders.create")`) but **side effects should stay asynchronous** (`emit("audit.order.created")`).
+
+### NATS (cloud-native RPC and fan-out)
+
+- **Core NATS** is fast and ephemeral—if the subscriber is offline, messages are gone.
+- **JetStream** adds persistence, replay, and consumer groups—use it for **integration events** you must not lose (`OrderPlaced`, audit trail).
+- Run **3+ server** clusters in prod; pin clients to **`nats://`** or **`tls://`** URLs from secrets managers, not baked into images.
+
+### Redis (low-latency work queues + cache bus)
+
+- **Lists / streams** back **`create_microservice_redis`** workloads; tune **memory eviction** so RPC metadata is not evicted under load.
+- Separate **cache Redis** from **queue Redis** when traffic mixes—noisy neighbors cause tail latency on **`send`**.
+
+### RabbitMQ (managed queues, DLQ)
+
+Production checklist:
+
+- **Quorum queues** for HA (RabbitMQ 3.8+) instead of classic mirrored queues.
+- **Dead-letter exchange (DLX)** bound to a **DLQ** queue—failed **`users.rpc`** messages land there for replay after fixing bugs.
+- **`prefetch`** per consumer ≈ concurrent in-flight handlers; tune so workers stay busy without overflowing memory.
+
+For a payment or KYC workflow, RabbitMQ is a strong fit when you need **controlled retries** and a visible queue of stuck jobs for operators.
+
+### Kafka (streaming, replay, ordering)
+
+- Put **partition key** = **`order_id`** (or **`tenant_id`**) so related events stay ordered per aggregate.
+- One **consumer group** per deploying service (`billing-worker-v3`); scale consumers ≤ partition count for strict ordering per key.
+- Enable **TLS + SASL** via **`KafkaConnectionOptions`** / **`KafkaSaslOptions`** to match MSK / Confluent Cloud.
+
+For analytics, billing ledgers, and audit trails, Kafka is usually the better fit than Redis or plain NATS because you can **replay** history into a new consumer.
+
+### TLS, secrets, and health
+
+Store **`NATS_URL`**, **`REDIS_URL`**, **`AMQP_URL`**, **`KAFKA_BOOTSTRAP`** in Vault / Kubernetes Secrets—rotate without redeploying app code when your platform supports hot reload.
+
+Combine broker-specific **`HealthIndicator`** stubs (**`NatsBrokerHealth`**, **`RedisBrokerHealth`**, **`kafka_cluster_reachable_with`**) with **`enable_readiness_check`** so orchestrators **drain** pods before broker outages take down user traffic.
+
+<Note>
+  **`WireRequest`** JSON is identical across transports—integration tests can swap **TCP** ↔ **NATS** without rewriting handler logic ([**wire**](https://docs.rs/nestrs-microservices/latest/nestrs_microservices/wire/index.html)).
+</Note>

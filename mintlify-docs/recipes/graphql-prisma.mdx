@@ -1,0 +1,153 @@
+---
+title: "Recipe C — GraphQL + PostgreSQL + Prisma"
+description: "async-graphql with PrismaService, nestrs-graphql limits, mutations, CRUD resolvers, global prefix and batch POST."
+---
+
+**Goal:** **`/graphql`** (or custom path) + **`PrismaService`** inside **`QueryRoot`** / **`MutationRoot`**.
+
+MdBook anchor: **[Recipe C](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/backend-recipes.md)**.
+
+## Cargo.toml
+
+```toml
+nestrs = { version = "0.3.8", features = ["graphql"] }
+nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+async-graphql = "=7.0.17"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+```
+
+## Minimal schema build
+
+```rust
+use async_graphql::{EmptySubscription, Schema};
+use nestrs::graphql::with_default_limits;
+
+let schema = with_default_limits(
+    Schema::build(QueryRoot { prisma: prisma.clone() }, MutationRoot { prisma }, EmptySubscription),
+)
+.finish();
+
+NestFactory::create::<AppModule>()
+    .enable_graphql(schema)
+    .listen(3000)
+    .await?;
+```
+
+## CRUD resolvers (production-shaped)
+
+Combine **`SimpleObject`** types with **`prisma_model!`**—same queries as REST, different transport. Clamp **`take`** / **`skip`** server-side so public GraphQL cannot scan the whole table.
+
+```rust
+use async_graphql::{Object, SimpleObject};
+use nestrs_prisma::SortOrder;
+
+#[derive(SimpleObject, Clone)]
+pub struct GqlUser {
+    pub id: String,
+    pub email: String,
+    pub name: String,
+}
+
+#[Object]
+impl QueryRoot {
+    async fn users(
+        &self,
+        take: Option<i64>,
+        skip: Option<i64>,
+    ) -> Result<Vec<GqlUser>, async_graphql::Error> {
+        let rows = self
+            .prisma
+            .user()
+            .find_many_with_options(UserFindManyOptions {
+                r#where: UserWhere::and(vec![]),
+                order_by: Some(vec![user::id::order(SortOrder::Asc)]),
+                take: Some(take.unwrap_or(20).clamp(1, 100)),
+                skip: Some(skip.unwrap_or(0).max(0)),
+                distinct: None,
+            })
+            .await
+            .map_err(async_graphql::Error::new_with_source)?;
+        Ok(rows
+            .into_iter()
+            .map(|u| GqlUser {
+                id: u.id.to_string(),
+                email: u.email,
+                name: u.name,
+            })
+            .collect())
+    }
+
+    async fn user(&self, id: i64) -> Result<Option<GqlUser>, async_graphql::Error> {
+        let u = self
+            .prisma
+            .user()
+            .find_unique(user::id::equals(id))
+            .await
+            .map_err(async_graphql::Error::new_with_source)?;
+        Ok(u.map(|u| GqlUser {
+            id: u.id.to_string(),
+            email: u.email,
+            name: u.name,
+        }))
+    }
+}
+
+#[Object]
+impl MutationRoot {
+    async fn create_user(
+        &self,
+        email: String,
+        name: String,
+    ) -> Result<GqlUser, async_graphql::Error> {
+        let u = self
+            .prisma
+            .user()
+            .create(UserCreateInput { email, name })
+            .await
+            .map_err(async_graphql::Error::new_with_source)?;
+        Ok(GqlUser {
+            id: u.id.to_string(),
+            email: u.email,
+            name: u.name,
+        })
+    }
+
+    async fn delete_user(&self, id: i64) -> Result<bool, async_graphql::Error> {
+        let n = self
+            .prisma
+            .user()
+            .delete_many(UserWhere::and(vec![user::id::equals(id)]))
+            .await
+            .map_err(async_graphql::Error::new_with_source)?;
+        Ok(n > 0)
+    }
+}
+```
+
+### Operating GraphQL like a product API
+
+| Topic | What teams actually do |
+|-------|-------------------------|
+| **Authorization** | Resolve auth (JWT/API key) in a guard or context factory; **never** expose raw **`PrismaService`** patterns that bypass tenant filters. Add **`where`** clauses from **`ctx`** on **every** list/detail resolver. |
+| **N+1** | For relation-heavy graphs, introduce batching (**DataLoader** pattern in **`async-graphql`**) so listing users does not issue one query per nested field. |
+| **Complexity / depth** | **`with_default_limits`** caps execution cost—keep custom limits aligned with gateway timeouts (often **3–30 s** behind OAuth). |
+| **Mutations** | Return **`Result`** with **`extensions`** or union types for domain errors (`EmailTaken`) instead of generic `"internal error"` strings. |
+
+Adjust **`delete_many`** vs single **`delete`** to match your macro-generated client (**[`prisma_model_client.rs`](https://github.com/Joshyahweh/nestrs/blob/main/nestrs-prisma/tests/prisma_model_client.rs)**).
+
+## Global prefix + GraphQL URL
+
+If you call **`.set_global_prefix("platform")`**, POST GraphQL to **`/platform/graphql`**, not **`/graphql`** alone.
+
+## Batch POST
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/graphql \
+  -H 'content-type: application/json' \
+  -d '[{"query":"{ dbPing }"},{"query":"{ version }"}]'
+```
+
+<Tip>
+  Chain **`.enable_openapi()`** on the same **`NestFactory`** when you feature-gate **`openapi`**—REST controllers and GraphQL coexist on one router.
+</Tip>

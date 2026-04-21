@@ -111,4 +111,4 @@ Open an issue with context, what you tried, and what you expected.
 2. Run local release gates (`fmt`, `clippy -D warnings`, `test`, `doc`, benchmark checks, publish dry-runs).
 3. Create and push tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 4. Tag triggers `.github/workflows/publish-crates.yml` (preflight + publish using `CARGO_REGISTRY_TOKEN`, or trusted publishing if configured on crates.io).
-5. If a bad release ships, use `cargo yank` and immediately cut a patch release.
+5. If a bad release ships, use `cargo yank` and immediately cut a patch release

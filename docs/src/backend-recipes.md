@@ -1,8 +1,8 @@
 # Backend stack recipes (procedures)
 
-This chapter gives **many copy-paste-friendly examples** per stack: **`Cargo.toml`**, **Prisma / env**, **module graph**, **`main` bootstrap**, **services**, **controllers / GraphQL / micro handlers**, and **next steps**.
+This chapter gives **many copy-paste-friendly examples** per stack: **`Cargo.toml`**, **Prisma / env**, **module graph**, **`main` bootstrap**, **services**, **controllers / GraphQL / micro handlers**, **CRUD variations**, **message brokers**, and **event-driven patterns**.
 
-It complements [Microservices](microservices.md), [GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md), and [`nestrs-prisma` README](../../nestrs-prisma/README.md)—not replace them.
+It complements [Microservices](microservices.md), [`MICROSERVICES.md`](../../MICROSERVICES.md), [GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md), and [`nestrs-prisma` README](../../nestrs-prisma/README.md)—not replace them.
 
 ---
 
@@ -594,6 +594,46 @@ Use **`tower::ServiceExt::oneshot`** — same idea as **`param_decorators_and_pi
 | In-memory SQLite flaky | **`pool_max(1)`** and single-threaded DDL (**`nestrs-prisma` README**). |
 | Macro / trait errors on **`prisma_model!`** | Add **`async-trait`** to **`Cargo.toml`** directly. |
 
+### A.25 REST CRUD cheat-sheet (`prisma_model!` **User**)
+
+Wire these routes once **`User`** / **`users`** matches **§ A.17** style macros and DDL.
+
+| Operation | HTTP | Handler calls (service) |
+|-----------|------|-------------------------|
+| **Create** | `POST /users/` | **`user().create(UserCreateInput { … })`** |
+| **Read list** | `GET /users/` | **`find_many`** with **`UserWhere`** + optional **`take`/`skip`** via **`find_many_with_options`** |
+| **Read one** | `GET /users/:id` | **`find_unique(user::id::equals(id))`** |
+| **Update** | `PATCH /users/:id` | **`update(user::id::equals(id), …)`** or **`update_many`** |
+| **Delete** | `DELETE /users/:id` | **`delete`** / **`delete_many`** if exposed for your macro version |
+
+Prefer **`ValidatedBody`** + **`ValidatedPath`** ([First steps](first-steps.md)) for payloads; map **`PrismaError`** → **`HttpException`** (**§ A.14**).
+
+### A.26 Pagination & counts (list endpoints)
+
+Sketch for **offset paging** (names follow your **`prisma_model!`** expansion—see **[`prisma_model_client.rs`](../../nestrs-prisma/tests/prisma_model_client.rs)**):
+
+```rust
+use nestrs_prisma::SortOrder;
+
+pub async fn page(&self, skip: i64, take: i64) -> Result<Vec<UserRow>, HttpException> {
+    let rows = self
+        .prisma
+        .user()
+        .find_many_with_options(UserFindManyOptions {
+            r#where: UserWhere::and(vec![]),
+            order_by: Some(vec![user::id::order(SortOrder::Asc)]),
+            take: Some(take.clamp(1, 100)),
+            skip: Some(skip.max(0)),
+            distinct: None,
+        })
+        .await
+        .map_err(HttpException::from)?;
+    Ok(rows.into_iter().map(/* model → UserRow */).collect())
+}
+```
+
+Expose **`GET /users?skip=&take=`** via **`ValidatedQuery`** and return **`Json<Vec<UserRow>>`** plus a **`X-Total-Count`** header from **`count`** if you need exact totals.
+
 ---
 
 # Recipe B — REST + MongoDB (`MongoModule`)
@@ -887,6 +927,38 @@ Paths depend on **`#[controller(prefix = …, version = …)]`** + any **`set_gl
 | Duplicate key on email | **`replace_one`** + unique index (**§ B.10**)—handle write errors in API. |
 | `_id` missing on read | **`find_one`** returns **`ProfileDoc`** without **`_id`** unless you model it—use **`Document`** or add **`ObjectId`** field to struct. |
 
+### B.16 REST CRUD routes (`ProfileStore`)
+
+Typical surface on **`ProfileController`** (prefix **`/profiles`**, version **`v1`**):
+
+| Method | Path | Behavior |
+|--------|------|----------|
+| `GET` | `/` | **`list_recent(limit)`** — add **`skip`** query for paging |
+| `GET` | `/:id` | Resolve **`ObjectId`**, **`find_one`** by **`_id`** (collection as **`Document`** or typed struct with **`_id`**) |
+| `POST` | `/` | **`insert_one(ProfileDoc)`** |
+| `PUT` | `/` | **`upsert_by_email`** (**§ B.9**) — treat as replace-by-email |
+| `PATCH` | `/:id` | **`find_one_and_update`** partial **`$set`** (**§ B.9**) |
+| `DELETE` | `/:id` | **`delete_by_id`** (**§ B.9**) |
+
+Return **`201`** + **`Location`** on create when you expose new **`ObjectId`**s.
+
+### B.17 Typed document with **`_id`** for CRUD reads
+
+```rust
+use bson::oid::ObjectId;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProfileDoc {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub email: String,
+    pub display_name: String,
+}
+```
+
+Then **`GET /:id`** can **`find_one`** into **`ProfileDoc`** and serialize **`id`** as hex string in JSON (`serde_json` supports **`ObjectId`** with **`hex`** feature on **`bson`** crate as configured).
+
 ---
 
 # Recipe C — GraphQL + PostgreSQL + Prisma
@@ -988,6 +1060,7 @@ use nestrs_graphql::with_default_limits;
 pub struct GqlUser {
     pub id: String,
     pub email: String,
+    pub name: String,
 }
 
 pub struct MutationRoot {
@@ -1005,6 +1078,7 @@ impl MutationRoot {
         Ok(GqlUser {
             id: "demo".into(),
             email,
+            name: "demo".into(),
         })
     }
 }
@@ -1083,6 +1157,95 @@ You can chain **`.enable_graphql(schema)`** with **`.enable_openapi()`** (featur
 | Playground 405 / disabled | **`GraphQlHttpOptions::enable_playground`** (**Recipe C.5**). |
 | Deep resolver stacks | Re-use **one** shared **`Arc<PrismaService>`**; avoid per-request pool creation. |
 | N+1 on relations | Add **`DataLoader`** / batching in **`async-graphql`** (outside nestrs core). |
+
+### C.15 GraphQL CRUD with **`prisma_model!`** (sketch)
+
+Assume **`nestrs_prisma::prisma_model!(User => "users", { id: i64, email: String, name: String })`** and a shared **`Arc<PrismaService>`** on **`QueryRoot`** / **`MutationRoot`**.
+
+**Query — list + one:**
+
+```rust
+#[Object]
+impl QueryRoot {
+    async fn users(&self, take: Option<i64>, skip: Option<i64>) -> Result<Vec<GqlUser>, async_graphql::Error> {
+        let rows = self
+            .prisma
+            .user()
+            .find_many_with_options(UserFindManyOptions {
+                r#where: UserWhere::and(vec![]),
+                order_by: Some(vec![user::id::order(nestrs_prisma::SortOrder::Asc)]),
+                take: Some(take.unwrap_or(20).clamp(1, 100)),
+                skip: Some(skip.unwrap_or(0).max(0)),
+                distinct: None,
+            })
+            .await
+            .map_err(async_graphql::Error::new_with_source)?;
+        Ok(rows
+            .into_iter()
+            .map(|u| GqlUser {
+                id: u.id.to_string(),
+                email: u.email,
+                name: u.name,
+            })
+            .collect())
+    }
+
+    async fn user(&self, id: i64) -> Result<Option<GqlUser>, async_graphql::Error> {
+        let u = self
+            .prisma
+            .user()
+            .find_unique(user::id::equals(id))
+            .await
+            .map_err(async_graphql::Error::new_with_source)?;
+        Ok(u.map(|u| GqlUser {
+            id: u.id.to_string(),
+            email: u.email,
+            name: u.name,
+        }))
+    }
+}
+```
+
+**Mutation — create / update / delete:**
+
+```rust
+#[Object]
+impl MutationRoot {
+    async fn create_user(&self, email: String, name: String) -> Result<GqlUser, async_graphql::Error> {
+        let u = self
+            .prisma
+            .user()
+            .create(UserCreateInput { email, name })
+            .await
+            .map_err(async_graphql::Error::new_with_source)?;
+        Ok(GqlUser {
+            id: u.id.to_string(),
+            email: u.email,
+            name: u.name,
+        })
+    }
+
+    async fn delete_user(&self, id: i64) -> Result<bool, async_graphql::Error> {
+        let n = self
+            .prisma
+            .user()
+            .delete_many(UserWhere::and(vec![user::id::equals(id)]))
+            .await
+            .map_err(async_graphql::Error::new_with_source)?;
+        Ok(n > 0)
+    }
+}
+```
+
+Adjust **`delete`** vs **`delete_many`** to the APIs your macro expands (**[`prisma_model_client.rs`](../../nestrs-prisma/tests/prisma_model_client.rs)** lists **`update`**, **`delete_many`**, etc.).
+
+### C.16 Batching writes (`create_many`)
+
+Reuse **`create_many`** / **`create_many_with_options`** from tests when importing CSV or sync jobs—same **`PrismaService`** pool as HTTP.
+
+### C.17 Splitting GraphQL layers
+
+Keep **thin resolvers**; put transaction boundaries in a **`UserRepository`** `#[injectable]` if CRUD grows—inject **`Arc<PrismaService>`** once and share across Query/Mutation roots.
 
 ---
 
@@ -1362,6 +1525,45 @@ async fn main() {
 ```
 
 Run: **`cargo run`**, then **§ D.9** curls against **`http://127.0.0.1:3000/graphql`**.
+
+### D.12 GraphQL CRUD mutations (update + delete by email or id)
+
+Extend **§ D.11** **`MutationRoot`** with targeted writes (same **`ProfileDoc`** / **`app`** DB):
+
+```rust
+#[Object]
+impl MutationRoot {
+    async fn update_profile_by_email(
+        &self,
+        email: String,
+        display_name: String,
+    ) -> Result<bool, async_graphql::Error> {
+        let db = self.mongo.database("app").await.map_err(async_graphql::Error::new)?;
+        let col = db.collection::<ProfileDoc>("profiles");
+        let r = col
+            .update_one(
+                doc! { "email": &email },
+                doc! { "$set": { "display_name": &display_name } },
+                None,
+            )
+            .await
+            .map_err(async_graphql::Error::new)?;
+        Ok(r.modified_count > 0 || r.matched_count > 0)
+    }
+
+    async fn delete_profile_by_email(&self, email: String) -> Result<u64, async_graphql::Error> {
+        let db = self.mongo.database("app").await.map_err(async_graphql::Error::new)?;
+        let col = db.collection::<ProfileDoc>("profiles");
+        let r = col
+            .delete_one(doc! { "email": &email })
+            .await
+            .map_err(async_graphql::Error::new)?;
+        Ok(r.deleted_count)
+    }
+}
+```
+
+Add **`#[derive(Debug, serde::Deserialize, serde::Serialize)]`** on **`ProfileDoc`** when you enable **`_id`** round-trips (**§ B.17**).
 
 ---
 
@@ -1714,6 +1916,277 @@ async fn main() {
 
 Invoke **`sql.ping`** from your gRPC client using the **JSON-wire** payloads described in **[GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md)** / **`nestrs_microservices`**. For a **TCP** listener instead of gRPC, swap bootstrap to **`NestFactory::create_microservice`** (**§ E.6** / **E.11**)—handlers stay identical.
 
+### E.15 Microservice CRUD patterns (`#[message_pattern]`)
+
+Same **`prisma_model!(User => …)`** as **§ E.10**, extended:
+
+| Pattern | Request DTO (sketch) | Response / error |
+|---------|----------------------|-------------------|
+| **`user.create`** | `{ "email", "name" }` | New row or **409** from Prisma |
+| **`user.get`** | `{ "id" }` | **§ E.10** |
+| **`user.list`** | `{ "skip", "take" }` | **`Vec<UserRpcRow>`** via **`find_many_with_options`** |
+| **`user.update`** | `{ "id", …fields }` | **`update`** / **`update_many`** |
+| **`user.delete`** | `{ "id" }` | **`delete_many`** → affected count |
+
+Always version payloads (**`schema_version`** in JSON) when multiple services evolve independently.
+
+---
+
+# Recipe F — Microservices + message brokers
+
+**Goal:** run **`#[micro_routes]`** handlers behind **brokers** (not only TCP/gRPC) and call peers with **`ClientProxy`** / **`ClientsModule`**.
+
+Deep reference: **[`MICROSERVICES.md`](../../MICROSERVICES.md)**, **[`nestrs-microservices` README](../../nestrs-microservices/README.md)**, [Microservices](microservices.md).
+
+### F.1 Which transports have `NestFactory` helpers?
+
+| Transport | Umbrella features | Bootstrap |
+|-----------|-------------------|-----------|
+| **TCP** | **`microservices`** | **`NestFactory::create_microservice`** |
+| **NATS** | **`microservices-nats`** | **`NestFactory::create_microservice_nats`** |
+| **Redis** | **`microservices-redis`** | **`NestFactory::create_microservice_redis`** |
+| **gRPC + JSON wire** | **`microservices-grpc`** | **`NestFactory::create_microservice_grpc`** (**Recipe E**) |
+| **RabbitMQ** | **`microservices-rabbitmq`** | **`NestFactory::create_microservice_rabbitmq`** |
+| **Kafka listener** | **`microservices-kafka`** | Compose **`KafkaMicroserviceServer`** (see **§ F.10**) |
+| **MQTT listener** | **`microservices-mqtt`** | Compose **`MqttMicroserviceServer`** — same idea |
+
+All transports deserialize the same **`WireRequest`** JSON (**[`wire`](https://docs.rs/nestrs-microservices/latest/nestrs_microservices/wire/index.html)**).
+
+### F.2 `Cargo.toml` feature matrix (examples)
+
+```toml
+# NATS micro listener + NATS client in another crate
+nestrs = { version = "0.3.8", features = ["microservices", "microservices-nats"] }
+
+# Redis micro listener
+nestrs = { version = "0.3.8", features = ["microservices", "microservices-redis"] }
+
+# RabbitMQ work-queue listener
+nestrs = { version = "0.3.8", features = ["microservices", "microservices-rabbitmq"] }
+
+# Kafka transport (client) — enable kafka on nestrs-microservices transitively
+nestrs = { version = "0.3.8", features = ["microservices", "microservices-kafka"] }
+```
+
+Match **exactly one** broker feature set per binary unless you know how layers compose.
+
+### F.3 NATS micro listener + Docker
+
+```bash
+docker run --name nestrs-nats -p 4222:4222 -d nats:2-alpine
+```
+
+Server bootstrap:
+
+```rust
+NestFactory::create_microservice_nats::<AppModule>(
+    nestrs::microservices::NatsMicroserviceOptions::new(
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into()),
+    ),
+)
+.listen()
+.await;
+```
+
+Remote caller (**CLI / other service**) — **`ClientProxy`** over **`NatsTransport`**:
+
+```rust
+use nestrs::microservices::{ClientProxy, NatsTransport, NatsTransportOptions};
+use std::sync::Arc;
+
+let proxy = ClientProxy::new(Arc::new(NatsTransport::new(NatsTransportOptions::new(
+    "nats://127.0.0.1:4222",
+))));
+let pong: serde_json::Value = proxy.send("sql.ping", &serde_json::json!({"check": 1})).await?;
+```
+
+Typed **`send<TReq,TRes>`** works when your DTOs derive **`serde`** (**[`ClientProxy`](https://docs.rs/nestrs-microservices)**).
+
+### F.4 Redis micro listener + Docker
+
+```bash
+docker run --name nestrs-redis -p 6379:6379 -d redis:7-alpine
+```
+
+```rust
+NestFactory::create_microservice_redis::<AppModule>(
+    nestrs::microservices::RedisMicroserviceOptions::new("redis://127.0.0.1:6379")
+        .with_prefix("myapp"),
+)
+.listen()
+.await;
+```
+
+Client:
+
+```rust
+use nestrs::microservices::{ClientProxy, RedisTransport, RedisTransportOptions};
+let proxy = ClientProxy::new(Arc::new(RedisTransport::new(RedisTransportOptions::new(
+    "redis://127.0.0.1:6379",
+))));
+proxy.emit("order.created", &serde_json::json!({"id": 1})).await?; // fire-and-forget
+```
+
+### F.5 RabbitMQ micro listener
+
+```bash
+docker run --name nestrs-rmq -p 5672:5672 -p 15672:15672 -e RABBITMQ_DEFAULT_USER=guest -e RABBITMQ_DEFAULT_PASS=guest -d rabbitmq:3-management-alpine
+```
+
+```rust
+NestFactory::create_microservice_rabbitmq::<AppModule>(
+    nestrs::microservices::RabbitMqMicroserviceOptions::new("amqp://guest:guest@127.0.0.1:5672/")
+        .with_work_queue("users.rpc"),
+)
+.listen()
+.await;
+```
+
+JSON **`WireRequest`** bodies land on the **work queue**; replies use private reply queues per the adapter (**[`README`](../../nestrs-microservices/README.md)** § RabbitMQ).
+
+### F.6 `ClientsModule`: multiple named brokers in one HTTP app
+
+Register brokers as a **dynamic module**, then merge it into your root module (**[`dynamic_modules.rs`](../../nestrs/tests/dynamic_modules.rs)**):
+
+```rust
+use nestrs::microservices::{
+    ClientConfig, ClientsModule, ClientsService, NatsTransportOptions, RedisTransportOptions,
+};
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+let dm: DynamicModule = ClientsModule::register(&[
+    ClientConfig::nats(
+        "USERS_MS",
+        NatsTransportOptions::new(std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into())),
+    ),
+    ClientConfig::redis(
+        "AUDIT_BUS",
+        RedisTransportOptions::new("redis://127.0.0.1:6379"),
+    ),
+]);
+
+let app = NestFactory::create_with_modules::<AppModule, _>([dm]);
+```
+
+Resolve proxies from **`ClientsService`** inside any **`#[injectable]`**:
+
+```rust
+let clients: Arc<ClientsService> = registry.get(); // or inject via ctor field
+clients.expect("USERS_MS").send("user.get", &req).await?;
+```
+
+`ClientsModule` also registers an **`EventBus`** (see **Recipe G**). When **exactly one** client is registered, a default **`ClientProxy`** exists.
+
+### F.7 Broker selection (operational view)
+
+| Need | Prefer |
+|------|--------|
+| Lowest ops, quick dev | **TCP** or **Redis** (single container) |
+| Cloud-native streaming, replay | **Kafka** clients + listener process |
+| Managed queues / DLQ | **RabbitMQ** |
+| Millions of tiny subjects | **NATS** |
+| Embedded / IoT bridges | **MQTT** |
+
+### F.8 TLS / SASL (Kafka)
+
+Kafka supports **`KafkaConnectionOptions`** / **`KafkaSaslOptions`** on both **`KafkaTransportOptions`** (client) and **`KafkaMicroserviceOptions`** (listener). Mirror cluster settings from your operator (MSK, Strimzi, Confluent).
+
+### F.9 Broker health probes
+
+nestrs exposes broker-specific **`HealthIndicator`** stubs (**`NatsBrokerHealth`**, **`RedisBrokerHealth`**, **`kafka_cluster_reachable_with`**) — combine with **`enable_readiness_check`** on HTTP sides (**[API cookbook](appendix-api-cookbook.md)**).
+
+### F.10 Kafka listener process (advanced)
+
+There is **no** `NestFactory::create_microservice_kafka` today. Run **`KafkaMicroserviceServer::new(KafkaMicroserviceOptions::new(vec!["127.0.0.1:9092".into()]), handlers)`** with **`handlers`** collected the same way **`NestFactory::create_microservice`** builds **`TcpMicroserviceServer`** (**[`nestrs/src/lib.rs`](../../nestrs/src/lib.rs)** search **`microservice_handlers`**). Prefer **`ClientConfig::kafka`** for callers until a first-party helper lands.
+
+---
+
+# Recipe G — Event-driven architecture (EDA)
+
+**Patterns:** integration events cross service boundaries; domain events stay in-process; both map cleanly to **`emit`** / **`EventBus`**.
+
+See **[`MICROSERVICES.md`](../../MICROSERVICES.md)** § Integration events, CQRS/outbox, reliability.
+
+### G.1 Fire-and-forget over the broker (`emit`)
+
+- Use **`Transport::emit_json`** / **`ClientProxy::emit`** for **`order.created`**, **`user.deleted`**, audit fan-out.
+- Use **`send`** when the caller needs a typed reply (RPC), not pure EDA.
+
+### G.2 `#[event_pattern]` on micro handlers (consumer)
+
+Already in **§ E.8** — handlers take an event DTO and return **`()`**. These are **inbound integration events** on the micro transport.
+
+### G.3 In-process `EventBus` + `#[on_event]` (same binary)
+
+For **domain** reactions without a broker (or before you add one), use **`nestrs_events::EventBus`** with **`#[event_routes]`** + **`#[on_event("topic")]`**:
+
+```rust
+use nestrs::prelude::*;
+use serde_json::json;
+
+#[injectable]
+struct OrderProjector;
+
+#[event_routes]
+impl OrderProjector {
+    #[on_event("order.created")]
+    async fn apply(&self, payload: serde_json::Value) {
+        tracing::info!(?payload, "projection");
+    }
+}
+
+// Register `OrderProjector` in providers; on HTTP/micro bootstrap, `wire_on_event_handlers`
+// subscribes these methods to the shared `EventBus`.
+```
+
+Emit from a service:
+
+```rust
+async fn place_order(bus: std::sync::Arc<nestrs::microservices::EventBus>) {
+    bus.emit("order.created", &json!({ "id": 99, "event_version": 1 })).await;
+}
+```
+
+Wire **`EventBus`** by importing **`ClientsModule::register`** (even with a dummy transport in tests) or construct **`EventBus::new()`** and register manually in custom modules—**[`microservices_events.rs`](../../nestrs-microservices/tests/microservices_events.rs)** shows **`ClientsModule`** exporting **`EventBus`**.
+
+### G.4 HTTP writes DB then **`emit`** (integration style)
+
+Typical **`OrderController`** flow:
+
+1. **`ValidatedBody`** → **`OrderService::create`** → single DB transaction.
+2. After commit, **`clients.expect("AUDIT").emit("order.created", &dto)`**.
+3. On failure after commit, rely on **outbox** (**§ G.6**) instead of losing the event.
+
+### G.5 Idempotency & versioning
+
+- Consumers must tolerate **at-least-once** delivery — guard with **`event_id`** / **`idempotency_key`**.
+- Include **`event_version`** in payloads when evolving schemas (**[`MICROSERVICES.md`](../../MICROSERVICES.md)**).
+
+### G.6 Outbox pattern (Postgres / Prisma)
+
+1. In the same transaction as business rows, insert an **outbox** row (`payload`, **`topic`**, **`created_at`**).
+2. Background worker reads outbox, calls **`emit`**, marks sent.
+3. Retries + dead-letter table per organizational policy.
+
+**nestrs** does not ship an outbox crate — implement with **`prisma_model!`** or raw SQL.
+
+### G.7 CQRS read models
+
+Subscribe to **`order.created`** (NATS/Kafka/`on_event`) and update a read-optimized store (Redis, Mongo, Elasticsearch). Keeps HTTP write path thin.
+
+### G.8 When to pick which recipe
+
+| Scenario | Recipe |
+|----------|--------|
+| CRUD REST + SQL | **A** |
+| CRUD document API | **B** |
+| Public graph API + SQL | **C** |
+| Graph + documents | **D** |
+| Service-to-service RPC + Prisma | **E** |
+| Broker-backed RPC/events | **F** |
+| Domain + integration events, outbox | **G** |
+
 ---
 
 ## More combinations (quick reference)
@@ -1740,7 +2213,7 @@ nestrs generate resource users --transport ws
 nestrs generate resource audit --transport microservice
 ```
 
-Replace generated stub providers with **Recipe A–E** data access.
+Replace generated stub providers with **Recipes A–G** (CRUD stacks **A–D**, RPC **E**, brokers **F**, events **G**).
 
 ---
 
@@ -1756,4 +2229,4 @@ Replace generated stub providers with **Recipe A–E** data access.
 
 ---
 
-**Summary:** **Recipe A** and **B–E** all include multiple sub-sections (run notes, **curl**, **troubleshooting**). **Recipe D.11** and **E.14** are end-to-end **single-file** bootstraps. Use **Recipe A/C/E** for **relational Prisma + SQLx**; **B/D** for **MongoDB** driver code. Combine **REST, GraphQL, and gRPC** by sharing **one module graph** and layering **`enable_graphql`**, **`also_listen_http`**, and **`set_global_prefix`** as needed.
+**Summary:** Recipes **A–G** pair **stack-specific CRUD** with **broker-backed microservices** (**F**) and **EDA** primitives (**G** — **`emit`**, **`EventBus`**, **`#[on_event]`**, outbox guidance). **Recipes D.11** and **E.14** stay the minimal **single-file** GraphQL‑Mongo and **gRPC** starters. Compose **REST + GraphQL + hybrid HTTP/micro** with **one module graph**, adding **`ClientsModule`** / **`also_listen_http`** where needed.

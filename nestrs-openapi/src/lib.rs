@@ -204,7 +204,8 @@ fn infer_tag_from_path(path: &str) -> String {
 }
 
 async fn openapi_docs(State(options): State<OpenApiOptions>) -> Html<String> {
-    let url = options.json_path;
+    let url = serde_json::to_string(&options.json_path).unwrap_or_else(|_| String::from("\"\""));
+
     Html(format!(
         r##"<!doctype html>
 <html>
@@ -220,7 +221,7 @@ async fn openapi_docs(State(options): State<OpenApiOptions>) -> Html<String> {
     <script>
       window.onload = () => {{
         SwaggerUIBundle({{
-          url: "{url}",
+          url: {url},
           dom_id: "#swagger-ui"
         }});
       }};

@@ -87,7 +87,7 @@ Scheduled workflow **`.github/workflows/fuzz.yml`** (weekly + manual) runs **`ca
 - **`nestrs-microservices/fuzz`**: `wire_json` — `WireRequest` / `WireResponse` / `WireError` JSON (protobuf/JSON boundary for gRPC and transporters).
 - **`nestrs/fuzz`**: `authorization_bearer` — `parse_authorization_bearer`; `uri_path_json` — `http::Uri` parse for path-shaped strings + `serde_json::Value` from arbitrary bytes.
 
-Local quick start: see **`nestrs/fuzz/README.md`** and **`nestrs-microservices/fuzz/README.md`** (requires **nightly** Rust). Any libFuzzer crash should be treated as a potential **panic or unsoundness** bug.
+Local quick start: see **`nestrs/fuzz/README.md`** and **`nestrs-microservices/fuzz/README.md`** (requires **nightly** Rust and **`cargo-fuzz` 0.13.1** installed **without** **`--locked`**—see those files). Any libFuzzer crash should be treated as a potential **panic or unsoundness** bug.
 
 ### External load testing
 

@@ -1,4 +1,15 @@
-# https://github.com/RustSec/rustsec/blob/main/cargo-audit/audit.toml.example
+# The official `mongodb` crate declares optional `hickory-*` (DNS/SRV). Cargo.lock lists
+# those edges even when nestrs is built with **`mongo`** only (no **`mongo-dns`** / no
+# **`dns-resolver`**), so **`cargo audit`** can report Hickory advisories that do not apply
+# to plain `mongodb://…` connections. Track upstream: mongo-rust-driver bump to Hickory
+# ≥ 0.26.1; RUSTSEC-2026-0118 has no fixed release yet per advisory-db.
+#
+# `rsa` via **`sqlx-mysql`** (nestrs-prisma optional SQLx backends): RUSTSEC-2023-0071 notes
+# no fixed stable release for the Marvin findings in the 0.9 line; monitor **`rsa`** /
+# **`sqlx`** releases.
 [advisories]
-# Transitive `rsa` via `sqlx-mysql` when SQLx `any` unifies drivers; advisory lists no patched release.
-ignore = ["RUSTSEC-2023-0071"]
+ignore = [
+    "RUSTSEC-2026-0118",
+    "RUSTSEC-2026-0119",
+    "RUSTSEC-2023-0071",
+]

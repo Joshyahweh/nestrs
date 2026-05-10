@@ -1,4 +1,5 @@
-//! MongoDB integration (NestJS **MongooseModule** analogue). Feature: **`mongo`**.
+//! MongoDB integration (NestJS **MongooseModule** analogue). Features: **`mongo`** (TLS + BSON compat),
+//! optional **`mongo-dns`** for **`mongodb+srv://`** / SRV seed lists (adds the driver's **`dns-resolver`** stack).
 
 use crate::core::DatabasePing;
 use crate::{injectable, module};

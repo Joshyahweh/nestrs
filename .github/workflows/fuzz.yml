@@ -18,8 +18,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@nightly
 
+      # crates.io 0.13.1 ships a lockfile that pins rustix 0.36.5; recent nightlies reject its
+      # rustc_* cfg_attrs. Resolve deps from Cargo.toml instead (--no-locked).
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        run: cargo install cargo-fuzz --version 0.13.1
 
       - name: Fuzz wire JSON (nestrs-microservices)
         run: |

@@ -653,6 +653,8 @@ serde = { version = "1", features = ["derive"] }
 validator = { version = "0.20", features = ["derive"] }
 ```
 
+For **`mongodb+srv://`** connection strings (SRV DNS resolution), add **`mongo-dns`** alongside **`mongo`**: `features = ["mongo", "mongo-dns"]`.
+
 ### B.2 Bootstrap URI
 
 ```rust
@@ -769,7 +771,7 @@ docker run --name nestrs-mongo -p 27017:27017 -d mongo:7
 export MONGODB_URI="mongodb://127.0.0.1:27017"
 ```
 
-Use **`MongoModule::for_root`** with that URI (or **`mongodb://user:pass@host:27017/db?authSource=admin`** for Atlas-style URLs).
+Use **`MongoModule::for_root`** with that URI (or **`mongodb://user:pass@host:27017/db?authSource=admin`** for Atlas-style URLs). For **`mongodb+srv://`** Atlas URIs, enable **`mongo-dns`** on **`nestrs`** as in **§ B.1**.
 
 ### B.9 Writes: `insert_one`, `replace_one`, `update_one`, `delete_one`
 

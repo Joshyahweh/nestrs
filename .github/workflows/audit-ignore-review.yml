@@ -1,0 +1,22 @@
+name: audit-ignore-review
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 1 * *"
+
+jobs:
+  audit-ignore-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Check whether ignored advisories are still needed
+        run: python3 scripts/ci/audit_ignore_status.py --fail-on-removable

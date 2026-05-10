@@ -30,6 +30,8 @@ queues = ["dep:linkme"]
 queues-redis = ["queues", "dep:redis"]
 database-sqlx = ["dep:sqlx"]
 mongo = ["dep:mongodb"]
+# Enables DNS/SRV resolution (`mongodb+srv://`, Atlas-style seed lists). Pulls **`hickory-*`** (see upstream MongoDB driver advisories).
+mongo-dns = ["mongo", "mongodb/dns-resolver"]
 http-client = ["dep:reqwest"]
 cookies = ["dep:tower-cookies"]
 csrf = ["cookies", "dep:subtle"]
@@ -77,7 +79,7 @@ opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"], optional = tr
 opentelemetry-otlp = { version = "0.31.1", default-features = false, features = ["trace", "grpc-tonic"], optional = true }
 tracing-opentelemetry = { version = "0.32.1", default-features = false, optional = true }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "postgres", "sqlite"], optional = true }
-mongodb = { version = "3", optional = true }
+mongodb = { version = "3", optional = true, default-features = false, features = ["compat-3-0-0", "rustls-tls"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 tower-cookies = { version = "0.10", optional = true }
 subtle = { version = "2.6", optional = true }

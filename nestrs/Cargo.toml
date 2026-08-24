@@ -61,7 +61,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 validator = { version = "0.20", features = ["derive"] }
 tower = { version = "0.5", features = ["limit", "load-shed"] }
-tower-http = { version = "0.6", features = ["cors", "set-header", "limit", "request-id", "compression-gzip", "decompression-gzip", "normalize-path", "fs"] }
+tower-http = { version = "0.6", features = ["cors", "catch-panic", "set-header", "limit", "request-id", "compression-gzip", "decompression-gzip", "normalize-path", "fs"] }
 async-trait = "0.1"
 metrics = "0.24"
 # Recorder + render only; we expose `/metrics` via Axum (no built-in hyper listener / push gateway).

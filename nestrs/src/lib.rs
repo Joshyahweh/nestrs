@@ -804,6 +804,13 @@ pub enum PathNormalization {
     AppendTrailingSlash,
 }
 
+/// Default request body size limit (2 MiB) applied by [`NestApplication::build_router`].
+///
+/// Override per app with [`NestApplication::use_body_limit`]. Raw extractors ([`crate::RawBody`])
+/// and JSON/DTO extraction all flow through this layer, so the default also protects webhook
+/// routes from unbounded in-memory reads.
+pub const DEFAULT_BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+
 pub struct NestApplication {
     registry: std::sync::Arc<crate::core::ProviderRegistry>,
     router: axum::Router,
@@ -821,7 +828,7 @@ pub struct NestApplication {
     concurrency_limit: Option<usize>,
     /// When enabled, sheds excess load immediately when inner services are not ready.
     load_shed: bool,
-    body_limit_bytes: Option<usize>,
+    body_limit_bytes: Option<usize>, // defaults to Some(DEFAULT_BODY_LIMIT_BYTES)
     production_errors: bool,
     request_id: bool,
     /// Injects [`RequestContext`] into each request’s extensions (see [`Self::use_request_context`]).
@@ -893,7 +900,7 @@ impl NestApplication {
             request_timeout: None,
             concurrency_limit: None,
             load_shed: false,
-            body_limit_bytes: None,
+            body_limit_bytes: Some(DEFAULT_BODY_LIMIT_BYTES),
             production_errors: false,
             request_id: false,
             request_context: false,
@@ -1368,6 +1375,11 @@ impl NestApplication {
         self
     }
 
+    /// Overrides the default request **body size limit** ([`DEFAULT_BODY_LIMIT_BYTES`], 2 MiB).
+    ///
+    /// Requests with larger bodies are rejected with `413 Payload Too Large`. Raise it for
+    /// upload endpoints, or pass `usize::MAX` to disable limiting entirely (not recommended
+    /// for public deployments — unbounded bodies are read into memory).
     pub fn use_body_limit(mut self, max_bytes: usize) -> Self {
         self.body_limit_bytes = Some(max_bytes.max(1));
         self
@@ -1971,6 +1983,27 @@ impl NestApplication {
         for apply in global_layers {
             router = apply(router);
         }
+
+        // Outermost safety net: a panic in any handler/middleware must yield a sanitized 500
+        // instead of dropping the connection with no response. Applied last so it wraps every
+        // layer above (including caller-supplied `global_layers`).
+        router = router.layer(tower_http::catch_panic::CatchPanicLayer::custom(
+            |panic: Box<dyn std::any::Any + Send>| {
+                let msg = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("<non-string panic payload>");
+                tracing::error!(target: "nestrs", "request handler panicked: {msg}");
+                axum::response::Response::builder()
+                    .status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        "{\"statusCode\":500,\"message\":\"Internal Server Error\"}",
+                    ))
+                    .expect("static catch-panic response is infallibly valid")
+            },
+        ));
 
         router
     }
@@ -3193,17 +3226,6 @@ where
     }
 }
 
-/// Used by [`impl_routes!`] for each guard type; not stable API.
-#[doc(hidden)]
-pub async fn __nestrs_run_guard<G>(
-    parts: &::axum::http::request::Parts,
-) -> Result<(), crate::core::GuardError>
-where
-    G: crate::core::CanActivate + Default,
-{
-    G::default().can_activate(parts).await
-}
-
 /// Runs a pre-resolved tuple of route guards left-to-right, short-circuiting on the first
 /// failure. Used by [`impl_routes!`]; not stable API.
 #[doc(hidden)]
@@ -3261,6 +3283,28 @@ impl_guard_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 /// Runs the registration-time-resolved guard tuple for a route; see [`impl_routes!`].
 /// Not stable API.
 #[doc(hidden)]
+/// Converts a guard rejection into the response NestJS parity expects: the standard
+/// `GuardError` JSON body, **plus** the equivalent [`HttpException`] inserted into the response
+/// extensions so `#[use_filters(...)]` exception filters can observe and rewrite auth failures
+/// (in NestJS, exception filters catch exceptions thrown by guards too). Used by `impl_routes!`;
+/// not stable API.
+#[doc(hidden)]
+pub fn __nestrs_guard_error_response(e: crate::core::GuardError) -> axum::response::Response {
+    let ex = match &e {
+        crate::core::GuardError::Unauthorized(m) => HttpException::new(
+            axum::http::StatusCode::UNAUTHORIZED,
+            m.clone(),
+            "Unauthorized",
+        ),
+        crate::core::GuardError::Forbidden(m) => {
+            HttpException::new(axum::http::StatusCode::FORBIDDEN, m.clone(), "Forbidden")
+        }
+    };
+    let mut res = <crate::core::GuardError as axum::response::IntoResponse>::into_response(e);
+    res.extensions_mut().insert(ex);
+    res
+}
+
 pub async fn __nestrs_run_guards<G: __NestrsGuardTuple>(
     guards: &G,
     parts: &::axum::http::request::Parts,
@@ -3438,9 +3482,7 @@ macro_rules! impl_routes {
                                             )
                                             .await
                                             {
-                                                return ::axum::response::IntoResponse::into_response(
-                                                    e,
-                                                );
+                                                return $crate::__nestrs_guard_error_response(e);
                                             }
                                             let req =
                                                 ::axum::http::Request::from_parts(parts, body);
@@ -3551,9 +3593,7 @@ macro_rules! impl_routes {
                                             )
                                             .await
                                             {
-                                                return ::axum::response::IntoResponse::into_response(
-                                                    e,
-                                                );
+                                                return $crate::__nestrs_guard_error_response(e);
                                             }
                                             let req =
                                                 ::axum::http::Request::from_parts(parts, body);
@@ -3580,9 +3620,7 @@ macro_rules! impl_routes {
                                             if let Err(e) =
                                                 __nestrs_ctrl_guard.can_activate(&parts).await
                                             {
-                                                return ::axum::response::IntoResponse::into_response(
-                                                    e,
-                                                );
+                                                return $crate::__nestrs_guard_error_response(e);
                                             }
                                             let req =
                                                 ::axum::http::Request::from_parts(parts, body);

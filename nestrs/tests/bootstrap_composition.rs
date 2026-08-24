@@ -556,11 +556,16 @@ async fn rate_limit_returns_too_many_requests() {
 
 #[tokio::test]
 async fn rate_limit_keeps_clients_in_separate_buckets_in_memory_mode() {
+    // One trusted proxy in front of the app; each client's request reaches the proxy, which
+    // appends the client IP to `x-forwarded-for`. Without a declared topology the forwarded
+    // header is client-controlled and correctly ignored (see client_ip tests).
     let router = NestFactory::create::<AppModule>()
+        .use_trusted_proxy_headers(1)
         .use_rate_limit(
             RateLimitOptions::builder()
                 .max_requests(1)
                 .window_secs(60)
+                .trusted_proxy_hops(1)
                 .build(),
         )
         .into_router();

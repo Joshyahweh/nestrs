@@ -146,7 +146,7 @@ pub use schedule::{ScheduleModule, ScheduleRuntime};
 pub use security::CsrfProtectionConfig;
 pub use security::{
     parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
-    OptionalBearerToken, XRoleMetadataGuard,
+    DemoXRoleMetadataGuard, OptionalBearerToken,
 };
 pub use serialization::strip_null_json_value;
 pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
@@ -245,7 +245,7 @@ pub mod prelude {
     };
     pub use crate::{
         parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
-        OptionalBearerToken, XRoleMetadataGuard,
+        DemoXRoleMetadataGuard, OptionalBearerToken,
     };
     #[cfg(feature = "files")]
     pub use crate::{
@@ -506,6 +506,10 @@ impl RequestTracingOptions {
 pub struct RateLimitOptions {
     max_requests: u64,
     window_secs: u64,
+    /// Number of trusted reverse proxies in front of this service (see
+    /// [`NestApplication::use_trusted_proxy_headers`]). When `0` (default), forwarded headers
+    /// are **not** consulted for the rate-limit key.
+    trusted_proxy_hops: u16,
     #[cfg(feature = "cache-redis")]
     redis: Option<RedisRateLimitOptions>,
 }
@@ -523,6 +527,7 @@ impl Default for RateLimitOptions {
         Self {
             max_requests: 100,
             window_secs: 60,
+            trusted_proxy_hops: 0,
             #[cfg(feature = "cache-redis")]
             redis: None,
         }
@@ -541,6 +546,16 @@ impl RateLimitOptions {
 
     pub fn window_secs(mut self, value: u64) -> Self {
         self.window_secs = value.max(1);
+        self
+    }
+
+    /// Trust `hops` reverse proxies when deriving the client IP for the rate-limit key.
+    ///
+    /// Must match the actual proxy topology; see [`NestApplication::use_trusted_proxy_headers`].
+    /// Without this (default), forwarded headers are ignored and the limiter keys on connection
+    /// metadata only — spoofing `X-Forwarded-For` cannot bypass or poison limits.
+    pub fn trusted_proxy_hops(mut self, hops: u16) -> Self {
+        self.trusted_proxy_hops = hops;
         self
     }
 
@@ -738,6 +753,12 @@ impl CorsOptions {
         self.permissive
     }
 
+    /// `allow_credentials(true)` combined with a wildcard origin is rejected by browsers and
+    /// flagged by security scanners; surface it as a configuration warning.
+    fn is_credentials_with_wildcard_origin(&self) -> bool {
+        self.allow_credentials && (self.permissive || self.allow_origins.iter().any(|o| o == "*"))
+    }
+
     fn into_layer(self) -> tower_http::cors::CorsLayer {
         if self.permissive {
             return tower_http::cors::CorsLayer::permissive();
@@ -809,6 +830,12 @@ pub struct NestApplication {
     execution_context: bool,
     /// Enables request-scoped providers (`ProviderScope::Request`) via task-local cache + per-request registry injection.
     request_scope: bool,
+    /// Trusted reverse-proxy hop count for client-IP resolution
+    /// (see [`Self::use_trusted_proxy_headers`]); `None` = forwarded headers untrusted.
+    trusted_proxy_hops: Option<u16>,
+    /// Bound on shutdown/destroy lifecycle hooks during graceful stop
+    /// (see [`Self::use_shutdown_timeout`]).
+    shutdown_hook_timeout: Option<std::time::Duration>,
     /// Resolves locale per request and installs [`crate::Locale`] / [`crate::I18n`] extractors (see [`Self::use_i18n`]).
     i18n: bool,
     /// GET route for liveness (merged at server root, not under [`Self::enable_uri_versioning`] / [`Self::set_global_prefix`]).
@@ -872,6 +899,8 @@ impl NestApplication {
             request_context: false,
             execution_context: false,
             request_scope: false,
+            trusted_proxy_hops: None,
+            shutdown_hook_timeout: None,
             i18n: false,
             liveness_path: None,
             readiness: None,
@@ -929,26 +958,11 @@ impl NestFactory {
     where
         M: core::Module + crate::microservices::MicroserviceModule,
     {
-        let (registry, router) = M::build();
-        let registry = std::sync::Arc::new(registry);
-
-        let handlers = M::microservice_handlers()
-            .into_iter()
-            .map(|f| f(&registry))
-            .collect::<Vec<_>>();
-
-        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
-            crate::microservices::TcpMicroserviceServer::new(options, handlers),
-        );
-
-        let http = NestApplication::from_parts(registry.clone(), router);
-
-        MicroserviceApplication {
-            registry,
-            http,
-            server,
-            http_port: None,
-        }
+        ::nestrs::__nestrs_create_microservice_with_server::<M, _>(M::build, |handlers| {
+            Box::new(crate::microservices::TcpMicroserviceServer::new(
+                options, handlers,
+            ))
+        })
     }
 
     /// Creates a microservice app (feature: `microservices-nats`) using the NATS transport adapter.
@@ -959,26 +973,11 @@ impl NestFactory {
     where
         M: core::Module + crate::microservices::MicroserviceModule,
     {
-        let (registry, router) = M::build();
-        let registry = std::sync::Arc::new(registry);
-
-        let handlers = M::microservice_handlers()
-            .into_iter()
-            .map(|f| f(&registry))
-            .collect::<Vec<_>>();
-
-        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
-            crate::microservices::NatsMicroserviceServer::new(options, handlers),
-        );
-
-        let http = NestApplication::from_parts(registry.clone(), router);
-
-        MicroserviceApplication {
-            registry,
-            http,
-            server,
-            http_port: None,
-        }
+        ::nestrs::__nestrs_create_microservice_with_server::<M, _>(M::build, |handlers| {
+            Box::new(crate::microservices::NatsMicroserviceServer::new(
+                options, handlers,
+            ))
+        })
     }
 
     /// Creates a microservice app (feature: `microservices-redis`) using the Redis transport adapter.
@@ -989,26 +988,11 @@ impl NestFactory {
     where
         M: core::Module + crate::microservices::MicroserviceModule,
     {
-        let (registry, router) = M::build();
-        let registry = std::sync::Arc::new(registry);
-
-        let handlers = M::microservice_handlers()
-            .into_iter()
-            .map(|f| f(&registry))
-            .collect::<Vec<_>>();
-
-        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
-            crate::microservices::RedisMicroserviceServer::new(options, handlers),
-        );
-
-        let http = NestApplication::from_parts(registry.clone(), router);
-
-        MicroserviceApplication {
-            registry,
-            http,
-            server,
-            http_port: None,
-        }
+        ::nestrs::__nestrs_create_microservice_with_server::<M, _>(M::build, |handlers| {
+            Box::new(crate::microservices::RedisMicroserviceServer::new(
+                options, handlers,
+            ))
+        })
     }
 
     /// Creates a microservice app (feature: `microservices-grpc`) using the gRPC transport adapter.
@@ -1023,26 +1007,11 @@ impl NestFactory {
     where
         M: core::Module + crate::microservices::MicroserviceModule,
     {
-        let (registry, router) = M::build();
-        let registry = std::sync::Arc::new(registry);
-
-        let handlers = M::microservice_handlers()
-            .into_iter()
-            .map(|f| f(&registry))
-            .collect::<Vec<_>>();
-
-        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
-            crate::microservices::GrpcMicroserviceServer::new(options, handlers),
-        );
-
-        let http = NestApplication::from_parts(registry.clone(), router);
-
-        MicroserviceApplication {
-            registry,
-            http,
-            server,
-            http_port: None,
-        }
+        ::nestrs::__nestrs_create_microservice_with_server::<M, _>(M::build, |handlers| {
+            Box::new(crate::microservices::GrpcMicroserviceServer::new(
+                options, handlers,
+            ))
+        })
     }
 
     /// Creates a microservice app (feature: `microservices-rabbitmq`) using the RabbitMQ transport adapter.
@@ -1053,26 +1022,45 @@ impl NestFactory {
     where
         M: core::Module + crate::microservices::MicroserviceModule,
     {
-        let (registry, router) = M::build();
-        let registry = std::sync::Arc::new(registry);
+        ::nestrs::__nestrs_create_microservice_with_server::<M, _>(M::build, |handlers| {
+            Box::new(crate::microservices::RabbitMqMicroserviceServer::new(
+                options, handlers,
+            ))
+        })
+    }
+}
 
-        let handlers = M::microservice_handlers()
-            .into_iter()
-            .map(|f| f(&registry))
-            .collect::<Vec<_>>();
+/// Shared body of the five `NestFactory::create_microservice*` constructors: builds the module,
+/// materializes its event handlers against the app registry, and hands them to the
+/// transport-specific server constructor.
+#[cfg(feature = "microservices")]
+fn __nestrs_create_microservice_with_server<M, F>(
+    build: fn() -> (nestrs_core::ProviderRegistry, axum::Router),
+    make_server: F,
+) -> MicroserviceApplication
+where
+    M: core::Module + crate::microservices::MicroserviceModule,
+    F: FnOnce(
+        Vec<std::sync::Arc<dyn crate::microservices::MicroserviceHandler>>,
+    ) -> Box<dyn crate::microservices::MicroserviceServer>,
+{
+    let (registry, router) = build();
+    let registry = std::sync::Arc::new(registry);
 
-        let server: Box<dyn crate::microservices::MicroserviceServer> = Box::new(
-            crate::microservices::RabbitMqMicroserviceServer::new(options, handlers),
-        );
+    let handlers = M::microservice_handlers()
+        .into_iter()
+        .map(|f| f(&registry))
+        .collect::<Vec<_>>();
 
-        let http = NestApplication::from_parts(registry.clone(), router);
+    let server = make_server(handlers);
 
-        MicroserviceApplication {
-            registry,
-            http,
-            server,
-            http_port: None,
-        }
+    let http = NestApplication::from_parts(registry.clone(), router);
+
+    MicroserviceApplication {
+        registry,
+        http,
+        server,
+        http_port: None,
     }
 }
 
@@ -1124,6 +1112,7 @@ impl MicroserviceApplication {
         let mut http = self.http;
         let server = self.server;
         let http_port = self.http_port;
+        let hook_timeout = http.shutdown_hook_timeout;
 
         // Lifecycle hooks are shared across HTTP + microservice (run once).
         registry.eager_init_singletons();
@@ -1194,8 +1183,7 @@ impl MicroserviceApplication {
             let _ = t.await;
         }
 
-        registry.run_on_application_shutdown().await;
-        registry.run_on_module_destroy().await;
+        run_destroy_phase(&registry, hook_timeout).await;
         #[cfg(feature = "otel")]
         if OTEL_INSTALLED.get().is_some() {
             crate::otel::shutdown_tracer_provider();
@@ -1336,6 +1324,14 @@ impl NestApplication {
                 "CORS permissive mode enabled in production environment"
             );
         }
+        if options.is_credentials_with_wildcard_origin() {
+            tracing::warn!(
+                target: "nestrs",
+                "CORS configured with allow_credentials + wildcard origin; browsers reject \
+                 `Access-Control-Allow-Origin: *` with credentials, so credentialed cross-origin \
+                 requests will fail. List explicit origins instead."
+            );
+        }
         self.cors_options = Some(options);
         self
     }
@@ -1463,6 +1459,30 @@ impl NestApplication {
     /// **Docs:** scopes and lifecycle are covered in mdBook **Fundamentals** (`docs/src/fundamentals.md`).
     pub fn use_request_scope(mut self) -> Self {
         self.request_scope = true;
+        self
+    }
+
+    /// Declares that `hops` trusted reverse proxies sit in front of this service, enabling
+    /// `X-Forwarded-For` / `X-Real-IP` resolution for the [`ClientIp`](crate::ClientIp)
+    /// extractor.
+    ///
+    /// The client address is read **right-most-first**: with one trusted proxy (the common
+    /// `client → LB → app` topology), the entry appended by your load balancer is used and any
+    /// attacker-supplied prefix is ignored. Forwarded headers are **never** consulted without
+    /// this setting — they are trivially spoofable, which would allow IP-based rate-limit
+    /// bypass. Pass the same hop count to [`RateLimitOptions::trusted_proxy_hops`] when using
+    /// `use_rate_limit`.
+    pub fn use_trusted_proxy_headers(mut self, hops: u16) -> Self {
+        self.trusted_proxy_hops = Some(hops);
+        self
+    }
+
+    /// Bounds the total time spent in `on_application_shutdown` / `on_module_destroy` hooks
+    /// during graceful stop; a hung hook logs a warning instead of blocking process exit
+    /// forever. Applies to [`Self::listen_with_shutdown`] / [`Self::listen_graceful`] and hybrid
+    /// microservice shutdown.
+    pub fn use_shutdown_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.shutdown_hook_timeout = Some(timeout);
         self
     }
 
@@ -1808,6 +1828,13 @@ impl NestApplication {
             ));
         }
 
+        if let Some(hops) = self.trusted_proxy_hops {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                crate::client_ip::TrustedProxyHops(hops),
+                install_trusted_proxy_middleware,
+            ));
+        }
+
         if let Some(cors) = self.cors_options {
             router = router.layer(cors.into_layer());
         }
@@ -1996,14 +2023,13 @@ impl NestApplication {
         s.build_router()
     }
 
-    pub async fn listen(self, port: u16) {
+    pub async fn listen(mut self, port: u16) {
         let ip = self
             .listen_ip
             .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
         let registry = self.registry.clone();
-        let mut s = self;
-        let path_normalization = s.path_normalization.take();
-        let router = s.build_router();
+        let path_normalization = self.path_normalization.take();
+        let router = self.build_router();
 
         registry.eager_init_singletons();
         #[cfg(feature = "microservices")]
@@ -2024,7 +2050,7 @@ impl NestApplication {
 
     /// Like [`Self::listen`], but stops when `shutdown` completes. Uses Axum’s graceful shutdown so
     /// in-flight requests can finish (see [`axum::serve::Serve::with_graceful_shutdown`]).
-    pub async fn listen_with_shutdown<F>(self, port: u16, shutdown: F)
+    pub async fn listen_with_shutdown<F>(mut self, port: u16, shutdown: F)
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
@@ -2032,9 +2058,9 @@ impl NestApplication {
             .listen_ip
             .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
         let registry = self.registry.clone();
-        let mut s = self;
-        let path_normalization = s.path_normalization.take();
-        let router = s.build_router();
+        let path_normalization = self.path_normalization.take();
+        let shutdown_hook_timeout = self.shutdown_hook_timeout;
+        let router = self.build_router();
 
         registry.eager_init_singletons();
         #[cfg(feature = "microservices")]
@@ -2058,8 +2084,7 @@ impl NestApplication {
         )
         .await;
 
-        registry.run_on_application_shutdown().await;
-        registry.run_on_module_destroy().await;
+        run_destroy_phase(&registry, shutdown_hook_timeout).await;
         #[cfg(feature = "otel")]
         if OTEL_INSTALLED.get().is_some() {
             crate::otel::shutdown_tracer_provider();
@@ -2144,6 +2169,30 @@ async fn axum_serve(
             .await
             .unwrap_or_else(err)
         }
+    }
+}
+
+/// Runs destroy-phase lifecycle hooks (application shutdown, then module destroy) in reverse
+/// init order, optionally bounded by a timeout so a hung hook cannot block process exit.
+async fn run_destroy_phase(
+    registry: &std::sync::Arc<crate::core::ProviderRegistry>,
+    hook_timeout: Option<std::time::Duration>,
+) {
+    let hooks = async {
+        registry.run_on_application_shutdown().await;
+        registry.run_on_module_destroy().await;
+    };
+    match hook_timeout {
+        Some(t) => {
+            if tokio::time::timeout(t, hooks).await.is_err() {
+                tracing::warn!(
+                    target: "nestrs",
+                    "shutdown hooks exceeded {:?}; skipping remaining teardown",
+                    t
+                );
+            }
+        }
+        None => hooks.await,
     }
 }
 
@@ -2313,6 +2362,26 @@ struct HttpMetricsState {
     scrape_path: String,
 }
 
+/// Buffer ceiling for production error sanitization (see `production_error_sanitize_middleware`).
+const SANITIZE_BUFFER_LIMIT: usize = 256 * 1024;
+
+/// RAII guard so the in-flight gauge is decremented even when the handler task panics or the
+/// request future is dropped mid-flight.
+struct InFlightGuard;
+
+impl InFlightGuard {
+    fn acquire() -> Self {
+        metrics::gauge!("http_requests_in_flight").increment(1.0);
+        Self
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        metrics::gauge!("http_requests_in_flight").decrement(1.0);
+    }
+}
+
 async fn http_metrics_middleware(
     axum::extract::State(state): axum::extract::State<HttpMetricsState>,
     req: axum::extract::Request,
@@ -2323,7 +2392,7 @@ async fn http_metrics_middleware(
         return next.run(req).await;
     }
 
-    metrics::gauge!("http_requests_in_flight").increment(1.0);
+    let _in_flight = InFlightGuard::acquire();
 
     let method = req.method().as_str().to_owned();
     let started = std::time::Instant::now();
@@ -2331,7 +2400,6 @@ async fn http_metrics_middleware(
     let response = next.run(req).await;
     let status = response.status().as_u16().to_string();
 
-    metrics::gauge!("http_requests_in_flight").decrement(1.0);
     metrics::counter!(
         "http_requests_total",
         "method" => method.clone(),
@@ -2408,6 +2476,13 @@ async fn request_scope_middleware(
     .await
 }
 
+/// Upper bound on tracked client windows per shard. Prevents unbounded memory growth from
+/// spoofed/rotated client IPs between prune passes; when full (after pruning), new clients are
+/// rejected with 429 rather than admitted without limit.
+const RATE_LIMIT_MAX_WINDOWS_PER_SHARD: usize = 16_384;
+/// Fixed shard count; spreads lock contention across independent mutexes.
+const RATE_LIMIT_SHARDS: usize = 32;
+
 #[derive(Debug)]
 struct RateLimitState {
     inner: RateLimitInner,
@@ -2417,7 +2492,7 @@ struct RateLimitState {
 enum RateLimitInner {
     Memory {
         options: RateLimitOptions,
-        state: tokio::sync::Mutex<RateLimitMemoryState>,
+        shards: Vec<std::sync::Mutex<RateLimitMemoryState>>,
     },
     #[cfg(feature = "cache-redis")]
     Redis {
@@ -2425,6 +2500,8 @@ enum RateLimitInner {
         key_prefix: String,
         window_secs: u64,
         max_requests: u64,
+        /// See [`RateLimitOptions::trusted_proxy_hops`].
+        trusted_proxy_hops: u16,
     },
 }
 
@@ -2471,6 +2548,7 @@ impl RateLimitState {
                             key_prefix: r.key_prefix,
                             window_secs: options.window_secs,
                             max_requests: options.max_requests,
+                            trusted_proxy_hops: options.trusted_proxy_hops,
                         },
                     };
                 }
@@ -2483,7 +2561,9 @@ impl RateLimitState {
         Self {
             inner: RateLimitInner::Memory {
                 options,
-                state: tokio::sync::Mutex::new(RateLimitMemoryState::new()),
+                shards: (0..RATE_LIMIT_SHARDS)
+                    .map(|_| std::sync::Mutex::new(RateLimitMemoryState::new()))
+                    .collect(),
             },
         }
     }
@@ -2495,12 +2575,43 @@ async fn rate_limit_middleware(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     match &state.inner {
-        RateLimitInner::Memory { options, state } => {
-            let client_key = client_ip_from_request(&req);
+        RateLimitInner::Memory { options, shards } => {
+            let client_key = client_ip_from_request(&req, Some(options.trusted_proxy_hops));
+            // Shard by key hash so concurrent requests rarely contend on one mutex.
+            let shard_index = {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                client_key.hash(&mut hasher);
+                (hasher.finish() as usize) % shards.len()
+            };
+            // Poison-tolerant: a panic in another request must not take down the limiter.
+            let mut guard = match shards[shard_index].lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let state = &mut *guard;
             let now = std::time::Instant::now();
-            let mut guard = state.lock().await;
-            guard.prune_expired(now, options.window_secs);
-            let window = guard
+            state.prune_expired(now, options.window_secs);
+
+            if !state.windows.contains_key(&client_key)
+                && state.windows.len() >= RATE_LIMIT_MAX_WINDOWS_PER_SHARD
+            {
+                // Table full of live windows: force-prune; still full ⇒ shed new clients.
+                state.last_pruned_at = now - std::time::Duration::from_secs(options.window_secs);
+                state.prune_expired(now, options.window_secs);
+                if state.windows.len() >= RATE_LIMIT_MAX_WINDOWS_PER_SHARD {
+                    tracing::warn!(
+                        target: "nestrs",
+                        "rate limit table full ({} windows/shard); rejecting new client until windows expire",
+                        RATE_LIMIT_MAX_WINDOWS_PER_SHARD
+                    );
+                    return axum::response::IntoResponse::into_response(
+                        TooManyRequestsException::new("Rate limit exceeded"),
+                    );
+                }
+            }
+
+            let window = state
                 .windows
                 .entry(client_key)
                 .or_insert_with(|| RateLimitWindow {
@@ -2524,8 +2635,9 @@ async fn rate_limit_middleware(
             key_prefix,
             window_secs,
             max_requests,
+            trusted_proxy_hops,
         } => {
-            let ip = client_ip_from_request(&req);
+            let ip = client_ip_from_request(&req, Some(*trusted_proxy_hops));
             let key = format!("{key_prefix}:{ip}");
             match redis_rate_allow(client, &key, *window_secs, *max_requests).await {
                 Ok(true) => {}
@@ -2543,6 +2655,22 @@ async fn rate_limit_middleware(
     next.run(req).await
 }
 
+/// Atomic fixed-window allow check.
+///
+/// Runs `INCR` + `EXPIRE` in a single Lua script so the TTL can never be lost to a crash or
+/// connection drop between the two commands (a lost TTL would lock a client out permanently).
+/// The `TTL` repair also heals keys written by older nestrs versions that may be missing a TTL.
+#[cfg(feature = "cache-redis")]
+const RATE_LIMIT_LUA: &str = r"
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+elseif redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+";
+
 #[cfg(feature = "cache-redis")]
 async fn redis_rate_allow(
     client: &redis::Client,
@@ -2551,23 +2679,36 @@ async fn redis_rate_allow(
     max_requests: u64,
 ) -> Result<bool, redis::RedisError> {
     let mut conn = client.get_multiplexed_tokio_connection().await?;
-    let count: i64 = redis::cmd("INCR").arg(key).query_async(&mut conn).await?;
+    let count: i64 = redis::cmd("EVAL")
+        .arg(RATE_LIMIT_LUA)
+        .arg(1)
+        .arg(key)
+        .arg(window_secs)
+        .query_async(&mut conn)
+        .await?;
     let count = u64::try_from(count).unwrap_or(0);
-    if count == 1 {
-        redis::cmd("EXPIRE")
-            .arg(key)
-            .arg(window_secs as usize)
-            .query_async::<()>(&mut conn)
-            .await
-            .ok();
-    }
     Ok(count <= max_requests)
 }
 
-fn client_ip_from_request(req: &axum::extract::Request) -> String {
-    crate::client_ip::best_effort_client_ip_from_request(req)
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+fn client_ip_from_request(req: &axum::extract::Request, trusted_hops: Option<u16>) -> String {
+    crate::client_ip::best_effort_client_ip_from_request(
+        req.headers(),
+        req.extensions(),
+        trusted_hops,
+    )
+    .map(|ip| ip.to_string())
+    .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Middleware that records the configured trusted-proxy hop count on every request so the
+/// [`ClientIp`](crate::ClientIp) extractor can safely use forwarded headers.
+async fn install_trusted_proxy_middleware(
+    axum::extract::State(hops): axum::extract::State<crate::client_ip::TrustedProxyHops>,
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    req.extensions_mut().insert(hops);
+    next.run(req).await
 }
 
 #[cfg(test)]
@@ -2716,6 +2857,10 @@ async fn readiness_handler(
 
 /// Strips internal detail from Nest-shaped JSON error bodies for 5xx responses when
 /// `enable_production_errors` is set on `NestApplication`.
+///
+/// Bodies larger than the buffering limit (declared via `Content-Length`) pass through
+/// **unmodified** rather than being truncated — a truncated JSON error body would be more
+/// confusing (and less safe) than an unsanitized one.
 async fn production_error_sanitize_middleware(
     req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -2734,7 +2879,16 @@ async fn production_error_sanitize_middleware(
     if !ctype.starts_with("application/json") {
         return axum::response::Response::from_parts(parts, body);
     }
-    let Ok(bytes) = to_bytes(body, 256 * 1024).await else {
+    if parts
+        .headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok())
+        .is_some_and(|len| len > SANITIZE_BUFFER_LIMIT)
+    {
+        return axum::response::Response::from_parts(parts, body);
+    }
+    let Ok(bytes) = to_bytes(body, SANITIZE_BUFFER_LIMIT).await else {
         parts.headers.remove(axum::http::header::CONTENT_LENGTH);
         return axum::response::Response::from_parts(parts, Body::empty());
     };
@@ -3050,6 +3204,87 @@ where
     G::default().can_activate(parts).await
 }
 
+/// Runs a pre-resolved tuple of route guards left-to-right, short-circuiting on the first
+/// failure. Used by [`impl_routes!`]; not stable API.
+#[doc(hidden)]
+#[async_trait::async_trait]
+pub trait __NestrsGuardTuple: Send + Sync {
+    async fn run_all(
+        &self,
+        parts: &::axum::http::request::Parts,
+    ) -> Result<(), crate::core::GuardError>;
+}
+
+macro_rules! impl_guard_tuple {
+    ($($name:ident),*) => {
+        #[async_trait::async_trait]
+        impl<$($name: crate::core::CanActivate),*> __NestrsGuardTuple for ($($name,)*) {
+            async fn run_all(
+                &self,
+                _parts: &::axum::http::request::Parts,
+            ) -> Result<(), crate::core::GuardError> {
+                #[allow(non_snake_case)]
+                let ($($name,)*) = self;
+                $( $name.can_activate(_parts).await?; )*
+                Ok(())
+            }
+        }
+    };
+}
+
+/// Blanket impl so macro-generated guard closures can capture the resolved tuple in an
+/// `Arc` (keeping the axum `from_fn` closure `Clone`) without requiring `Clone` on guards.
+#[async_trait::async_trait]
+impl<T: __NestrsGuardTuple> __NestrsGuardTuple for ::std::sync::Arc<T> {
+    async fn run_all(
+        &self,
+        parts: &::axum::http::request::Parts,
+    ) -> Result<(), crate::core::GuardError> {
+        (**self).run_all(parts).await
+    }
+}
+
+impl_guard_tuple!();
+impl_guard_tuple!(A);
+impl_guard_tuple!(A, B);
+impl_guard_tuple!(A, B, C);
+impl_guard_tuple!(A, B, C, D);
+impl_guard_tuple!(A, B, C, D, E);
+impl_guard_tuple!(A, B, C, D, E, F);
+impl_guard_tuple!(A, B, C, D, E, F, G);
+impl_guard_tuple!(A, B, C, D, E, F, G, H);
+impl_guard_tuple!(A, B, C, D, E, F, G, H, I);
+impl_guard_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_guard_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_guard_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+/// Runs the registration-time-resolved guard tuple for a route; see [`impl_routes!`].
+/// Not stable API.
+#[doc(hidden)]
+pub async fn __nestrs_run_guards<G: __NestrsGuardTuple>(
+    guards: &G,
+    parts: &::axum::http::request::Parts,
+) -> Result<(), crate::core::GuardError> {
+    guards.run_all(parts).await
+}
+
+/// Resolves a declared interceptor via [`Interceptor::resolve`] (DI-capable) and runs it.
+/// Used by `impl_routes!`; not stable API.
+#[doc(hidden)]
+pub async fn __nestrs_run_interceptor<I>(
+    axum::extract::State(registry): axum::extract::State<
+        std::sync::Arc<crate::core::ProviderRegistry>,
+    >,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response
+where
+    I: Interceptor,
+{
+    let interceptor = <I as Interceptor>::resolve(&registry);
+    interceptor.intercept(req, next).await
+}
+
 /// Builds a leaked [`crate::core::OpenApiRouteSpec`] for [`impl_routes!`] / route registration.
 /// Returns [`None`] when there is nothing to attach (no summary, tag, or responses).
 /// If summary or tag is set but `responses` is empty, defaults to a single **200** `"OK"` response.
@@ -3173,25 +3408,44 @@ macro_rules! impl_routes {
                                 let __route = $crate::impl_routes!(@method $method, $handler);
                                 let __route = $crate::impl_routes!(
                                     @apply_interceptors
+                                    registry,
                                     __route
                                     $(, $($interceptor),* )?
                                 );
+                                // Guards are resolved ONCE at registration time (`CanActivate::resolve`)
+                                // so stateful/DI-backed guards hold their dependencies for all requests.
+                                // The `Arc` keeps the captured closure `Clone` regardless of the guard type.
+                                let __nestrs_route_guards = ::std::sync::Arc::new((
+                                    $(<$guard as $crate::core::CanActivate>::resolve(
+                                        &$crate::core::ProviderRegistry::clone(registry),
+                                    ),)*
+                                ));
                                 let __route = __route.layer(::axum::middleware::from_fn(
-                                    |req: ::axum::extract::Request,
-                                     next: ::axum::middleware::Next| async move {
-                                        let (mut parts, body) = req.into_parts();
-                                        parts.extensions.insert($crate::core::HandlerKey(
-                                            concat!(module_path!(), "::", stringify!($handler)),
-                                        ));
-                                        $(
-                                            if let Err(e) =
-                                                $crate::__nestrs_run_guard::<$guard>(&parts).await
+                                    move |req: ::axum::extract::Request,
+                                          next: ::axum::middleware::Next| {
+                                        // Clone before the `async move` block: moving the `Arc`
+                                        // itself out of the closure would make it `FnOnce`.
+                                        let __nestrs_route_guards =
+                                            ::std::sync::Arc::clone(&__nestrs_route_guards);
+                                        async move {
+                                            let (mut parts, body) = req.into_parts();
+                                            parts.extensions.insert($crate::core::HandlerKey(
+                                                concat!(module_path!(), "::", stringify!($handler)),
+                                            ));
+                                            if let Err(e) = $crate::__nestrs_run_guards(
+                                                &__nestrs_route_guards,
+                                                &parts,
+                                            )
+                                            .await
                                             {
-                                                return ::axum::response::IntoResponse::into_response(e);
+                                                return ::axum::response::IntoResponse::into_response(
+                                                    e,
+                                                );
                                             }
-                                        )*
-                                        let req = ::axum::http::Request::from_parts(parts, body);
-                                        next.run(req).await
+                                            let req =
+                                                ::axum::http::Request::from_parts(parts, body);
+                                            next.run(req).await
+                                        }
                                     },
                                 ));
                                 let __route = $crate::impl_routes!(
@@ -3267,41 +3521,73 @@ macro_rules! impl_routes {
                                 let __route = $crate::impl_routes!(@method $method, $handler);
                                 let __route = $crate::impl_routes!(
                                     @apply_interceptors
+                                    registry,
                                     __route
                                     $(, $($interceptor),* )?
                                 );
-                                let __route = __route.layer(::axum::middleware::from_fn(
-                                    |req: ::axum::extract::Request,
-                                     next: ::axum::middleware::Next| async move {
-                                        let (mut parts, body) = req.into_parts();
-                                        parts.extensions.insert($crate::core::HandlerKey(
-                                            concat!(module_path!(), "::", stringify!($handler)),
-                                        ));
-                                        $(
-                                            if let Err(e) =
-                                                $crate::__nestrs_run_guard::<$guard>(&parts).await
-                                            {
-                                                return ::axum::response::IntoResponse::into_response(e);
-                                            }
-                                        )*
-                                        let req = ::axum::http::Request::from_parts(parts, body);
-                                        next.run(req).await
-                                    },
+                                // Guards are resolved ONCE at registration time (`CanActivate::resolve`)
+                                // so stateful/DI-backed guards hold their dependencies for all requests.
+                                // The `Arc` keeps the captured closure `Clone` regardless of the guard type.
+                                let __nestrs_route_guards = ::std::sync::Arc::new((
+                                    $(<$guard as $crate::core::CanActivate>::resolve(
+                                        &$crate::core::ProviderRegistry::clone(registry),
+                                    ),)*
                                 ));
                                 let __route = __route.layer(::axum::middleware::from_fn(
-                                    |req: ::axum::extract::Request,
-                                     next: ::axum::middleware::Next| async move {
-                                        let (mut parts, body) = req.into_parts();
-                                        parts.extensions.insert($crate::core::HandlerKey(
-                                            concat!(module_path!(), "::", stringify!($handler)),
-                                        ));
-                                        if let Err(e) =
-                                            $crate::__nestrs_run_guard::<$ctrl_guard>(&parts).await
-                                        {
-                                            return ::axum::response::IntoResponse::into_response(e);
+                                    move |req: ::axum::extract::Request,
+                                          next: ::axum::middleware::Next| {
+                                        // Clone before the `async move` block: moving the `Arc`
+                                        // itself out of the closure would make it `FnOnce`.
+                                        let __nestrs_route_guards =
+                                            ::std::sync::Arc::clone(&__nestrs_route_guards);
+                                        async move {
+                                            let (mut parts, body) = req.into_parts();
+                                            parts.extensions.insert($crate::core::HandlerKey(
+                                                concat!(module_path!(), "::", stringify!($handler)),
+                                            ));
+                                            if let Err(e) = $crate::__nestrs_run_guards(
+                                                &__nestrs_route_guards,
+                                                &parts,
+                                            )
+                                            .await
+                                            {
+                                                return ::axum::response::IntoResponse::into_response(
+                                                    e,
+                                                );
+                                            }
+                                            let req =
+                                                ::axum::http::Request::from_parts(parts, body);
+                                            next.run(req).await
                                         }
-                                        let req = ::axum::http::Request::from_parts(parts, body);
-                                        next.run(req).await
+                                    },
+                                ));
+                                let __nestrs_ctrl_guard =
+                                    ::std::sync::Arc::new(<$ctrl_guard as $crate::core::CanActivate>::resolve(
+                                        &$crate::core::ProviderRegistry::clone(registry),
+                                    ));
+                                let __route = __route.layer(::axum::middleware::from_fn(
+                                    move |req: ::axum::extract::Request,
+                                          next: ::axum::middleware::Next| {
+                                        // Clone before the `async move` block: moving the `Arc`
+                                        // itself out of the closure would make it `FnOnce`.
+                                        let __nestrs_ctrl_guard =
+                                            ::std::sync::Arc::clone(&__nestrs_ctrl_guard);
+                                        async move {
+                                            let (mut parts, body) = req.into_parts();
+                                            parts.extensions.insert($crate::core::HandlerKey(
+                                                concat!(module_path!(), "::", stringify!($handler)),
+                                            ));
+                                            if let Err(e) =
+                                                __nestrs_ctrl_guard.can_activate(&parts).await
+                                            {
+                                                return ::axum::response::IntoResponse::into_response(
+                                                    e,
+                                                );
+                                            }
+                                            let req =
+                                                ::axum::http::Request::from_parts(parts, body);
+                                            next.run(req).await
+                                        }
                                     },
                                 ));
                                 let __route = $crate::impl_routes!(
@@ -3371,11 +3657,25 @@ macro_rules! impl_routes {
     (@method OPTIONS, $handler:path) => { axum::routing::options($handler) };
     (@method HEAD, $handler:path) => { axum::routing::head($handler) };
     (@method ALL, $handler:path) => { axum::routing::any($handler) };
-    (@apply_interceptors $router:expr) => { $router };
-    (@apply_interceptors $router:expr,) => { $router };
-    (@apply_interceptors $router:expr, $head:ty $(, $tail:ty)*) => {{
-        $crate::impl_routes!(@apply_interceptors $router $(, $tail)*)
-            .layer($crate::interceptor_layer!($head))
+    // NOTE: the registry is threaded through as an explicit `$expr` — a `macro_rules!` arm
+    // cannot see locals bound by a *different* arm (hygiene), so referencing the
+    // registration-time `registry` binding here directly fails to resolve.
+    (@apply_interceptors $registry:expr, $router:expr) => { $router };
+    (@apply_interceptors $registry:expr, $router:expr,) => { $router };
+    (@apply_interceptors $registry:expr, $router:expr, $head:ty $(, $tail:ty)*) => {{
+        let __nestrs_inner =
+            $crate::impl_routes!(@apply_interceptors $registry, $router $(, $tail)*);
+        // Interceptors are resolved ONCE at registration time (`Interceptor::resolve`,
+        // DI-capable), mirroring the guard pipeline. The `Arc` keeps the axum `from_fn`
+        // closure `Clone` regardless of the interceptor type; the inner `Arc::clone` keeps
+        // the closure `FnMut` instead of moving the instance out on every call.
+        let __nestrs_icpt = ::std::sync::Arc::new(<$head as $crate::Interceptor>::resolve($registry));
+        __nestrs_inner.layer(::axum::middleware::from_fn(
+            move |req: ::axum::extract::Request, next: ::axum::middleware::Next| {
+                let __nestrs_icpt = ::std::sync::Arc::clone(&__nestrs_icpt);
+                async move { __nestrs_icpt.intercept(req, next).await }
+            },
+        ))
     }};
     (@apply_filters $router:expr) => { $router };
     (@apply_filters $router:expr,) => { $router };

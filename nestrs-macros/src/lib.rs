@@ -397,36 +397,41 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl nestrs::core::Module for #name {
             fn build() -> (nestrs::core::ProviderRegistry, axum::Router) {
-                let _module_guard = nestrs::core::__NestrsModuleBuildGuard::push(
-                    std::any::TypeId::of::<#name>(),
-                    std::any::type_name::<#name>(),
-                );
-                let mut registry = nestrs::core::ProviderRegistry::new();
-                let mut router = axum::Router::new();
+                // Memoized process-wide: modules imported by multiple importers share one built
+                // instance (NestJS module-instance caching), avoiding duplicate singletons and
+                // duplicate route registration.
+                nestrs::core::__nestrs_memoize_module_build::<#name>(Box::new(|| {
+                    let _module_guard = nestrs::core::__NestrsModuleBuildGuard::push(
+                        std::any::TypeId::of::<#name>(),
+                        std::any::type_name::<#name>(),
+                    );
+                    let mut registry = nestrs::core::ProviderRegistry::new();
+                    let mut router = axum::Router::new();
 
-                #(#import_builds)*
+                    #(#import_builds)*
 
-                #(
-                    {
-                        let __dm: nestrs::core::DynamicModule = (#imports_dynamic);
-                        registry.absorb_exported(__dm.registry, &__dm.exports);
-                        router = router.merge(__dm.router);
-                    }
-                )*
+                    #(
+                        {
+                            let __dm: nestrs::core::DynamicModule = (#imports_dynamic);
+                            registry.absorb_exported(__dm.registry, &__dm.exports);
+                            router = router.merge(__dm.router);
+                        }
+                    )*
 
-                #(
-                    registry.register::<#providers>();
-                )*
+                    #(
+                        registry.register::<#providers>();
+                    )*
 
-                #(
-                    registry.register::<#microservices_ref>();
-                )*
+                    #(
+                        registry.register::<#microservices_ref>();
+                    )*
 
-                #(
-                    router = <#controllers as nestrs::core::Controller>::register(router, &registry);
-                )*
+                    #(
+                        router = <#controllers as nestrs::core::Controller>::register(router, &registry);
+                    )*
 
-                (registry, router)
+                    (registry, router)
+                }))
             }
 
             fn exports() -> Vec<std::any::TypeId> {
@@ -590,8 +595,17 @@ pub fn injectable(attr: TokenStream, item: TokenStream) -> TokenStream {
                         .to_compile_error();
                 };
 
-                quote! {
-                    #field_ident: registry.get::<#inner>()
+                // Trait-object bindings (`arc_dyn: Arc<dyn MyTrait>`) resolve the registered
+                // `Arc<dyn MyTrait>` value (register it via `ProviderRegistry::register_use_factory`
+                // with `T = Arc<dyn MyTrait>`).
+                if matches!(inner, Type::TraitObject(_)) {
+                    quote! {
+                        #field_ident: (*registry.get::<#inner>()).clone()
+                    }
+                } else {
+                    quote! {
+                        #field_ident: registry.get::<#inner>()
+                    }
                 }
             });
 

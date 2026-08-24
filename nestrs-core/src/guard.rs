@@ -47,7 +47,41 @@ impl IntoResponse for GuardError {
 /// `nestrs` crate); that runs **outside** route-level guards.
 ///
 /// Stateless guards are usually unit structs with [`Default`].
+///
+/// # Dependency injection
+///
+/// Guards are resolved **once at route-registration time**, so they can hold dependencies
+/// (JWT keys, repositories, caches). Override [`Self::resolve`] to pull them from the
+/// [`ProviderRegistry`]; keep the `Default` supertrait satisfied with a placeholder unit struct:
+///
+/// ```ignore
+/// #[derive(Default)]
+/// struct AuthGuard { users: Arc<UserRepository> } // real fields live here
+///
+/// // Placeholder used only to satisfy the Default bound:
+/// impl Default for AuthGuard { fn default() -> Self { Self { users: Arc::new(UserRepository::empty()) } } }
+///
+/// #[async_trait]
+/// impl CanActivate for AuthGuard {
+///     fn resolve(registry: &ProviderRegistry) -> Self {
+///         Self { users: registry.get::<UserRepository>() }
+///     }
+///     async fn can_activate(&self, parts: &Parts) -> Result<(), GuardError> { /* ... */ }
+/// }
+/// ```
 #[async_trait]
 pub trait CanActivate: Default + Send + Sync + 'static {
+    /// Build the guard instance used for **every** request on routes declaring this guard.
+    ///
+    /// The default implementation returns [`Default::default()`] (a stateless guard).
+    /// Override this to construct a stateful guard from the application's
+    /// [`ProviderRegistry`] (NestJS dependency-injected guards).
+    fn resolve(_registry: &crate::ProviderRegistry) -> Self
+    where
+        Self: Sized,
+    {
+        Self::default()
+    }
+
     async fn can_activate(&self, parts: &Parts) -> Result<(), GuardError>;
 }

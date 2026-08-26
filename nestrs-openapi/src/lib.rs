@@ -91,10 +91,15 @@ async fn openapi_json(State(options): State<OpenApiOptions>) -> Json<Value> {
             continue;
         }
         let full_path = join_prefix(&options.api_prefix, r.path);
+        // OpenAPI path templates use `{param}`, nestrs routes use `:param`.
+        let spec_path = to_openapi_path(&full_path);
 
-        let entry = paths.entry(full_path.clone()).or_insert_with(|| json!({}));
+        let entry = paths.entry(spec_path.clone()).or_insert_with(|| json!({}));
         let obj = entry.as_object_mut().expect("path entry object");
-        obj.insert(method, build_operation(&full_path, &r, &options));
+        obj.insert(
+            method,
+            build_operation(&full_path, &spec_path, &r, &options),
+        );
     }
 
     let mut root = Map::new();
@@ -127,7 +132,36 @@ async fn openapi_json(State(options): State<OpenApiOptions>) -> Json<Value> {
     Json(Value::Object(root))
 }
 
-fn build_operation(full_path: &str, route: &RouteInfo, options: &OpenApiOptions) -> Value {
+/// Converts nestrs route param syntax (`:id`) into OpenAPI path templates (`{id}`).
+fn to_openapi_path(path: &str) -> String {
+    path.split('/')
+        .map(|seg| {
+            if let Some(name) = seg.strip_prefix(':') {
+                if !name.is_empty() && !name.contains(':') {
+                    return format!("{{{name}}}");
+                }
+            }
+            seg.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Extracts the param names declared in an OpenAPI path template (`{id}` → `id`).
+fn extract_path_params(spec_path: &str) -> Vec<String> {
+    spec_path
+        .split('/')
+        .filter_map(|seg| seg.strip_prefix('{').and_then(|s| s.strip_suffix('}')))
+        .map(str::to_string)
+        .collect()
+}
+
+fn build_operation(
+    full_path: &str,
+    spec_path: &str,
+    route: &RouteInfo,
+    options: &OpenApiOptions,
+) -> Value {
     let handler = route.handler;
     let spec = route.openapi;
     let summary = spec
@@ -143,6 +177,20 @@ fn build_operation(full_path: &str, route: &RouteInfo, options: &OpenApiOptions)
     op.insert("operationId".into(), json!(handler));
     op.insert("summary".into(), json!(summary));
     op.insert("tags".into(), json!([tag]));
+    let params: Vec<Value> = extract_path_params(spec_path)
+        .into_iter()
+        .map(|name| {
+            json!({
+                "name": name,
+                "in": "path",
+                "required": true,
+                "schema": { "type": "string" },
+            })
+        })
+        .collect();
+    if !params.is_empty() {
+        op.insert("parameters".into(), json!(params));
+    }
     op.insert("responses".into(), responses);
     if options.infer_route_security_from_roles && MetadataRegistry::get(handler, "roles").is_some()
     {
@@ -259,5 +307,29 @@ mod tests {
     fn infer_tag_skips_version_segment() {
         assert_eq!(infer_tag_from_path("/v1/o/ping"), "o");
         assert_eq!(infer_tag_from_path("/api/users"), "api");
+    }
+
+    #[test]
+    fn openapi_path_converts_param_syntax() {
+        assert_eq!(
+            to_openapi_path("/lab/v1/cat/hello/:name"),
+            "/lab/v1/cat/hello/{name}"
+        );
+        assert_eq!(to_openapi_path("/v1/o/ping"), "/v1/o/ping");
+        // Multiple params in one path.
+        assert_eq!(
+            to_openapi_path("/v1/u/:user_id/posts/:id"),
+            "/v1/u/{user_id}/posts/{id}"
+        );
+    }
+
+    #[test]
+    fn extract_params_reads_templates() {
+        assert_eq!(extract_path_params("/lab/v1/cat/hello/{name}"), ["name"]);
+        assert_eq!(
+            extract_path_params("/v1/u/{user_id}/posts/{id}"),
+            ["user_id", "id"]
+        );
+        assert!(extract_path_params("/v1/o/ping").is_empty());
     }
 }

@@ -49,8 +49,8 @@ fn build_rustls_config(opts: &KafkaTlsOptions) -> Result<Arc<rustls::ClientConfi
 
     let mut root_store = RootCertStore::empty();
     if let Some(pem) = opts.ca_cert_pem.as_deref() {
-        let mut cursor = std::io::Cursor::new(pem.as_bytes());
-        for item in rustls_pemfile::certs(&mut cursor) {
+        use rustls::pki_types::pem::PemObject;
+        for item in rustls::pki_types::CertificateDer::pem_slice_iter(pem.as_bytes()) {
             let cert = item.map_err(|e| format!("PEM parse: {e}"))?;
             root_store
                 .add(cert)

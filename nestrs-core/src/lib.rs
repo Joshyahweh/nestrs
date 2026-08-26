@@ -30,6 +30,12 @@ pub use pipe::PipeTransform;
 pub use platform::{AxumHttpEngine, HttpServerEngine};
 pub use route_registry::{OpenApiResponseDesc, OpenApiRouteSpec, RouteInfo, RouteRegistry};
 pub use strategy::{AuthError, AuthStrategy};
+// Re-exported at the crate root so intra-doc links like `[`ProviderRegistry`]`
+// resolve from any sibling module (rustdoc's resolver looks for the bare name
+// in scope; without this re-export `crate::ProviderRegistry` paths in doc
+// comments fail with "no item named `ProviderRegistry` in scope"). Strictly
+// additive — the type was already public.
+pub use crate::ProviderRegistry;
 
 type CustomFactoryFn =
     std::sync::Arc<dyn Fn(&ProviderRegistry) -> Arc<dyn Any + Send + Sync> + Send + Sync>;

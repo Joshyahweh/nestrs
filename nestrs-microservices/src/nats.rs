@@ -80,7 +80,8 @@ impl NatsTransport {
 struct WireError {
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<serde_json::Value>,
+    // Boxed to mirror `TransportError::details` (serializes identically).
+    details: Option<Box<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -15,13 +15,14 @@ categories = ["network-programming", "asynchronous"]
 default = []
 # Optional transport adapters
 nats = ["dep:async-nats", "dep:futures-util", "dep:time"]
-redis = ["dep:redis", "dep:futures-util", "dep:uuid"]
+redis = ["dep:redis", "dep:futures-util"]
 grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:bytes"]
 kafka = [
   "dep:rskafka",
   "dep:chrono",
   "dep:uuid",
   "dep:rustls",
+  "dep:rustls-pemfile",
   "dep:webpki-roots",
   "rskafka/transport-tls",
 ]
@@ -32,13 +33,12 @@ microservice-metrics = ["dep:metrics"]
 [dependencies]
 async-trait = "0.1"
 tokio = { workspace = true, features = ["io-util"] }
-nestrs-core = { version = "0.4.0", path = "../nestrs-core" }
-nestrs-events = { version = "0.4.0", path = "../nestrs-events" }
+nestrs-core = { version = "0.3.8", path = "../nestrs-core" }
+nestrs-events = { version = "0.3.8", path = "../nestrs-events" }
 axum.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 linkme = "0.3"
-tracing = "=0.1.44"
 
 async-nats = { version = "0.47", optional = true }
 redis = { version = "0.29", features = ["tokio-comp"], optional = true }
@@ -54,6 +54,7 @@ uuid = { version = "1.23.0", optional = true, features = ["v4"] }
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-native-tls"], optional = true }
 lapin = { version = "2.5", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
+rustls-pemfile = { version = "2", optional = true }
 webpki-roots = { version = "0.26", optional = true }
 metrics = { version = "0.24", default-features = false, optional = true }
 

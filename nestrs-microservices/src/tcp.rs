@@ -59,8 +59,7 @@ struct MicroserviceRequest {
 struct MicroserviceErrorPayload {
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    // Boxed to mirror `TransportError::details` (serializes identically).
-    details: Option<Box<serde_json::Value>>,
+    details: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

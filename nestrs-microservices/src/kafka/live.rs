@@ -404,13 +404,11 @@ impl KafkaMicroserviceServer {
                                 let corr = req.correlation_id.clone().unwrap_or_default();
                                 tokio::spawn(async move {
                                     let res = dispatch_send(&handlers, &req.pattern, req.payload.clone()).await;
-                                    let reply_corr = req.correlation_id.clone();
                                     let wire = match res {
                                         Ok(v) => WireResponse {
                                             ok: true,
                                             payload: Some(v),
                                             error: None,
-                                            correlation_id: reply_corr,
                                         },
                                         Err(e) => WireResponse {
                                             ok: false,
@@ -419,7 +417,6 @@ impl KafkaMicroserviceServer {
                                                 message: e.message,
                                                 details: e.details,
                                             }),
-                                            correlation_id: req.correlation_id.clone(),
                                         },
                                     };
                                     if let Ok(bytes) = serde_json::to_vec(&wire) {

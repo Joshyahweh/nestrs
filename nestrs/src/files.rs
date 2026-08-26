@@ -31,15 +31,6 @@ pub async fn stream_file_octet_stream(
 }
 
 /// Maps `std::io::Error` into a plain **404** (missing file) or **500** response.
-///
-/// The ergonomic choice inside handlers — returns a `Response` directly instead of `Result`:
-///
-/// ```ignore
-/// #[get("/download/:name")]
-/// pub async fn download(#[param::param] p: NameParams) -> Response {
-///     nestrs::stream_file_or_response(upload_dir().join(&p.name), "application/octet-stream").await
-/// }
-/// ```
 pub async fn stream_file_or_response(
     path: impl AsRef<std::path::Path>,
     content_type: &'static str,

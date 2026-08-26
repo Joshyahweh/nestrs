@@ -4,11 +4,8 @@ This runbook captures deployment and operations guidance for nestrs applications
 
 ## Environment and prod flags
 
-- `NESTRS_ENV=production` enables production-safe behavior automatically:
-  - **5xx JSON error bodies are sanitized** (generic `message`, no `errors` payload, no internal
-    detail leakage) — no builder call needed. Force it on with `enable_production_errors()`,
-    opt out with `disable_production_errors()`. (`enable_production_errors_from_env()` is kept
-    for backward compatibility.)
+- `NESTRS_ENV=production` enables production-safe behavior when your app uses:
+  - `enable_production_errors_from_env()`
 - `RUST_LOG` (or `NESTRS_LOG`) controls tracing filter directives.
 - `PORT` controls bind port when your app reads env at startup.
 

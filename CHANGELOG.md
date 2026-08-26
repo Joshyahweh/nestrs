@@ -7,34 +7,6 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-08-26
-
-### Added
-
-- **Safe-by-default HTTP stack**: `catch-panic` middleware and request body limits are enabled by default; framework errors no longer leak internal details in production mode (`disable_production_errors` opt-out).
-- **Bound-parameter SQL** for `nestrs-prisma`: `prisma_query_rows!` / `prisma_query_scalar!` / `prisma_execute!` macros bind every placeholder through SQLx (injection-safe by construction), plus `PrismaService::pool()` for advanced hand-bound queries.
-- **DI lifecycle hooks**: `on_application_bootstrap` now runs automatically inside every `listen*` call, enabling self-wiring provider setup without a `MicroserviceApplication`.
-- **GraphQL query limits helper** (`nestrs::graphql::with_default_limits`: depth 64 / complexity 512) for one-line schema hardening.
-- **cargo-fuzz targets** for parser-heavy surfaces.
-- **Scheduled dependency auditing**: the `security.yml` cargo-audit job now also runs weekly and on demand, so RustSec advisory drift is caught between pushes.
-
-### Fixed
-
-- **Scheduler: sub-second `#[interval(ms)]` jobs silently died** after 1–2 ticks. Root cause was `tokio-cron-scheduler` truncating repeat periods through `Duration::as_secs()`; interval jobs are now driven by native tokio timers with missed-tick skipping, deterministic shutdown, and a regression test asserting sustained tick progress.
-- **OpenAPI path parameters were non-compliant**: specs emitted `:name` segments and no `parameters` arrays; paths now convert to `{name}` templates with proper `parameters` entries (OpenAPI 3.1).
-- **`nestrs-microservices` `redis` feature did not compile standalone** (missing `dep:uuid` after the correlation-id change).
-
-### Security
-
-- Lockfile bumps: `crossbeam-epoch` 0.9.20 (RUSTSEC-2026-0204), `h2` 0.4.19 (RUSTSEC-2026-0258), `quinn-proto` 0.11.17 (RUSTSEC-2026-0185), un-yanked `spin` 0.9.9. `cargo audit` reports zero vulnerabilities.
-- Kafka TLS no longer depends on the unmaintained `rustls-pemfile` crate; CA PEMs are parsed via `rustls::pki_types::PemObject`.
-- `nestrs-prisma` macros migrated from the unmaintained `paste` crate to the maintained fork `pastey`.
-
-### Changed
-
-- **`HttpException` is now lint-clean in user handlers**: the rarely-populated `details` payload is boxed (`Option<Box<serde_json::Value>>`) across `HttpException`, `microservices::TransportError`, and the microservice wire types, keeping the error variant below `clippy::result_large_err`'s 128-byte threshold. Code that only reads or constructs details via `with_details(...)` / JSON indexing is unaffected; direct field literals like `details: Some(v)` need `Some(Box::new(v))`. The same fix applies to every nestrs application, not just this workspace.
-- Workspace and crate versions aligned to `0.4.0` (the scheduler rewrite changed public API shape).
-
 ## [0.3.8] - 2026-04-17
 
 ### Added

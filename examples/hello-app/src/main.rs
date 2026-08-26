@@ -20,21 +20,11 @@ impl AppService {
         "Hello World"
     }
 
-    /// Persists the user and returns the stored row. The prisma facade exposes raw SQL
-    /// (`execute`), so string literals are escaped manually here; prefer bound parameters
-    /// via `sqlx` for anything beyond a demo.
-    pub async fn create_user(&self, dto: CreateUserDto) -> Result<UserResponse, String> {
-        let email = dto.email.replace('\'', "''");
-        let name = dto.name.replace('\'', "''");
-        self.prisma
-            .execute(&format!(
-                r#"INSERT INTO "User" ("email", "name") VALUES ('{email}', '{name}')"#
-            ))
-            .await?;
-        Ok(UserResponse {
+    pub fn create_user(&self, dto: CreateUserDto) -> UserResponse {
+        UserResponse {
             email: dto.email,
             name: dto.name,
-        })
+        }
     }
 
     pub async fn db_health(&self) -> DbHealthResponse {
@@ -94,13 +84,7 @@ impl AppController {
         if dto.name.eq_ignore_ascii_case("admin") {
             return Err(ConflictException::new("`admin` is reserved in this demo"));
         }
-        match service.create_user(dto).await {
-            Ok(user) => Ok(Json(user)),
-            Err(e) if e.contains("UNIQUE constraint failed") => Err(ConflictException::new(
-                "a user with this email already exists",
-            )),
-            Err(e) => Err(InternalServerErrorException::new(e)),
-        }
+        Ok(Json(service.create_user(dto)))
     }
 
     #[get("/db-health")]
@@ -172,20 +156,17 @@ pub struct AppModule;
 #[tokio::main]
 async fn main() {
     let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // `mode=rwc` lets sqlx create the database file on first run instead of failing with
-    // "unable to open database file".
-    let db_url = format!("sqlite:{}?mode=rwc", base.join("dev.db").display());
+    let db_url = format!("sqlite:{}", base.join("dev.db").display());
     let schema_path = base.join("prisma/schema.prisma");
 
     let _ = PrismaModule::for_root_with_options(
-        PrismaOptions::from_url(db_url.clone())
+        PrismaOptions::from_url(db_url)
             .pool_min(1)
             .pool_max(10)
             .schema_path(schema_path.to_string_lossy().as_ref()),
     );
 
     let prisma = PrismaService::default();
-    let mut bootstrap_ok = true;
     for ddl in [
         r#"CREATE TABLE IF NOT EXISTS "User" (
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -195,20 +176,11 @@ async fn main() {
         r#"CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email")"#,
     ] {
         if let Err(e) = prisma.execute(ddl).await {
-            eprintln!("hello-app schema bootstrap failed, exiting: {e}");
-            bootstrap_ok = false;
+            eprintln!("hello-app schema bootstrap: {e}");
             break;
         }
     }
-    if !bootstrap_ok {
-        std::process::exit(1);
-    }
 
-    // Resulting URL layout follows NestJS URI-versioning order:
-    //   {global-prefix}/{version}/{controller-prefix}/{route}
-    // e.g. this app serves `GET /platform/v1/api/` and `POST /platform/v1/api/users`.
-    // To get the common `/platform/api/v1/...` shape instead, put `api` in the global
-    // prefix (`set_global_prefix("platform/api")`) and drop it from `#[controller(prefix)]`.
     NestFactory::create::<AppModule>()
         .set_global_prefix("platform")
         .listen_graceful(3000)

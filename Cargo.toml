@@ -12,6 +12,7 @@ members = [
   "nestrs-openapi",
   "nestrs-cli",
   "examples/hello-app",
+  "examples/lab",
 ]
 resolver = "2"
 

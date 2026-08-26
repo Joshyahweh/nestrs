@@ -2645,47 +2645,46 @@ pub fn schedule_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
 
-    let job_stmts = tasks
-        .into_iter()
-        .map(|t| {
-            let name = t.name;
-            match t.kind {
-                TaskKind::Cron(expr) => {
-                    quote! {
-                        let job = nestrs::schedule::Job::new_async(#expr, {
+    let mut cron_stmts = Vec::new();
+    let mut interval_stmts = Vec::new();
+    for t in tasks {
+        let name = t.name;
+        match t.kind {
+            TaskKind::Cron(expr) => {
+                cron_stmts.push(quote! {
+                    let job = nestrs::schedule::Job::new_async(#expr, {
+                        let service = service.clone();
+                        move |_uuid, _lock| {
                             let service = service.clone();
-                            move |_uuid, _lock| {
-                                let service = service.clone();
-                                ::std::boxed::Box::pin(async move {
-                                    let _ = service.#name().await;
-                                })
-                            }
-                        })
-                        .unwrap_or_else(|e| panic!("failed to register cron job: {e:?}"));
-                        jobs.push(job);
-                    }
-                }
-                TaskKind::Interval(ms) => {
-                    quote! {
-                        let job = nestrs::schedule::Job::new_repeated_async(
-                            ::std::time::Duration::from_millis(#ms as u64),
-                            {
-                                let service = service.clone();
-                                move |_uuid, _lock| {
-                                    let service = service.clone();
-                                    ::std::boxed::Box::pin(async move {
-                                        let _ = service.#name().await;
-                                    })
-                                }
-                            },
-                        )
-                        .unwrap_or_else(|e| panic!("failed to register interval job: {e:?}"));
-                        jobs.push(job);
-                    }
-                }
+                            ::std::boxed::Box::pin(async move {
+                                let _ = service.#name().await;
+                            })
+                        }
+                    })
+                    .unwrap_or_else(|e| panic!("failed to register cron job: {e:?}"));
+                    jobs.push(job);
+                });
             }
-        })
-        .collect::<Vec<_>>();
+            TaskKind::Interval(ms) => {
+                // Native tokio timer loop — tokio-cron-scheduler truncates repeat
+                // periods to whole seconds, which breaks sub-second intervals.
+                interval_stmts.push(quote! {
+                    futures.push(::std::boxed::Box::pin(async move {
+                        let mut timer = nestrs::schedule::tokio::time::interval(
+                            ::std::time::Duration::from_millis(#ms as u64),
+                        );
+                        timer.set_missed_tick_behavior(
+                            nestrs::schedule::tokio::time::MissedTickBehavior::Skip,
+                        );
+                        loop {
+                            timer.tick().await;
+                            let _ = service.#name().await;
+                        }
+                    }));
+                });
+            }
+        }
+    }
 
     let expanded = quote! {
         #item_impl
@@ -2694,13 +2693,25 @@ pub fn schedule_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             fn __nestrs_build(registry: &nestrs::core::ProviderRegistry) -> ::std::vec::Vec<nestrs::schedule::Job> {
                 let service = registry.get::<#self_ty>();
                 let mut jobs = ::std::vec::Vec::<nestrs::schedule::Job>::new();
-                #(#job_stmts)*
+                #(#cron_stmts)*
                 jobs
+            }
+
+            fn __nestrs_build_intervals(
+                registry: &nestrs::core::ProviderRegistry,
+            ) -> ::std::vec::Vec<nestrs::schedule::IntervalFuture> {
+                let service = registry.get::<#self_ty>();
+                let mut futures = ::std::vec::Vec::<nestrs::schedule::IntervalFuture>::new();
+                #(#interval_stmts)*
+                futures
             }
 
             #[nestrs::schedule::linkme::distributed_slice(nestrs::schedule::SCHEDULE_REGISTRATIONS)]
             static __NES_SCHEDULE: nestrs::schedule::ScheduleRegistration =
-                nestrs::schedule::ScheduleRegistration { build: __nestrs_build };
+                nestrs::schedule::ScheduleRegistration {
+                    build: __nestrs_build,
+                    build_intervals: __nestrs_build_intervals,
+                };
         };
     };
 

@@ -2402,6 +2402,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab"
+version = "0.3.8"
+dependencies = [
+ "async-graphql",
+ "async-trait",
+ "axum 0.7.9",
+ "futures-util",
+ "linkme",
+ "mongodb",
+ "nestrs",
+ "nestrs-cqrs",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tower-cookies",
+ "validator",
+]
+
+[[package]]
 name = "lapin"
 version = "2.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2996,6 +3016,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "tracing",
  "uuid",
  "webpki-roots 0.26.11",
 ]

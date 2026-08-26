@@ -901,7 +901,9 @@ impl NestApplication {
             concurrency_limit: None,
             load_shed: false,
             body_limit_bytes: Some(DEFAULT_BODY_LIMIT_BYTES),
-            production_errors: false,
+            // Safe by default: sanitize 5xx JSON bodies when running in a production
+            // environment (NESTRS_ENV/APP_ENV/RUST_ENV). See `disable_production_errors`.
+            production_errors: runtime_is_production(),
             request_id: false,
             request_context: false,
             execution_context: false,
@@ -1409,14 +1411,26 @@ impl NestApplication {
 
     /// When enabled, JSON bodies for **5xx** responses are sanitized: generic `message`, no `errors` payload.
     /// Aligns with production-safe error responses (no internal detail leakage).
+    ///
+    /// This is the **default** whenever [`runtime_is_production`] is true (i.e. `NESTRS_ENV` /
+    /// `APP_ENV` / `RUST_ENV` is `production` or `prod`) — calling this forces it on elsewhere.
     pub fn enable_production_errors(mut self) -> Self {
         self.production_errors = true;
         self
     }
 
-    /// Enables the same behavior as [`Self::enable_production_errors`] when [`runtime_is_production`] is true.
+    /// Kept for backward compatibility: sanitization is now applied automatically when
+    /// [`runtime_is_production`] is true (which is also the constructor default). This method
+    /// re-reads the environment, overriding a prior [`Self::disable_production_errors`].
     pub fn enable_production_errors_from_env(mut self) -> Self {
         self.production_errors = runtime_is_production();
+        self
+    }
+
+    /// Opts **out** of 5xx JSON sanitization even in production (e.g. internal admin services
+    /// behind a trusted boundary that want detailed error messages).
+    pub fn disable_production_errors(mut self) -> Self {
+        self.production_errors = false;
         self
     }
 

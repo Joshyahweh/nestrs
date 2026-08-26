@@ -12,6 +12,11 @@ pub struct NatsTransportOptions {
 }
 
 impl NatsTransportOptions {
+    /// Subject namespace used when no explicit prefix is configured. Subscribing a
+    /// bare `>` (the previous behavior) would pull in *every* subject on the cluster,
+    /// dispatching unrelated traffic as RPC events.
+    const DEFAULT_PREFIX: &'static str = "nestrs";
+
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
@@ -25,44 +30,24 @@ impl NatsTransportOptions {
         self
     }
 
-    fn subject(&self, pattern: &str) -> String {
-        match self.prefix.as_deref() {
-            None => pattern.to_string(),
-            Some(p) => {
-                let p = p.trim_matches('.');
-                if p.is_empty() {
-                    pattern.to_string()
-                } else {
-                    format!("{p}.{pattern}")
-                }
-            }
+    fn effective_prefix(&self) -> &str {
+        match self.prefix.as_deref().map(|p| p.trim().trim_matches('.')) {
+            Some("") | None => Self::DEFAULT_PREFIX,
+            Some(p) => p,
         }
     }
 
+    fn subject(&self, pattern: &str) -> String {
+        format!("{}.{pattern}", self.effective_prefix())
+    }
+
     fn strip_prefix<'a>(&self, subject: &'a str) -> &'a str {
-        let Some(p) = self.prefix.as_deref() else {
-            return subject;
-        };
-        let p = p.trim_matches('.');
-        if p.is_empty() {
-            return subject;
-        }
-        let prefix_dot = format!("{p}.");
+        let prefix_dot = format!("{}.", self.effective_prefix());
         subject.strip_prefix(&prefix_dot).unwrap_or(subject)
     }
 
     fn wildcard_subject(&self) -> String {
-        match self.prefix.as_deref() {
-            None => ">".to_string(),
-            Some(p) => {
-                let p = p.trim_matches('.');
-                if p.is_empty() {
-                    ">".to_string()
-                } else {
-                    format!("{p}.>")
-                }
-            }
-        }
+        format!("{}>", self.effective_prefix())
     }
 }
 

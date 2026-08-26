@@ -862,11 +862,62 @@ async fn production_errors_from_env_sanitizes_when_nestrs_env_production() {
         .await
         .expect("router should serve request");
 
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let body = response.into_body();
     let bytes = to_bytes(body, 64 * 1024).await.expect("read body");
     let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!(v["message"], "An unexpected error occurred");
+}
+
+/// Safe by default: setting `NESTRS_ENV=production` alone (no builder call) enables 5xx
+/// JSON sanitization.
+#[tokio::test]
+#[serial(env)]
+async fn production_errors_sanitize_by_default_when_nestrs_env_production() {
+    let _g = EnvGuard::set("NESTRS_ENV", "production");
+    let router = NestFactory::create::<AppModule>().into_router();
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/v1/api/internal-error")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let bytes = to_bytes(response.into_body(), 64 * 1024).await.expect("read body");
+    let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+    assert_eq!(v["message"], "An unexpected error occurred");
+}
+
+/// Explicit opt-out wins even in a production environment.
+#[tokio::test]
+#[serial(env)]
+async fn disable_production_errors_keeps_detail_when_nestrs_env_production() {
+    let _g = EnvGuard::set("NESTRS_ENV", "production");
+    let router = NestFactory::create::<AppModule>()
+        .disable_production_errors()
+        .into_router();
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/v1/api/internal-error")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let bytes = to_bytes(response.into_body(), 64 * 1024).await.expect("read body");
+    let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+    // The fixture handler's message must survive when sanitization is disabled.
+    assert_ne!(v["message"], "An unexpected error occurred");
 }
 
 #[tokio::test]

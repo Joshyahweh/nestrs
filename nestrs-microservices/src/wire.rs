@@ -11,9 +11,14 @@
 //! Revision **`1`**: `WireKind` as snake_case strings (`send`, `emit`); `WireRequest` with optional
 //! `reply` and `correlation_id`; `WireResponse` with `ok`, optional `payload`, optional `error`
 //! (`message` + optional `details`).
+//!
+//! Revision **`2`**: additive — optional `correlation_id` on `WireResponse`. Responders that receive
+//! a request carrying `correlation_id` echo it back so callers can reject stale/mismatched replies
+//! on shared or recycled reply channels. Older responders simply omit the field; receivers must
+//! treat an absent `correlation_id` as "unverified" rather than invalid.
 
 /// Human-readable revision for release notes and external integrators (not sent on the wire).
-pub const WIRE_FORMAT_DOC_REVISION: u32 = 1;
+pub const WIRE_FORMAT_DOC_REVISION: u32 = 2;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,7 +49,9 @@ pub struct WireRequest {
 pub struct WireError {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<Value>,
+    // Boxed to mirror `HttpException::details`, keeping error types small
+    // (serializes identically over the wire).
+    pub details: Option<Box<Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +61,10 @@ pub struct WireResponse {
     pub payload: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<WireError>,
+    /// Echo of [`WireRequest::correlation_id`] (revision 2). Callers verify this before trusting
+    /// a reply delivered on a shared/recycled reply channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 pub async fn dispatch_send(

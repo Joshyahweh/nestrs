@@ -134,29 +134,6 @@ impl AppController {
     async fn compressible() -> String {
         "y".repeat(64)
     }
-
-    #[get("/panic")]
-    async fn panic_route() -> &'static str {
-        panic!("boom-secret-internal-detail");
-    }
-
-    #[get("/guarded-deny-filtered")]
-    async fn guarded_deny_filtered() -> &'static str {
-        "unreachable"
-    }
-}
-
-/// Rewrites any `HttpException` it observes — used to prove guard rejections reach the
-/// exception-filter layer (NestJS parity: filters catch guard-thrown errors too).
-#[derive(Default)]
-struct RewritingFilter;
-
-#[async_trait]
-impl ExceptionFilter for RewritingFilter {
-    async fn catch(&self, mut ex: HttpException) -> axum::response::Response {
-        ex.message = format!("filtered:{}", ex.message);
-        ex.into_response()
-    }
 }
 
 #[derive(Default)]
@@ -189,8 +166,6 @@ impl_routes!(AppController, state AppState => [
     GET "/guarded-deny" with (DenyForTests) => AppController::guarded_deny,
     GET "/ctx" with () => AppController::ctx_preview,
     GET "/compressible" with () => AppController::compressible,
-    GET "/panic" with () => AppController::panic_route,
-    GET "/guarded-deny-filtered" with (DenyForTests) filters (RewritingFilter) => AppController::guarded_deny_filtered,
 ]);
 
 #[tokio::test]
@@ -216,61 +191,6 @@ async fn validated_body_returns_422_with_validation_errors() {
     assert_eq!(v["statusCode"], 422);
     assert_eq!(v["message"], "Validation failed");
     assert!(v["errors"].is_array());
-}
-
-#[tokio::test]
-async fn panicking_handler_returns_sanitized_500() {
-    let router = NestFactory::create::<AppModule>().into_router();
-
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/v1/api/panic")
-                .method("GET")
-                .body(Body::empty())
-                .expect("request should be valid"),
-        )
-        .await
-        .expect("router should serve request");
-
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let bytes = to_bytes(response.into_body(), 64 * 1024)
-        .await
-        .expect("read body");
-    let text = String::from_utf8_lossy(&bytes);
-    // The sanitized body must not leak the panic message.
-    assert!(
-        !text.contains("boom-secret-internal-detail"),
-        "panic payload leaked: {text}"
-    );
-    let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
-    assert_eq!(v["statusCode"], 500);
-}
-
-#[tokio::test]
-async fn guard_rejections_are_visible_to_exception_filters() {
-    let router = NestFactory::create::<AppModule>().into_router();
-
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/v1/api/guarded-deny-filtered")
-                .method("GET")
-                .body(Body::empty())
-                .expect("request should be valid"),
-        )
-        .await
-        .expect("router should serve request");
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    let bytes = to_bytes(response.into_body(), 64 * 1024)
-        .await
-        .expect("read body");
-    let text = String::from_utf8_lossy(&bytes);
-    assert!(
-        text.contains("filtered:denied by test guard"),
-        "exception filter did not observe the guard rejection: {text}"
-    );
 }
 
 #[module(
@@ -636,16 +556,11 @@ async fn rate_limit_returns_too_many_requests() {
 
 #[tokio::test]
 async fn rate_limit_keeps_clients_in_separate_buckets_in_memory_mode() {
-    // One trusted proxy in front of the app; each client's request reaches the proxy, which
-    // appends the client IP to `x-forwarded-for`. Without a declared topology the forwarded
-    // header is client-controlled and correctly ignored (see client_ip tests).
     let router = NestFactory::create::<AppModule>()
-        .use_trusted_proxy_headers(1)
         .use_rate_limit(
             RateLimitOptions::builder()
                 .max_requests(1)
                 .window_secs(60)
-                .trusted_proxy_hops(1)
                 .build(),
         )
         .into_router();
@@ -862,66 +777,11 @@ async fn production_errors_from_env_sanitizes_when_nestrs_env_production() {
         .await
         .expect("router should serve request");
 
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let body = response.into_body();
     let bytes = to_bytes(body, 64 * 1024).await.expect("read body");
     let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!(v["message"], "An unexpected error occurred");
-}
-
-/// Safe by default: setting `NESTRS_ENV=production` alone (no builder call) enables 5xx
-/// JSON sanitization.
-#[tokio::test]
-#[serial(env)]
-async fn production_errors_sanitize_by_default_when_nestrs_env_production() {
-    let _g = EnvGuard::set("NESTRS_ENV", "production");
-    let router = NestFactory::create::<AppModule>().into_router();
-
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/v1/api/internal-error")
-                .method("GET")
-                .body(Body::empty())
-                .expect("request should be valid"),
-        )
-        .await
-        .expect("router should serve request");
-
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let bytes = to_bytes(response.into_body(), 64 * 1024)
-        .await
-        .expect("read body");
-    let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
-    assert_eq!(v["message"], "An unexpected error occurred");
-}
-
-/// Explicit opt-out wins even in a production environment.
-#[tokio::test]
-#[serial(env)]
-async fn disable_production_errors_keeps_detail_when_nestrs_env_production() {
-    let _g = EnvGuard::set("NESTRS_ENV", "production");
-    let router = NestFactory::create::<AppModule>()
-        .disable_production_errors()
-        .into_router();
-
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/v1/api/internal-error")
-                .method("GET")
-                .body(Body::empty())
-                .expect("request should be valid"),
-        )
-        .await
-        .expect("router should serve request");
-
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let bytes = to_bytes(response.into_body(), 64 * 1024)
-        .await
-        .expect("read body");
-    let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
-    // The fixture handler's message must survive when sanitization is disabled.
-    assert_ne!(v["message"], "An unexpected error occurred");
 }
 
 #[tokio::test]

@@ -4,7 +4,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::RwLock;
 
 use async_trait::async_trait;
 use axum::Router;
@@ -94,9 +93,6 @@ fn create_entry_for_injectable<T: Injectable + Send + Sync + 'static>() -> Provi
 
 pub struct ProviderRegistry {
     entries: HashMap<TypeId, ProviderEntry>,
-    /// Registration order of providers. Iteration over [`Self::entries`] alone is nondeterministic
-    /// (HashMap), so lifecycle hooks and discovery use this order for stable startup/shutdown.
-    order: Vec<TypeId>,
 }
 
 /// Per-request handle identifying the matched handler (used for metadata lookups).
@@ -107,22 +103,15 @@ impl ProviderRegistry {
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
-            order: Vec::new(),
         }
-    }
-
-    fn insert_entry(&mut self, type_id: TypeId, entry: ProviderEntry) {
-        if !self.entries.contains_key(&type_id) {
-            self.order.push(type_id);
-        }
-        self.entries.insert(type_id, entry);
     }
 
     pub fn register<T>(&mut self)
     where
         T: Injectable + Send + Sync + 'static,
     {
-        self.insert_entry(TypeId::of::<T>(), create_entry_for_injectable::<T>());
+        self.entries
+            .insert(TypeId::of::<T>(), create_entry_for_injectable::<T>());
     }
 
     /// NestJS **`useValue`**: register a pre-built singleton without an [`Injectable`] impl.
@@ -130,7 +119,7 @@ impl ProviderRegistry {
         let preset: Arc<dyn Any + Send + Sync> = value;
         let cell = Arc::new(OnceLock::new());
         let _ = cell.set(preset.clone());
-        self.insert_entry(
+        self.entries.insert(
             TypeId::of::<T>(),
             ProviderEntry {
                 type_name: std::any::type_name::<T>(),
@@ -160,7 +149,7 @@ impl ProviderRegistry {
     {
         let factory: std::sync::Arc<F> = std::sync::Arc::new(factory);
         let factory = factory.clone();
-        self.insert_entry(
+        self.entries.insert(
             TypeId::of::<T>(),
             ProviderEntry {
                 type_name: std::any::type_name::<T>(),
@@ -209,7 +198,7 @@ impl ProviderRegistry {
         let any: Arc<dyn Any + Send + Sync> = instance;
         let _ = entry.instance.set(any);
 
-        self.insert_entry(TypeId::of::<T>(), entry);
+        self.entries.insert(TypeId::of::<T>(), entry);
     }
 
     fn produce_any(&self, type_id: TypeId, entry: &ProviderEntry) -> Arc<dyn Any + Send + Sync> {
@@ -255,76 +244,48 @@ impl ProviderRegistry {
         }
     }
 
-    /// Resolves a provider, panicking when it is not registered. Prefer
-    /// [`Self::try_get`] at call sites that can handle absence.
-    ///
-    /// When called **during** another provider's construction (inside `construct` or a
-    /// `useFactory` closure), the edge `constructor -> requested` is recorded so lifecycle
-    /// hooks can run in dependency order (see [`Self::run_on_module_init`]).
     pub fn get<T>(&self) -> Arc<T>
     where
         T: Send + Sync + 'static,
     {
-        self.try_get::<T>()
-            .unwrap_or_else(|| panic!("Provider `{}` not registered", std::any::type_name::<T>()))
-    }
-
-    /// Fallible resolution: returns `None` instead of panicking when the provider is missing.
-    pub fn try_get<T>(&self) -> Option<Arc<T>>
-    where
-        T: Send + Sync + 'static,
-    {
         let type_id = TypeId::of::<T>();
-        let entry = self.entries.get(&type_id)?;
-
-        if let Some(parent) =
-            CONSTRUCTION_STACK.with(|stack| stack.borrow().last().map(|(_, id)| *id))
-        {
-            record_provider_dependency(parent, type_id);
-        }
+        let entry = self
+            .entries
+            .get(&type_id)
+            .unwrap_or_else(|| panic!("Provider `{}` not registered", std::any::type_name::<T>()));
 
         let any = self.produce_any(type_id, entry);
 
-        any.downcast::<T>().ok()
+        any.downcast::<T>().unwrap_or_else(|_| {
+            panic!(
+                "Provider downcast failed for `{}`",
+                std::any::type_name::<T>()
+            )
+        })
     }
 
-    /// All registered provider [`TypeId`] keys (NestJS discovery-style introspection), in registration order.
+    /// All registered provider [`TypeId`] keys (NestJS discovery-style introspection).
     pub fn registered_type_ids(&self) -> Vec<TypeId> {
-        self.order.clone()
+        self.entries.keys().copied().collect()
     }
 
-    /// Human-readable type names for registered providers (debug / tooling), in registration order.
+    /// Human-readable type names for registered providers (debug / tooling).
     pub fn registered_type_names(&self) -> Vec<&'static str> {
-        self.order
-            .iter()
-            .filter_map(|id| self.entries.get(id).map(|e| e.type_name))
-            .collect()
+        self.entries.values().map(|e| e.type_name).collect()
     }
 
     pub fn absorb(&mut self, other: ProviderRegistry) {
-        let ProviderRegistry { entries, order } = other;
-        let mut leftover = entries;
-        for type_id in order {
-            if let Some(entry) = leftover.remove(&type_id) {
-                self.insert_entry(type_id, entry);
-            }
-        }
-        for (type_id, entry) in leftover {
-            self.insert_entry(type_id, entry);
-        }
+        self.entries.extend(other.entries);
     }
 
-    pub fn absorb_exported(&mut self, mut other: ProviderRegistry, exported: &[TypeId]) {
+    pub fn absorb_exported(&mut self, other: ProviderRegistry, exported: &[TypeId]) {
         if exported.is_empty() {
             return;
         }
         let allow = exported.iter().copied().collect::<HashSet<_>>();
-        // Preserve the source registry's registration order (every entry is tracked in `order`).
-        for type_id in std::mem::take(&mut other.order) {
+        for (type_id, entry) in other.entries {
             if allow.contains(&type_id) {
-                if let Some(entry) = other.entries.remove(&type_id) {
-                    self.insert_entry(type_id, entry);
-                }
+                self.entries.insert(type_id, entry);
             }
         }
     }
@@ -336,22 +297,16 @@ impl ProviderRegistry {
             return;
         }
         let allow = exported.iter().copied().collect::<HashSet<_>>();
-        for type_id in &other.order {
+        for (type_id, entry) in &other.entries {
             if allow.contains(type_id) {
-                if let Some(entry) = other.entries.get(type_id) {
-                    self.insert_entry(*type_id, entry.clone());
-                }
+                self.entries.insert(*type_id, entry.clone());
             }
         }
     }
 
-    /// Construct all singleton providers (so their lifecycle hooks can run deterministically),
-    /// in registration order.
+    /// Construct all singleton providers (so their lifecycle hooks can run deterministically).
     pub fn eager_init_singletons(&self) {
-        for type_id in &self.order {
-            let Some(entry) = self.entries.get(type_id) else {
-                continue;
-            };
+        for (type_id, entry) in self.entries.iter() {
             if entry.scope == ProviderScope::Singleton {
                 let _guard = ConstructionGuard::push(*type_id, entry.type_name);
                 let _ = entry.instance.get_or_init(|| match &entry.factory {
@@ -362,112 +317,33 @@ impl ProviderRegistry {
         }
     }
 
-    /// Registration-ordered, dependency-sorted [`TypeId`]s of all **singleton** providers.
-    ///
-    /// Ordering: construction dependencies recorded by [`Self::get`] are respected first
-    /// (dependencies initialize before dependents); ties fall back to registration order.
-    /// Providers involved in a hook-time cycle are appended in registration order.
-    fn ordered_singletons(&self) -> Vec<TypeId> {
-        let singletons: HashSet<TypeId> = self
-            .order
-            .iter()
-            .filter(|id| {
-                self.entries
-                    .get(id)
-                    .is_some_and(|e| e.scope == ProviderScope::Singleton)
-            })
-            .copied()
-            .collect();
-
-        // Edge `dep -> dependent`: dep must be initialized first. Only edges between
-        // registered singletons participate (edges to transient/request types or types from
-        // other registries are ignored).
-        let deps = provider_dep_graph().read().expect("provider dep graph");
-        let mut incoming: HashMap<TypeId, usize> =
-            singletons.iter().map(|id| (*id, 0usize)).collect();
-        let mut adjacency: HashMap<TypeId, Vec<TypeId>> = HashMap::new();
-        for (from, targets) in deps.iter() {
-            if !singletons.contains(from) {
-                continue;
-            }
-            for to in targets {
-                if singletons.contains(to) {
-                    adjacency.entry(*from).or_default().push(*to);
-                    *incoming.entry(*to).or_insert(0) += 1;
-                }
-            }
-        }
-        drop(deps);
-
-        // Kahn's algorithm; among ready nodes pick the earliest registration order for stability.
-        use std::cmp::Reverse;
-        let position: HashMap<&TypeId, usize> = self
-            .order
-            .iter()
-            .enumerate()
-            .map(|(i, id)| (id, i))
-            .collect();
-        let mut ready: std::collections::BinaryHeap<Reverse<usize>> = singletons
-            .iter()
-            .filter(|id| incoming[id] == 0)
-            .map(|id| Reverse(position[id]))
-            .collect();
-
-        let mut sorted = Vec::with_capacity(singletons.len());
-        let mut visited = HashSet::new();
-        while let Some(Reverse(pos)) = ready.pop() {
-            let id = self.order[pos];
-            visited.insert(id);
-            sorted.push(id);
-            if let Some(dependents) = adjacency.get(&id) {
-                for to in dependents {
-                    let e = incoming.get_mut(to).expect("edge target tracked");
-                    *e -= 1;
-                    if *e == 0 && !visited.contains(to) {
-                        ready.push(Reverse(position[to]));
-                    }
-                }
-            }
-        }
-
-        // Cycle fallback: append anything not reached, in registration order.
-        for id in &self.order {
-            if singletons.contains(id) && !visited.contains(id) {
-                sorted.push(*id);
-            }
-        }
-        sorted
-    }
-
     pub async fn run_on_module_init(&self) {
-        for type_id in self.ordered_singletons() {
-            if let Some(entry) = self.entries.get(&type_id) {
+        for entry in self.entries.values() {
+            if entry.scope == ProviderScope::Singleton {
                 (entry.on_module_init)(self).await;
             }
         }
     }
 
-    /// Destroy hooks run in **reverse** initialization order (dependencies torn down after dependents).
     pub async fn run_on_module_destroy(&self) {
-        for type_id in self.ordered_singletons().into_iter().rev() {
-            if let Some(entry) = self.entries.get(&type_id) {
+        for entry in self.entries.values() {
+            if entry.scope == ProviderScope::Singleton {
                 (entry.on_module_destroy)(self).await;
             }
         }
     }
 
     pub async fn run_on_application_bootstrap(&self) {
-        for type_id in self.ordered_singletons() {
-            if let Some(entry) = self.entries.get(&type_id) {
+        for entry in self.entries.values() {
+            if entry.scope == ProviderScope::Singleton {
                 (entry.on_application_bootstrap)(self).await;
             }
         }
     }
 
-    /// Shutdown hooks run in **reverse** initialization order (dependencies torn down after dependents).
     pub async fn run_on_application_shutdown(&self) {
-        for type_id in self.ordered_singletons().into_iter().rev() {
-            if let Some(entry) = self.entries.get(&type_id) {
+        for entry in self.entries.values() {
+            if entry.scope == ProviderScope::Singleton {
                 (entry.on_application_shutdown)(self).await;
             }
         }
@@ -478,7 +354,6 @@ impl Clone for ProviderRegistry {
     fn clone(&self) -> Self {
         Self {
             entries: self.entries.clone(),
-            order: self.order.clone(),
         }
     }
 }
@@ -889,86 +764,4 @@ impl Drop for ConstructionGuard {
             }
         });
     }
-}
-
-/// Global construction-dependency graph (`constructor -> dependency`) recorded by
-/// [`ProviderRegistry::get`] while a provider factory is running. Used to order lifecycle hooks.
-fn provider_dep_graph() -> &'static RwLock<HashMap<TypeId, Vec<TypeId>>> {
-    static DEPS: OnceLock<RwLock<HashMap<TypeId, Vec<TypeId>>>> = OnceLock::new();
-    DEPS.get_or_init(|| RwLock::new(HashMap::new()))
-}
-
-fn record_provider_dependency(from: TypeId, to: TypeId) {
-    let mut deps = provider_dep_graph().write().expect("provider dep graph");
-    let targets = deps.entry(from).or_default();
-    if !targets.contains(&to) {
-        targets.push(to);
-    }
-}
-
-/// Clears the recorded provider dependency graph.
-///
-/// **Available only with the `test-hooks` feature.** For tests; see `STABILITY.md` in the repo root.
-#[cfg(feature = "test-hooks")]
-pub fn clear_provider_dependencies_for_tests() {
-    provider_dep_graph()
-        .write()
-        .expect("provider dep graph")
-        .clear();
-}
-
-type ModuleBuildFn = Box<dyn FnOnce() -> (ProviderRegistry, Router) + Send>;
-
-static MODULE_BUILD_CACHE: OnceLock<RwLock<HashMap<TypeId, Arc<OnceLock<DynamicModule>>>>> =
-    OnceLock::new();
-
-fn module_build_cache() -> &'static RwLock<HashMap<TypeId, Arc<OnceLock<DynamicModule>>>> {
-    MODULE_BUILD_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
-}
-
-/// Memoizes a [`Module::build`] result **process-wide**, keyed by the module type.
-///
-/// This makes NestJS-style module-instance sharing the default: when two modules import the same
-/// shared module, both importers receive bindings cloned from **one** built instance (shared
-/// singleton cells, one route subtree), instead of each importer rebuilding its own copy.
-///
-/// Route conflicts from duplicate registration and split-singleton bugs are thereby avoided;
-/// `forward_ref` back-edges still skip via the existing module build-stack check before this is reached.
-///
-/// # Arguments
-///
-/// `build` is the uncached module body (generated by `#[module]`). It runs at most once per
-/// process per module type.
-#[doc(hidden)]
-pub fn __nestrs_memoize_module_build<M: Module + 'static>(
-    build: ModuleBuildFn,
-) -> (ProviderRegistry, Router) {
-    let key = TypeId::of::<M>();
-    let entry = Arc::clone(
-        module_build_cache()
-            .write()
-            .expect("module build cache")
-            .entry(key)
-            .or_insert_with(|| Arc::new(OnceLock::new())),
-    );
-    // At most one thread builds `M`; concurrent/reentrant callers block on the cell. Reentrant
-    // builds (a true cycle) are rejected earlier by the module build-stack circular check inside
-    // `build`, matching pre-memoization semantics.
-    let dm = entry.get_or_init(|| {
-        let (registry, router) = build();
-        DynamicModule::from_parts(registry, router, <M as Module>::exports())
-    });
-    (dm.registry.clone(), dm.router.clone())
-}
-
-/// Clears the process-wide module build cache.
-///
-/// **Available only with the `test-hooks` feature.** For tests that rebuild the same module type
-/// expecting fresh instances; see `STABILITY.md` in the repo root.
-#[cfg(feature = "test-hooks")]
-pub fn clear_module_cache_for_tests() {
-    module_build_cache()
-        .write()
-        .expect("module build cache")
-        .clear();
 }

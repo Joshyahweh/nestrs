@@ -97,7 +97,7 @@ fn golden_wire_response_error_shape() {
     assert!(!res.ok);
     let err = res.error.as_ref().expect("error");
     assert_eq!(err.message, "not found");
-    assert_eq!(err.details.as_deref(), Some(&json!({"code": 404})));
+    assert_eq!(err.details.as_ref(), Some(&json!({"code": 404})));
     assert_eq!(
         serde_json::to_value(&res).unwrap(),
         serde_json::from_str::<Value>(raw).unwrap()

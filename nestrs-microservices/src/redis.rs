@@ -2,8 +2,8 @@ use crate::wire::{dispatch_emit, dispatch_send, WireError, WireKind, WireRequest
 use crate::{MicroserviceHandler, Transport, TransportError};
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct RedisTransportOptions {
@@ -13,11 +13,6 @@ pub struct RedisTransportOptions {
 }
 
 impl RedisTransportOptions {
-    /// Channel namespace used when no explicit prefix is configured. A bare `*` psubscribe
-    /// (the previous behavior) would consume *every* pubsub message on the server, dispatching
-    /// unrelated traffic as RPC events.
-    const DEFAULT_PREFIX: &'static str = "nestrs";
-
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
@@ -31,53 +26,55 @@ impl RedisTransportOptions {
         self
     }
 
-    fn effective_prefix(&self) -> &str {
-        match self
-            .prefix
-            .as_deref()
-            .map(|p| p.trim().trim_end_matches('.'))
-        {
-            Some("") | None => Self::DEFAULT_PREFIX,
-            Some(p) => p,
+    fn channel(&self, pattern: &str) -> String {
+        match self.prefix.as_deref() {
+            None => pattern.to_string(),
+            Some(p) => {
+                let p = p.trim_end_matches('.');
+                if p.is_empty() {
+                    pattern.to_string()
+                } else {
+                    format!("{p}.{pattern}")
+                }
+            }
         }
     }
 
-    fn channel(&self, pattern: &str) -> String {
-        format!("{}.{pattern}", self.effective_prefix())
-    }
-
     fn wildcard(&self) -> String {
-        format!("{}.*", self.effective_prefix())
-    }
-
-    /// Per-request reply channel, kept *outside* the `{prefix}.*` namespace so servers
-    /// subscribed to the wildcard never receive each other's replies.
-    fn reply_channel(correlation_id: &str) -> String {
-        format!("__nestrs.reply.{correlation_id}")
+        match self.prefix.as_deref() {
+            None => "*".to_string(),
+            Some(p) => {
+                let p = p.trim_end_matches('.');
+                if p.is_empty() {
+                    "*".to_string()
+                } else {
+                    format!("{p}.*")
+                }
+            }
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct RedisTransport {
     options: RedisTransportOptions,
-    // Opened eagerly in `new` but never panics; URL errors surface on first use.
-    client: Result<redis::Client, String>,
+    client: redis::Client,
+    seq: Arc<AtomicU64>,
 }
 
 impl RedisTransport {
     pub fn new(options: RedisTransportOptions) -> Self {
-        let opened = redis::Client::open(options.url.clone())
-            .map_err(|e| format!("redis client open failed: {e}"));
+        let client = redis::Client::open(options.url.clone())
+            .unwrap_or_else(|e| panic!("redis client open failed: {e}"));
         Self {
             options,
-            client: opened,
+            client,
+            seq: Arc::new(AtomicU64::new(1)),
         }
     }
 
-    fn client(&self) -> Result<&redis::Client, TransportError> {
-        self.client
-            .as_ref()
-            .map_err(|msg| TransportError::new(msg.clone()))
+    fn next_id(&self) -> String {
+        self.seq.fetch_add(1, Ordering::Relaxed).to_string()
     }
 }
 
@@ -88,14 +85,12 @@ impl Transport for RedisTransport {
         pattern: &str,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, TransportError> {
-        let client = self.client()?;
-        // A fresh uuid per request makes the reply channel unguessable and collision-free across
-        // processes (a shared atomic counter is not), and doubles as the correlation id.
-        let correlation_id = Uuid::new_v4().simple().to_string();
-        let reply = RedisTransportOptions::reply_channel(&correlation_id);
+        let id = self.next_id();
+        let reply = format!("__nestrs.reply.{id}");
         let channel = self.options.channel(pattern);
 
-        let mut pubsub = client
+        let mut pubsub = self
+            .client
             .get_async_pubsub()
             .await
             .map_err(|e| TransportError::new(format!("redis pubsub failed: {e}")))?;
@@ -108,13 +103,14 @@ impl Transport for RedisTransport {
             kind: WireKind::Send,
             pattern: pattern.to_string(),
             payload,
-            reply: Some(reply),
-            correlation_id: Some(correlation_id.clone()),
+            reply: Some(reply.clone()),
+            correlation_id: None,
         };
         let text = serde_json::to_string(&wire)
             .map_err(|e| TransportError::new(format!("serialize request failed: {e}")))?;
 
-        let mut pub_conn = client
+        let mut pub_conn = self
+            .client
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| TransportError::new(format!("redis connect failed: {e}")))?;
@@ -136,15 +132,6 @@ impl Transport for RedisTransport {
             .map_err(|e| TransportError::new(format!("redis reply payload decode failed: {e}")))?;
         let wire: WireResponse = serde_json::from_str(&payload)
             .map_err(|e| TransportError::new(format!("deserialize response failed: {e}")))?;
-        // Reject stale/mismatched replies on a recycled channel. Absent id = legacy peer
-        // (pre-correlation responder); accepted for wire compatibility (see `wire` module docs).
-        if let Some(id) = &wire.correlation_id {
-            if id != &correlation_id {
-                return Err(TransportError::new(
-                    "redis reply correlation mismatch (stale or forged response)",
-                ));
-            }
-        }
         if wire.ok {
             Ok(wire.payload.unwrap_or(serde_json::Value::Null))
         } else {
@@ -177,7 +164,7 @@ impl Transport for RedisTransport {
             .map_err(|e| TransportError::new(format!("serialize event failed: {e}")))?;
 
         let mut conn = self
-            .client()?
+            .client
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| TransportError::new(format!("redis connect failed: {e}")))?;
@@ -213,8 +200,7 @@ impl RedisMicroserviceOptions {
 
 pub struct RedisMicroserviceServer {
     options: RedisTransportOptions,
-    // Opened eagerly in `new` but never panics; URL errors surface on `listen`.
-    client: Result<redis::Client, String>,
+    client: redis::Client,
     handlers: Vec<Arc<dyn MicroserviceHandler>>,
 }
 
@@ -228,19 +214,13 @@ impl RedisMicroserviceServer {
             prefix: options.prefix,
             request_timeout: std::time::Duration::from_secs(5),
         };
-        let opened = redis::Client::open(options.url.clone())
-            .map_err(|e| format!("redis client open failed: {e}"));
+        let client = redis::Client::open(options.url.clone())
+            .unwrap_or_else(|e| panic!("redis client open failed: {e}"));
         Self {
-            client: opened,
             options,
+            client,
             handlers,
         }
-    }
-
-    fn client(&self) -> Result<&redis::Client, TransportError> {
-        self.client
-            .as_ref()
-            .map_err(|msg| TransportError::new(msg.clone()))
     }
 
     pub async fn listen(self) -> Result<(), TransportError> {
@@ -253,7 +233,7 @@ impl RedisMicroserviceServer {
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         let mut pubsub = self
-            .client()?
+            .client
             .get_async_pubsub()
             .await
             .map_err(|e| TransportError::new(format!("redis pubsub failed: {e}")))?;
@@ -263,8 +243,6 @@ impl RedisMicroserviceServer {
             .map_err(|e| TransportError::new(format!("redis psubscribe failed: {e}")))?;
 
         let handlers = Arc::new(self.handlers);
-        // Clone the (possibly failed) open result out of `self` before it's partially moved.
-        let opened_client = self.client.clone();
         let mut stream = pubsub.on_message();
 
         tokio::pin!(shutdown);
@@ -286,17 +264,12 @@ impl RedisMicroserviceServer {
                         WireKind::Send => {
                             let Some(reply) = req.reply else { continue; };
                             let handlers = handlers.clone();
-                            // A failed URL open surfaces as a skipped request here; it was
-                            // already reported at `listen` time via `listen_with_shutdown`.
-                            let Ok(client) = opened_client.as_ref() else { continue };
-                            let client = client.clone();
-                            // Echo the caller's correlation id so it can reject stale replies.
-                            let reply_corr = req.correlation_id.clone();
+                            let client = self.client.clone();
                             tokio::spawn(async move {
                                 let res = dispatch_send(&handlers, &req.pattern, req.payload.clone()).await;
                                 let wire = match res {
-                                    Ok(v) => WireResponse { ok: true, payload: Some(v), error: None, correlation_id: reply_corr },
-                                    Err(e) => WireResponse { ok: false, payload: None, error: Some(WireError { message: e.message, details: e.details }), correlation_id: reply_corr },
+                                    Ok(v) => WireResponse { ok: true, payload: Some(v), error: None },
+                                    Err(e) => WireResponse { ok: false, payload: None, error: Some(WireError { message: e.message, details: e.details }) },
                                 };
                                 if let Ok(text) = serde_json::to_string(&wire) {
                                     if let Ok(mut conn) = client.get_multiplexed_async_connection().await

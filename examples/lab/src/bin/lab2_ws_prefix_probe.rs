@@ -7,9 +7,8 @@
 
 use futures_util::{SinkExt, StreamExt};
 use nestrs::prelude::*;
-use nestrs::ws::{WsClient, WsGateway};
+use nestrs::ws::WsClient;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use tokio_tungstenite::tungstenite::Message;
 
 static CONNECTIONS: AtomicU64 = AtomicU64::new(0);

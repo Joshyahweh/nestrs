@@ -5,7 +5,6 @@
 //! Run: `cargo run -p lab --bin lab2_ws_client`
 
 use futures_util::{SinkExt, StreamExt};
-use nestrs::prelude::*;
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::main]
@@ -87,7 +86,6 @@ async fn main() {
 /// Mirrors `lab2_realtime.rs` so this binary can boot the app without a subprocess.
 mod lab2_realtime {
     use nestrs::prelude::*;
-    use nestrs::ws::{WsClient, WsGateway};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static CONNECTIONS: AtomicU64 = AtomicU64::new(0);

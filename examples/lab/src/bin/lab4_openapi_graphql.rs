@@ -4,6 +4,7 @@
 //! Writes two attack queries to /tmp for curl use:
 //! - `/tmp/lab4-complex-query.json` (exceeds complexity 512)
 //! - `/tmp/lab4-deep-query.json`    (exceeds depth 64)
+//!
 //! Also exports SDL to `/tmp/lab4-schema.graphql`.
 //!
 //! Run: `cargo run -p lab --bin lab4_openapi_graphql`

@@ -24,7 +24,7 @@ fn tick_stream() -> impl futures_util::Stream<Item = Result<nestrs::sse::Event, 
 #[ws_gateway(path = "/ws")]
 #[derive(Default)]
 #[injectable]
-struct EchoGateway;
+pub struct EchoGateway;
 
 #[ws_routes]
 impl EchoGateway {

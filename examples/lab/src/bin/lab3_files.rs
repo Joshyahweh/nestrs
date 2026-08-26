@@ -34,6 +34,8 @@ impl UploadService {
     }
 }
 
+// HttpException carries inline detail storage, tripping clippy's result_large_err here.
+#[allow(clippy::result_large_err)]
 fn sanitize_download_name(raw: &str) -> Result<String, HttpException> {
     // Reject anything that could escape the upload dir: separators, dot segments.
     if raw.contains("..") || raw.contains('/') || raw.contains('\\') || raw.starts_with('.') {

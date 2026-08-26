@@ -5,7 +5,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use nestrs::prelude::*;
-use nestrs::ws::{WsClient, WsGateway};
+use nestrs::ws::WsClient;
 use tokio_tungstenite::tungstenite::Message;
 
 #[ws_gateway(path = "/ws")]

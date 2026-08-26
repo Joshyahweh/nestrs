@@ -28,7 +28,7 @@ async-trait = "0.1"
 chrono = { version = "0.4", optional = true, default-features = false, features = ["clock"] }
 nestrs = { version = "0.3.8", path = "../nestrs" }
 axum.workspace = true
-paste = "1"
+pastey = "0.2"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 tokio = { workspace = true, optional = true }

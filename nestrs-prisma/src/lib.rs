@@ -22,7 +22,7 @@ pub mod schema_bridge;
 pub mod transaction;
 
 #[doc(hidden)]
-pub use paste;
+pub use pastey;
 
 #[cfg(feature = "sqlx")]
 #[doc(hidden)]

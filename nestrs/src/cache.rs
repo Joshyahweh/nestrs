@@ -129,6 +129,22 @@ impl CacheBackend {
 }
 
 /// Cache service (in-memory by default; Redis available with feature `cache-redis`).
+///
+/// Inject it like any provider; the backend is chosen when the module is imported.
+/// Redis registration goes through [`CacheModule::register`] in your module's
+/// `imports` list (the `cache` module itself is private — use the crate-root re-exports):
+///
+/// ```ignore
+/// #[module(
+///     imports = [CacheModule::register(CacheOptions::Redis(
+///         nestrs::RedisCacheOptions::new("redis://127.0.0.1:6379").with_prefix("myapp"),
+///     ))],
+/// )]
+/// pub struct AppModule;
+///
+/// // In a controller: `State(cache): State<Arc<CacheService>>`
+/// // cache.set("key", &value, Some(Duration::from_secs(60))).await?;
+/// ```
 pub struct CacheService {
     backend: CacheBackend,
 }

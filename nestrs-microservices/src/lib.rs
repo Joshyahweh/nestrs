@@ -82,7 +82,9 @@ pub struct MessageEnvelope<T> {
 pub struct TransportError {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<serde_json::Value>,
+    // Boxed to mirror `HttpException::details`, keeping error types small
+    // (serializes identically over the wire).
+    pub details: Option<Box<serde_json::Value>>,
 }
 
 impl TransportError {
@@ -93,8 +95,8 @@ impl TransportError {
         }
     }
 
-    pub fn with_details(mut self, details: serde_json::Value) -> Self {
-        self.details = Some(details);
+    pub fn with_details(mut self, details: impl Into<Box<serde_json::Value>>) -> Self {
+        self.details = Some(details.into());
         self
     }
 }

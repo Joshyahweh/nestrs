@@ -804,7 +804,7 @@ pub enum PathNormalization {
     AppendTrailingSlash,
 }
 
-/// Default request body size limit (2 MiB) applied by [`NestApplication::build_router`].
+/// Default request body size limit (2 MiB) applied when the application router is built.
 ///
 /// Override per app with [`NestApplication::use_body_limit`]. Raw extractors ([`crate::RawBody`])
 /// and JSON/DTO extraction all flow through this layer, so the default also protects webhook
@@ -1489,7 +1489,7 @@ impl NestApplication {
     }
 
     /// Declares that `hops` trusted reverse proxies sit in front of this service, enabling
-    /// `X-Forwarded-For` / `X-Real-IP` resolution for the [`ClientIp`](crate::ClientIp)
+    /// `X-Forwarded-For` / `X-Real-IP` resolution for the [`ClientIp`]
     /// extractor.
     ///
     /// The client address is read **right-most-first**: with one trusted proxy (the common

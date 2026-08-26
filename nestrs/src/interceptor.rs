@@ -6,10 +6,10 @@ use axum::response::Response;
 
 /// Around-advice: run logic before/after the inner pipeline by calling [`Next::run`].
 ///
-/// Apply with the [`interceptor_layer!`](crate::interceptor_layer) macro on a [`axum::Router`] or via
+/// Apply with the [`crate::interceptor_layer`] macro on a [`axum::Router`] or via
 /// [`crate::NestApplication::use_global_layer`]. Interceptors declared through `#[use_interceptors(...)]`
 /// / `impl_routes!` are resolved **once at route registration** via [`Self::resolve`], so they may hold
-/// DI dependencies; the standalone [`interceptor_layer!`] macro keeps using [`Default`].
+/// DI dependencies; the standalone [`crate::interceptor_layer`] macro keeps using [`Default`].
 #[async_trait::async_trait]
 pub trait Interceptor: Default + Send + Sync + 'static {
     /// Build the interceptor instance used for every request on routes declaring it.

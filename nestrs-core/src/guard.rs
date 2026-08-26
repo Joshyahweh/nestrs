@@ -5,8 +5,6 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
-use crate::ProviderRegistry;
-
 /// Failure returned from [`CanActivate::can_activate`]; becomes a JSON error body (401 / 403).
 #[derive(Debug, Clone)]
 pub enum GuardError {
@@ -54,7 +52,7 @@ impl IntoResponse for GuardError {
 ///
 /// Guards are resolved **once at route-registration time**, so they can hold dependencies
 /// (JWT keys, repositories, caches). Override [`Self::resolve`] to pull them from the
-/// [`ProviderRegistry`]; keep the `Default` supertrait satisfied with a placeholder unit struct:
+/// [`crate::ProviderRegistry`]; keep the `Default` supertrait satisfied with a placeholder unit struct:
 ///
 /// ```ignore
 /// #[derive(Default)]
@@ -77,7 +75,7 @@ pub trait CanActivate: Default + Send + Sync + 'static {
     ///
     /// The default implementation returns [`Default::default()`] (a stateless guard).
     /// Override this to construct a stateful guard from the application's
-    /// [`ProviderRegistry`] (NestJS dependency-injected guards).
+    /// [`crate::ProviderRegistry`] (NestJS dependency-injected guards).
     fn resolve(_registry: &crate::ProviderRegistry) -> Self
     where
         Self: Sized,

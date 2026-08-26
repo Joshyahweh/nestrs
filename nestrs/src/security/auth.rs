@@ -98,12 +98,20 @@ where
     }
 }
 
-/// Reads the caller role from the `x-role` header and checks it against `#[roles("a,b")]` metadata (same pattern as Nest metadata + guard).
+/// **Demo-only** guard showing the Nest metadata + roles pattern: it reads the caller's role
+/// from the **client-supplied** `x-role` header and checks it against `#[roles("a,b")]`
+/// route metadata.
+///
+/// ⚠️ **Never use this in production.** The role comes from a request header anyone can set.
+/// Real deployments must derive the role from authenticated material (JWT claims, session,
+/// API-key lookup) inside your own [`CanActivate`] implementation or an
+/// [`AuthStrategy`](crate::core::AuthStrategy). This type exists to demonstrate
+/// `set_metadata`/`roles` wiring end-to-end in tests and examples.
 #[derive(Debug, Default)]
-pub struct XRoleMetadataGuard;
+pub struct DemoXRoleMetadataGuard;
 
 #[async_trait]
-impl CanActivate for XRoleMetadataGuard {
+impl CanActivate for DemoXRoleMetadataGuard {
     async fn can_activate(&self, parts: &Parts) -> Result<(), GuardError> {
         let handler = parts
             .extensions
@@ -128,3 +136,12 @@ impl CanActivate for XRoleMetadataGuard {
         }
     }
 }
+
+/// Old name of [`DemoXRoleMetadataGuard`]. Kept as a deprecated alias so existing code keeps
+/// compiling; the rename makes the client-trusted-header footgun explicit.
+#[allow(dead_code)] // re-exported for downstream users even when unused within this crate
+#[deprecated(
+    since = "0.3.9",
+    note = "renamed to DemoXRoleMetadataGuard: this guard trusts the client-supplied `x-role` header and must not be used in production"
+)]
+pub type XRoleMetadataGuard = DemoXRoleMetadataGuard;

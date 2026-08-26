@@ -24,6 +24,23 @@ async fn ensure_client() -> Result<&'static Client, String> {
         .await
 }
 
+/// Injectable MongoDB service (feature: **`mongo`**).
+///
+/// Call [`MongoModule::for_root`] once before `NestFactory::create` to set the
+/// connection URI, and import the module via `DynamicModule::from_module`
+/// (`for_root` returns `Self`, not a `DynamicModule`, so it can't be used inline):
+///
+/// ```ignore
+/// #[tokio::main]
+/// async fn main() {
+///     nestrs::MongoModule::for_root("mongodb://127.0.0.1:27017");
+///
+///     NestFactory::create::<AppModule>().listen(3000).await;
+/// }
+///
+/// #[module(imports = [DynamicModule::from_module::<nestrs::MongoModule>()])]
+/// pub struct AppModule;
+/// ```
 #[injectable]
 pub struct MongoService;
 

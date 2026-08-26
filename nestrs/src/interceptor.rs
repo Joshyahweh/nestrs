@@ -7,22 +7,9 @@ use axum::response::Response;
 /// Around-advice: run logic before/after the inner pipeline by calling [`Next::run`].
 ///
 /// Apply with the [`interceptor_layer!`](crate::interceptor_layer) macro on a [`axum::Router`] or via
-/// [`crate::NestApplication::use_global_layer`]. Interceptors declared through `#[use_interceptors(...)]`
-/// / `impl_routes!` are resolved **once at route registration** via [`Self::resolve`], so they may hold
-/// DI dependencies; the standalone [`interceptor_layer!`] macro keeps using [`Default`].
+/// [`crate::NestApplication::use_global_layer`].
 #[async_trait::async_trait]
 pub trait Interceptor: Default + Send + Sync + 'static {
-    /// Build the interceptor instance used for every request on routes declaring it.
-    ///
-    /// The default returns [`Default::default()`]; override to construct from the application's
-    /// [`crate::core::ProviderRegistry`] (NestJS dependency-injected interceptors).
-    fn resolve(_registry: &crate::core::ProviderRegistry) -> Self
-    where
-        Self: Sized,
-    {
-        Self::default()
-    }
-
     async fn intercept(&self, req: Request, next: Next) -> Response;
 }
 

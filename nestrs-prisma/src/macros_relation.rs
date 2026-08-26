@@ -158,7 +158,7 @@ macro_rules! prisma_relation_schema {
 #[macro_export]
 macro_rules! prisma_model_relations {
     ($Model:ident { $( ( $($entry:tt)+ ) )* }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             #[::async_trait::async_trait]
             pub trait [< Prisma $Model RelationRepository >]: Send + Sync {
                 $( $crate::prisma_model_relations!(@trait_method $($entry)+); )*
@@ -175,7 +175,7 @@ macro_rules! prisma_model_relations {
         child_table: $many_table:literal,
         child_fk: $many_fk:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< include_ $many_name >](
                 &self,
                 parent_id: $crate::relation_queries::RelationIdValue,
@@ -187,7 +187,7 @@ macro_rules! prisma_model_relations {
         table: $one_table:literal,
         fk: $one_fk:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< include_ $one_name >](
                 &self,
                 owner_id: $crate::relation_queries::RelationIdValue,
@@ -201,7 +201,7 @@ macro_rules! prisma_model_relations {
         join_left: $m2m_join_left:literal,
         join_right: $m2m_join_right:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< include_ $m2m_name >](
                 &self,
                 owner_id: $crate::relation_queries::RelationIdValue,
@@ -215,7 +215,7 @@ macro_rules! prisma_model_relations {
         fk: $fk_column:literal,
         nullable: $fk_nullable:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< connect_ $fk_name >](
                 &self,
                 record_id: $crate::relation_queries::RelationIdValue,
@@ -232,7 +232,7 @@ macro_rules! prisma_model_relations {
         left: $join_left:literal,
         right: $join_right:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< connect_ $join_name >](
                 &self,
                 left_id: $crate::relation_queries::RelationIdValue,
@@ -250,7 +250,7 @@ macro_rules! prisma_model_relations {
         child_table: $many_table:literal,
         child_fk: $many_fk:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< include_ $many_name >](
                 &self,
                 parent_id: $crate::relation_queries::RelationIdValue,
@@ -274,7 +274,7 @@ macro_rules! prisma_model_relations {
         table: $one_table:literal,
         fk: $one_fk:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< include_ $one_name >](
                 &self,
                 owner_id: $crate::relation_queries::RelationIdValue,
@@ -299,7 +299,7 @@ macro_rules! prisma_model_relations {
         join_left: $m2m_join_left:literal,
         join_right: $m2m_join_right:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< include_ $m2m_name >](
                 &self,
                 owner_id: $crate::relation_queries::RelationIdValue,
@@ -328,7 +328,7 @@ macro_rules! prisma_model_relations {
         fk: $fk_column:literal,
         nullable: $fk_nullable:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< connect_ $fk_name >](
                 &self,
                 record_id: $crate::relation_queries::RelationIdValue,
@@ -372,7 +372,7 @@ macro_rules! prisma_model_relations {
         left: $join_left:literal,
         right: $join_right:literal
     }) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             async fn [< connect_ $join_name >](
                 &self,
                 left_id: $crate::relation_queries::RelationIdValue,

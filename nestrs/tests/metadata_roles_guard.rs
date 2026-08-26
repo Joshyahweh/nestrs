@@ -18,14 +18,14 @@ struct MetaController;
 impl MetaController {
     #[get("/admin")]
     #[roles("admin")]
-    #[use_guards(DemoXRoleMetadataGuard)]
+    #[use_guards(XRoleMetadataGuard)]
     async fn admin() -> &'static str {
         "admin"
     }
 
     #[get("/user")]
     #[roles("user")]
-    #[use_guards(DemoXRoleMetadataGuard)]
+    #[use_guards(XRoleMetadataGuard)]
     async fn user() -> &'static str {
         "user"
     }

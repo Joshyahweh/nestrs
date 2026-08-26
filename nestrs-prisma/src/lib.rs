@@ -13,7 +13,6 @@ mod macros;
 mod macros_enum;
 mod macros_index;
 mod macros_relation;
-mod macros_sql;
 mod macros_where;
 pub mod mapping;
 pub mod query_optimization;
@@ -23,7 +22,7 @@ pub mod schema_bridge;
 pub mod transaction;
 
 #[doc(hidden)]
-pub use pastey;
+pub use paste;
 
 #[cfg(feature = "sqlx")]
 #[doc(hidden)]
@@ -172,16 +171,6 @@ impl PrismaService {
     /// Lightweight status without hitting the network (always `"ok"` if the service was constructed).
     pub fn health(&self) -> &'static str {
         "ok"
-    }
-
-    /// Direct pool access for advanced queries — chained `.bind(...)` calls, cursors,
-    /// or anything else the raw [`crate::sqlx`] surface offers.
-    ///
-    /// Prefer the `prisma_query_rows!` / `prisma_query_scalar!` / `prisma_execute!`
-    /// macros for everyday parameterized SQL.
-    #[cfg(feature = "sqlx")]
-    pub async fn pool(&self) -> Result<&'static SqlxPool, PrismaError> {
-        ensure_sqlx_pool().await.map_err(PrismaError::PoolInit)
     }
 
     /// Run arbitrary SQL returning a single scalar (trusted SQL only — use parameters in app code).

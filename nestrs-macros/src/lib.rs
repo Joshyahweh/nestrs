@@ -397,41 +397,36 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl nestrs::core::Module for #name {
             fn build() -> (nestrs::core::ProviderRegistry, axum::Router) {
-                // Memoized process-wide: modules imported by multiple importers share one built
-                // instance (NestJS module-instance caching), avoiding duplicate singletons and
-                // duplicate route registration.
-                nestrs::core::__nestrs_memoize_module_build::<#name>(Box::new(|| {
-                    let _module_guard = nestrs::core::__NestrsModuleBuildGuard::push(
-                        std::any::TypeId::of::<#name>(),
-                        std::any::type_name::<#name>(),
-                    );
-                    let mut registry = nestrs::core::ProviderRegistry::new();
-                    let mut router = axum::Router::new();
+                let _module_guard = nestrs::core::__NestrsModuleBuildGuard::push(
+                    std::any::TypeId::of::<#name>(),
+                    std::any::type_name::<#name>(),
+                );
+                let mut registry = nestrs::core::ProviderRegistry::new();
+                let mut router = axum::Router::new();
 
-                    #(#import_builds)*
+                #(#import_builds)*
 
-                    #(
-                        {
-                            let __dm: nestrs::core::DynamicModule = (#imports_dynamic);
-                            registry.absorb_exported(__dm.registry, &__dm.exports);
-                            router = router.merge(__dm.router);
-                        }
-                    )*
+                #(
+                    {
+                        let __dm: nestrs::core::DynamicModule = (#imports_dynamic);
+                        registry.absorb_exported(__dm.registry, &__dm.exports);
+                        router = router.merge(__dm.router);
+                    }
+                )*
 
-                    #(
-                        registry.register::<#providers>();
-                    )*
+                #(
+                    registry.register::<#providers>();
+                )*
 
-                    #(
-                        registry.register::<#microservices_ref>();
-                    )*
+                #(
+                    registry.register::<#microservices_ref>();
+                )*
 
-                    #(
-                        router = <#controllers as nestrs::core::Controller>::register(router, &registry);
-                    )*
+                #(
+                    router = <#controllers as nestrs::core::Controller>::register(router, &registry);
+                )*
 
-                    (registry, router)
-                }))
+                (registry, router)
             }
 
             fn exports() -> Vec<std::any::TypeId> {
@@ -595,17 +590,8 @@ pub fn injectable(attr: TokenStream, item: TokenStream) -> TokenStream {
                         .to_compile_error();
                 };
 
-                // Trait-object bindings (`arc_dyn: Arc<dyn MyTrait>`) resolve the registered
-                // `Arc<dyn MyTrait>` value (register it via `ProviderRegistry::register_use_factory`
-                // with `T = Arc<dyn MyTrait>`).
-                if matches!(inner, Type::TraitObject(_)) {
-                    quote! {
-                        #field_ident: (*registry.get::<#inner>()).clone()
-                    }
-                } else {
-                    quote! {
-                        #field_ident: registry.get::<#inner>()
-                    }
+                quote! {
+                    #field_ident: registry.get::<#inner>()
                 }
             });
 
@@ -2645,46 +2631,47 @@ pub fn schedule_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
 
-    let mut cron_stmts = Vec::new();
-    let mut interval_stmts = Vec::new();
-    for t in tasks {
-        let name = t.name;
-        match t.kind {
-            TaskKind::Cron(expr) => {
-                cron_stmts.push(quote! {
-                    let job = nestrs::schedule::Job::new_async(#expr, {
-                        let service = service.clone();
-                        move |_uuid, _lock| {
+    let job_stmts = tasks
+        .into_iter()
+        .map(|t| {
+            let name = t.name;
+            match t.kind {
+                TaskKind::Cron(expr) => {
+                    quote! {
+                        let job = nestrs::schedule::Job::new_async(#expr, {
                             let service = service.clone();
-                            ::std::boxed::Box::pin(async move {
-                                let _ = service.#name().await;
-                            })
-                        }
-                    })
-                    .unwrap_or_else(|e| panic!("failed to register cron job: {e:?}"));
-                    jobs.push(job);
-                });
-            }
-            TaskKind::Interval(ms) => {
-                // Native tokio timer loop — tokio-cron-scheduler truncates repeat
-                // periods to whole seconds, which breaks sub-second intervals.
-                interval_stmts.push(quote! {
-                    futures.push(::std::boxed::Box::pin(async move {
-                        let mut timer = nestrs::schedule::tokio::time::interval(
+                            move |_uuid, _lock| {
+                                let service = service.clone();
+                                ::std::boxed::Box::pin(async move {
+                                    let _ = service.#name().await;
+                                })
+                            }
+                        })
+                        .unwrap_or_else(|e| panic!("failed to register cron job: {e:?}"));
+                        jobs.push(job);
+                    }
+                }
+                TaskKind::Interval(ms) => {
+                    quote! {
+                        let job = nestrs::schedule::Job::new_repeated_async(
                             ::std::time::Duration::from_millis(#ms as u64),
-                        );
-                        timer.set_missed_tick_behavior(
-                            nestrs::schedule::tokio::time::MissedTickBehavior::Skip,
-                        );
-                        loop {
-                            timer.tick().await;
-                            let _ = service.#name().await;
-                        }
-                    }));
-                });
+                            {
+                                let service = service.clone();
+                                move |_uuid, _lock| {
+                                    let service = service.clone();
+                                    ::std::boxed::Box::pin(async move {
+                                        let _ = service.#name().await;
+                                    })
+                                }
+                            },
+                        )
+                        .unwrap_or_else(|e| panic!("failed to register interval job: {e:?}"));
+                        jobs.push(job);
+                    }
+                }
             }
-        }
-    }
+        })
+        .collect::<Vec<_>>();
 
     let expanded = quote! {
         #item_impl
@@ -2693,25 +2680,13 @@ pub fn schedule_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             fn __nestrs_build(registry: &nestrs::core::ProviderRegistry) -> ::std::vec::Vec<nestrs::schedule::Job> {
                 let service = registry.get::<#self_ty>();
                 let mut jobs = ::std::vec::Vec::<nestrs::schedule::Job>::new();
-                #(#cron_stmts)*
+                #(#job_stmts)*
                 jobs
-            }
-
-            fn __nestrs_build_intervals(
-                registry: &nestrs::core::ProviderRegistry,
-            ) -> ::std::vec::Vec<nestrs::schedule::IntervalFuture> {
-                let service = registry.get::<#self_ty>();
-                let mut futures = ::std::vec::Vec::<nestrs::schedule::IntervalFuture>::new();
-                #(#interval_stmts)*
-                futures
             }
 
             #[nestrs::schedule::linkme::distributed_slice(nestrs::schedule::SCHEDULE_REGISTRATIONS)]
             static __NES_SCHEDULE: nestrs::schedule::ScheduleRegistration =
-                nestrs::schedule::ScheduleRegistration {
-                    build: __nestrs_build,
-                    build_intervals: __nestrs_build_intervals,
-                };
+                nestrs::schedule::ScheduleRegistration { build: __nestrs_build };
         };
     };
 

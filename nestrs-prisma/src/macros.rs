@@ -25,7 +25,7 @@ macro_rules! __prisma_create_input {
         $crate::__prisma_create_input!($Model; id: i64, $( $f : $t ),+);
     };
     ($Model:ident; id: i64, $( $f:ident : $t:ty ),+ $(,)?) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
             pub struct [< $Model CreateInput >] {
                 $( pub $f : $t ),+
@@ -33,7 +33,7 @@ macro_rules! __prisma_create_input {
         }
     };
     ($Model:ident; $( $f:ident : $t:ty ),+ $(,)?) => {
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
             pub struct [< $Model CreateInput >] {
                 $( pub $f : $t ),+
@@ -793,7 +793,7 @@ macro_rules! __prisma_upsert_impl {
         $create:ident,
         $update:ident
     ) => {
-        $crate::pastey::paste! {{
+        $crate::paste::paste! {{
             if [< Prisma $Model Repository >]::find_unique($self, $w.clone())
                 .await?
                 .is_some()
@@ -969,7 +969,7 @@ macro_rules! prisma_model {
         ::core::compile_error!("prisma_model! requires the `sqlx` feature on nestrs-prisma");
 
         #[cfg(feature = "sqlx")]
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
             #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, $crate::sqlx::FromRow)]
             pub struct $Model {
                 $( pub $field : $ftype ),*
@@ -980,7 +980,7 @@ macro_rules! prisma_model {
         $crate::__prisma_where_types!($Model; $( ($field, $ftype) ),*);
 
         #[cfg(feature = "sqlx")]
-        $crate::pastey::paste! {
+        $crate::paste::paste! {
 
             #[derive(Debug, Clone, Default)]
             pub struct [< $Model Update >] {

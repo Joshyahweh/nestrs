@@ -888,7 +888,9 @@ async fn production_errors_sanitize_by_default_when_nestrs_env_production() {
         .expect("router should serve request");
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let bytes = to_bytes(response.into_body(), 64 * 1024).await.expect("read body");
+    let bytes = to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("read body");
     let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!(v["message"], "An unexpected error occurred");
 }
@@ -914,7 +916,9 @@ async fn disable_production_errors_keeps_detail_when_nestrs_env_production() {
         .expect("router should serve request");
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let bytes = to_bytes(response.into_body(), 64 * 1024).await.expect("read body");
+    let bytes = to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("read body");
     let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     // The fixture handler's message must survive when sanitization is disabled.
     assert_ne!(v["message"], "An unexpected error occurred");

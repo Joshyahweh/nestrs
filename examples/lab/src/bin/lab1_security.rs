@@ -3,8 +3,8 @@
 //!
 //! Run: `cargo run -p lab --bin lab1_security` then attack it with curl.
 
-use nestrs::ClientIp;
 use nestrs::prelude::*;
+use nestrs::ClientIp;
 use nestrs::{CsrfProtectionConfig, RateLimitOptions, SecurityHeaders};
 use std::sync::Arc;
 
@@ -31,7 +31,9 @@ impl SecController {
     #[get("/token")]
     pub async fn token(cookies: tower_cookies::Cookies) -> String {
         let token = uuid_like();
-        let cookie = tower_cookies::Cookie::build(("csrf_token", token.clone())).path("/").into();
+        let cookie = tower_cookies::Cookie::build(("csrf_token", token.clone()))
+            .path("/")
+            .into();
         cookies.add(cookie);
         token
     }
@@ -52,7 +54,10 @@ impl SecController {
 /// Cheap random-ish token for lab purposes only.
 fn uuid_like() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     format!("lab-{nanos:x}")
 }
 
@@ -66,7 +71,12 @@ async fn main() {
         .use_cookies()
         .use_csrf_protection(CsrfProtectionConfig::default())
         .use_security_headers(SecurityHeaders::default())
-        .use_rate_limit(RateLimitOptions::builder().max_requests(6).window_secs(3).build())
+        .use_rate_limit(
+            RateLimitOptions::builder()
+                .max_requests(6)
+                .window_secs(3)
+                .build(),
+        )
         .listen_graceful(3100)
         .await;
 }

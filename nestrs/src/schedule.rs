@@ -77,19 +77,19 @@ impl ScheduleRuntime {
         if !cron_jobs.is_empty() {
             let sched = tokio_cron_scheduler::JobScheduler::new()
                 .await
-                .unwrap_or_else(|e| {
-                    panic!("ScheduleRuntime: failed to create scheduler: {e:?}")
-                });
+                .unwrap_or_else(|e| panic!("ScheduleRuntime: failed to create scheduler: {e:?}"));
 
             for job in cron_jobs {
-                let _ = sched.add(job).await.unwrap_or_else(|e| {
-                    panic!("ScheduleRuntime: failed to add job: {e:?}")
-                });
+                let _ = sched
+                    .add(job)
+                    .await
+                    .unwrap_or_else(|e| panic!("ScheduleRuntime: failed to add job: {e:?}"));
             }
 
-            sched.start().await.unwrap_or_else(|e| {
-                panic!("ScheduleRuntime: failed to start scheduler: {e:?}")
-            });
+            sched
+                .start()
+                .await
+                .unwrap_or_else(|e| panic!("ScheduleRuntime: failed to start scheduler: {e:?}"));
 
             let mut guard = self.scheduler.lock().await;
             if guard.is_none() {

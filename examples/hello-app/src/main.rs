@@ -174,10 +174,7 @@ async fn main() {
     let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // `mode=rwc` lets sqlx create the database file on first run instead of failing with
     // "unable to open database file".
-    let db_url = format!(
-        "sqlite:{}?mode=rwc",
-        base.join("dev.db").display()
-    );
+    let db_url = format!("sqlite:{}?mode=rwc", base.join("dev.db").display());
     let schema_path = base.join("prisma/schema.prisma");
 
     let _ = PrismaModule::for_root_with_options(

@@ -36,7 +36,11 @@ async fn main() {
     tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
     // A: join{room} as FIRST frame on a fresh connection
-    scenario("A: join{room} first frame", vec![r#"{"event":"join","data":{"room":"lab"}}"#]).await;
+    scenario(
+        "A: join{room} first frame",
+        vec![r#"{"event":"join","data":{"room":"lab"}}"#],
+    )
+    .await;
 
     // B: echo then join{room} (original failing order)
     scenario(

@@ -44,7 +44,11 @@ async fn main() {
         .await
         .expect("send join p2");
     for i in 0..2 {
-        let reply = ws.next().await.expect("pipelined reply").expect("no ws error");
+        let reply = ws
+            .next()
+            .await
+            .expect("pipelined reply")
+            .expect("no ws error");
         println!("PIPELINED REPLY {i}: {reply}");
     }
 
@@ -57,11 +61,17 @@ async fn main() {
     ws2.send(Message::text(r#"{"event":"join","data":{}}"#))
         .await
         .expect("send join #2");
-    let reply = ws2.next().await.expect("join reply 2").expect("no ws error");
+    let reply = ws2
+        .next()
+        .await
+        .expect("join reply 2")
+        .expect("no ws error");
     println!("JOIN REPLY 2 (after reconnect): {reply}");
 
     // 4. garbage payload must not kill the connection
-    ws2.send(Message::text("this is not json")).await.expect("send garbage");
+    ws2.send(Message::text("this is not json"))
+        .await
+        .expect("send garbage");
     ws2.send(Message::text(r#"{"event":"echo","data":"still alive"}"#))
         .await
         .expect("send after garbage");

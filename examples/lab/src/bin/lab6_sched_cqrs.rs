@@ -6,8 +6,8 @@
 
 use async_trait::async_trait;
 use nestrs::prelude::*;
-use nestrs_cqrs::{CqrsError, Query, QueryBus, QueryHandler};
 use nestrs_cqrs::{Command, CommandBus, CommandHandler};
+use nestrs_cqrs::{CqrsError, Query, QueryBus, QueryHandler};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

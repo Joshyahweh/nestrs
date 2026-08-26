@@ -32,7 +32,11 @@ impl RedisTransportOptions {
     }
 
     fn effective_prefix(&self) -> &str {
-        match self.prefix.as_deref().map(|p| p.trim().trim_end_matches('.')) {
+        match self
+            .prefix
+            .as_deref()
+            .map(|p| p.trim().trim_end_matches('.'))
+        {
             Some("") | None => Self::DEFAULT_PREFIX,
             Some(p) => p,
         }

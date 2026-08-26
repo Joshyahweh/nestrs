@@ -54,9 +54,9 @@ impl RtController {
     }
 
     #[get("/ticks")]
-    pub async fn ticks()
-    -> nestrs::sse::Sse<impl futures_util::Stream<Item = Result<nestrs::sse::Event, std::io::Error>>>
-    {
+    pub async fn ticks() -> nestrs::sse::Sse<
+        impl futures_util::Stream<Item = Result<nestrs::sse::Event, std::io::Error>>,
+    > {
         nestrs::sse::Sse::new(tick_stream()).keep_alive(nestrs::sse::KeepAlive::default())
     }
 }

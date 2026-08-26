@@ -46,11 +46,15 @@ async fn main() {
     let mut failures = 0usize;
     let mut first_failure: Option<String> = None;
     for i in 0..ITERATIONS {
-        let (mut ws, _) =
-            tokio_tungstenite::connect_async("ws://127.0.0.1:3700/lab/ws").await.expect("hs");
+        let (mut ws, _) = tokio_tungstenite::connect_async("ws://127.0.0.1:3700/lab/ws")
+            .await
+            .expect("hs");
         ws.send(Message::text(ECHO_FRAME)).await.expect("send");
         let r1 = ws.next().await.expect("reply").expect("ok");
-        assert!(r1.to_text().unwrap().contains("echo"), "iter {i}: echo broken");
+        assert!(
+            r1.to_text().unwrap().contains("echo"),
+            "iter {i}: echo broken"
+        );
 
         ws.send(Message::text(JOIN_FRAME)).await.expect("send");
         let r2 = tokio::time::timeout(std::time::Duration::from_secs(1), ws.next()).await;

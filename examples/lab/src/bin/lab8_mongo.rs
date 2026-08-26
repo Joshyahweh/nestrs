@@ -21,7 +21,9 @@ pub struct MongoController;
 #[routes(state = MongoService)]
 impl MongoController {
     #[get("/ping")]
-    pub async fn ping(State(svc): State<Arc<MongoService>>) -> Result<Json<serde_json::Value>, HttpException> {
+    pub async fn ping(
+        State(svc): State<Arc<MongoService>>,
+    ) -> Result<Json<serde_json::Value>, HttpException> {
         svc.ping()
             .await
             .map(|_| Json(serde_json::json!({ "ok": true })))
@@ -46,7 +48,9 @@ impl MongoController {
             .insert_one(doc! { "name": name })
             .await
             .map_err(|e| BadRequestException::new(e.to_string()))?;
-        Ok(Json(serde_json::json!({ "inserted_id": res.inserted_id.to_string() })))
+        Ok(Json(
+            serde_json::json!({ "inserted_id": res.inserted_id.to_string() }),
+        ))
     }
 
     #[get("/users/:name")]
@@ -64,7 +68,9 @@ impl MongoController {
             .await
             .map_err(|e| BadRequestException::new(e.to_string()))?;
         Ok(Json(match found {
-            Some(d) => serde_json::json!({ "found": true, "name": d.get_str("name").unwrap_or("") }),
+            Some(d) => {
+                serde_json::json!({ "found": true, "name": d.get_str("name").unwrap_or("") })
+            }
             None => serde_json::json!({ "found": false }),
         }))
     }
@@ -83,11 +89,17 @@ impl MongoController {
             .await
             .map_err(|e| BadRequestException::new(e.to_string()))?;
         let mut names = Vec::new();
-        while let Some(d) = cursor.try_next().await.map_err(|e| BadRequestException::new(e.to_string()))? {
+        while let Some(d) = cursor
+            .try_next()
+            .await
+            .map_err(|e| BadRequestException::new(e.to_string()))?
+        {
             names.push(d.get_str("name").unwrap_or("").to_string());
         }
         names.sort();
-        Ok(Json(serde_json::json!({ "count": names.len(), "names": names })))
+        Ok(Json(
+            serde_json::json!({ "count": names.len(), "names": names }),
+        ))
     }
 
     #[delete("/users/:name")]

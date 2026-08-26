@@ -66,7 +66,9 @@ async fn main() {
 }
 
 async fn run_sequence(url: &str) {
-    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.expect("handshake");
+    let (mut ws, _) = tokio_tungstenite::connect_async(url)
+        .await
+        .expect("handshake");
     ws.send(Message::text(
         r#"{"event":"echo","data":{"msg":"hello over ws"}}"#,
     ))

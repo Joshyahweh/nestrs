@@ -96,7 +96,10 @@ async fn openapi_json(State(options): State<OpenApiOptions>) -> Json<Value> {
 
         let entry = paths.entry(spec_path.clone()).or_insert_with(|| json!({}));
         let obj = entry.as_object_mut().expect("path entry object");
-        obj.insert(method, build_operation(&full_path, &spec_path, &r, &options));
+        obj.insert(
+            method,
+            build_operation(&full_path, &spec_path, &r, &options),
+        );
     }
 
     let mut root = Map::new();
@@ -323,7 +326,10 @@ mod tests {
     #[test]
     fn extract_params_reads_templates() {
         assert_eq!(extract_path_params("/lab/v1/cat/hello/{name}"), ["name"]);
-        assert_eq!(extract_path_params("/v1/u/{user_id}/posts/{id}"), ["user_id", "id"]);
+        assert_eq!(
+            extract_path_params("/v1/u/{user_id}/posts/{id}"),
+            ["user_id", "id"]
+        );
         assert!(extract_path_params("/v1/o/ping").is_empty());
     }
 }

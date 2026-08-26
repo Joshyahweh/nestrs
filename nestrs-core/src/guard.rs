@@ -5,6 +5,8 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
+use crate::ProviderRegistry;
+
 /// Failure returned from [`CanActivate::can_activate`]; becomes a JSON error body (401 / 403).
 #[derive(Debug, Clone)]
 pub enum GuardError {

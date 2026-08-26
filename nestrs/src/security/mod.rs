@@ -7,7 +7,7 @@ pub mod csrf;
 
 pub use auth::{
     parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
-    OptionalBearerToken, XRoleMetadataGuard,
+    DemoXRoleMetadataGuard, OptionalBearerToken,
 };
 
 #[cfg(feature = "csrf")]

@@ -121,7 +121,13 @@ impl MqttTransport {
                             let _ = tx.send(s);
                         }
                     }
-                    Err(_) => break,
+                    // Poll errors are usually transient connection issues; rumqttc reconnects
+                    // internally on subsequent polls. Breaking here would permanently kill the
+                    // transport (pending requests hang, all future sends fail).
+                    Err(e) => {
+                        tracing::warn!(target: "nestrs_microservices", "mqtt eventloop error (will retry): {e}");
+                        continue;
+                    }
                     _ => {}
                 }
             }
@@ -328,6 +334,7 @@ impl MqttMicroserviceServer {
                                                 ok: true,
                                                 payload: Some(v),
                                                 error: None,
+                                                correlation_id: req.correlation_id.clone(),
                                             },
                                             Err(e) => WireResponse {
                                                 ok: false,
@@ -336,6 +343,7 @@ impl MqttMicroserviceServer {
                                                     message: e.message,
                                                     details: e.details,
                                                 }),
+                                                correlation_id: req.correlation_id.clone(),
                                             },
                                         };
                                         if let Ok(bytes) = serde_json::to_vec(&wire) {
@@ -355,7 +363,13 @@ impl MqttMicroserviceServer {
                                 }
                             }
                         }
-                        Err(_) => break,
+                        // Poll errors are transient (broker restarts, network blips);
+                        // rumqttc reconnects internally. Breaking would end the server
+                        // silently while callers still expect delivery.
+                        Err(e) => {
+                            tracing::warn!(target: "nestrs_microservices", "mqtt server eventloop error (will retry): {e}");
+                            continue;
+                        }
                         _ => {}
                     }
                 }

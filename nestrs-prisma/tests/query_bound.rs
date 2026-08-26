@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 
-use nestrs_prisma::{prisma_execute, prisma_query_rows, prisma_query_scalar, PrismaModule, PrismaOptions, PrismaService};
+use nestrs_prisma::{
+    prisma_execute, prisma_query_rows, prisma_query_scalar, PrismaModule, PrismaOptions,
+    PrismaService,
+};
 use sqlx::FromRow;
 
 #[derive(Debug, FromRow)]

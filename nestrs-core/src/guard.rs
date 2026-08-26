@@ -52,7 +52,7 @@ impl IntoResponse for GuardError {
 ///
 /// Guards are resolved **once at route-registration time**, so they can hold dependencies
 /// (JWT keys, repositories, caches). Override [`Self::resolve`] to pull them from the
-/// [`crate::ProviderRegistry`]; keep the `Default` supertrait satisfied with a placeholder unit struct:
+/// [`ProviderRegistry`]; keep the `Default` supertrait satisfied with a placeholder unit struct:
 ///
 /// ```ignore
 /// #[derive(Default)]
@@ -75,7 +75,7 @@ pub trait CanActivate: Default + Send + Sync + 'static {
     ///
     /// The default implementation returns [`Default::default()`] (a stateless guard).
     /// Override this to construct a stateful guard from the application's
-    /// [`crate::ProviderRegistry`] (NestJS dependency-injected guards).
+    /// [`ProviderRegistry`] (NestJS dependency-injected guards).
     fn resolve(_registry: &crate::ProviderRegistry) -> Self
     where
         Self: Sized,

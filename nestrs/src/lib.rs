@@ -2974,7 +2974,10 @@ pub struct HttpException {
     pub status: axum::http::StatusCode,
     pub message: String,
     pub error: String,
-    pub details: Option<serde_json::Value>,
+    /// Boxed to keep `HttpException` small: handlers return
+    /// `Result<T, HttpException>` everywhere, and a large error variant trips
+    /// `clippy::result_large_err` (>= 128 bytes) under `-D warnings`.
+    pub details: Option<Box<serde_json::Value>>,
 }
 
 impl HttpException {
@@ -2991,8 +2994,8 @@ impl HttpException {
         }
     }
 
-    pub fn with_details(mut self, details: serde_json::Value) -> Self {
-        self.details = Some(details);
+    pub fn with_details(mut self, details: impl Into<Box<serde_json::Value>>) -> Self {
+        self.details = Some(details.into());
         self
     }
 }
@@ -3124,7 +3127,7 @@ impl axum::response::IntoResponse for HttpException {
             "error": &self.error,
         });
         if let Some(ref details) = self.details {
-            payload["errors"] = details.clone();
+            payload["errors"] = (**details).clone();
         }
         let body = match serde_json::to_vec(&payload) {
             Ok(b) => b,

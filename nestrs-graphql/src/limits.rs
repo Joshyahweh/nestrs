@@ -12,6 +12,15 @@ pub const DEFAULT_MAX_DEPTH: usize = 64;
 pub const DEFAULT_MAX_COMPLEXITY: usize = 512;
 
 /// Apply default depth and complexity limits to a schema under construction.
+///
+/// Wrap the builder before `.finish()`:
+///
+/// ```ignore
+/// let schema = nestrs::graphql::with_default_limits(
+///     Schema::build(QueryRoot, EmptyMutation, EmptySubscription),
+/// )
+/// .finish();
+/// ```
 pub fn with_default_limits<Q, M, S>(builder: SchemaBuilder<Q, M, S>) -> SchemaBuilder<Q, M, S> {
     builder
         .limit_depth(DEFAULT_MAX_DEPTH)

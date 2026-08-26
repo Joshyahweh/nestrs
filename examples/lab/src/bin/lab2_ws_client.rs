@@ -86,6 +86,7 @@ async fn main() {
 /// Mirrors `lab2_realtime.rs` so this binary can boot the app without a subprocess.
 mod lab2_realtime {
     use nestrs::prelude::*;
+    use nestrs::ws::WsClient;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static CONNECTIONS: AtomicU64 = AtomicU64::new(0);

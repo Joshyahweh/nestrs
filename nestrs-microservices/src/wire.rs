@@ -49,7 +49,9 @@ pub struct WireRequest {
 pub struct WireError {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<Value>,
+    // Boxed to mirror `HttpException::details`, keeping error types small
+    // (serializes identically over the wire).
+    pub details: Option<Box<Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

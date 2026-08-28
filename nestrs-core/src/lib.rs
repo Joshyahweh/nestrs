@@ -21,11 +21,11 @@ mod platform;
 mod route_registry;
 mod strategy;
 
+pub use admin_snapshot::AdminSnapshot;
 pub use database::DatabasePing;
 pub use discovery::DiscoveryService;
 pub use execution_context::{ExecutionContext, HostType, HttpExecutionArguments};
 pub use guard::{CanActivate, GuardError};
-pub use admin_snapshot::AdminSnapshot;
 pub use metadata::MetadataRegistry;
 pub use module_ref::ModuleRef;
 pub use pipe::PipeTransform;
@@ -318,7 +318,12 @@ impl ProviderRegistry {
     pub fn provider_summaries(&self) -> Vec<ProviderSummary> {
         self.order
             .iter()
-            .filter_map(|id| self.entries.get(id).map(|e| ProviderSummary { type_name: e.type_name, scope: e.scope }))
+            .filter_map(|id| {
+                self.entries.get(id).map(|e| ProviderSummary {
+                    type_name: e.type_name,
+                    scope: e.scope,
+                })
+            })
             .collect()
     }
 

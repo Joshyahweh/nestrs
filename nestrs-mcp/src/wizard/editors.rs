@@ -163,7 +163,10 @@ mod tests {
                     p.starts_with(&home),
                     "{editor:?} path {p:?} should start with home {home:?}"
                 );
-                assert!(p.ends_with(suffix), "{editor:?} path should end with {suffix}");
+                assert!(
+                    p.ends_with(suffix),
+                    "{editor:?} path should end with {suffix}"
+                );
             }
         }
     }

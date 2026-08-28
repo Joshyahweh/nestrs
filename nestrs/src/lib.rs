@@ -73,6 +73,8 @@ pub use nestrs_openapi;
 #[cfg(feature = "ws")]
 pub use nestrs_ws as ws;
 
+#[cfg(feature = "admin")]
+pub mod admin;
 mod cache;
 mod client_ip;
 mod config;
@@ -95,8 +97,6 @@ mod mvc;
 pub mod otel;
 mod pipes;
 pub mod problem;
-#[cfg(feature = "admin")]
-pub mod admin;
 #[cfg(feature = "queues")]
 pub mod queues;
 mod raw_body;
@@ -2161,11 +2161,12 @@ impl NestApplication {
         }
         let registry = self.registry.clone();
         let version = env!("CARGO_PKG_VERSION");
-        let provider: std::sync::Arc<dyn Fn() -> std::sync::Arc<nestrs_core::AdminSnapshot> + Send + Sync> =
-            std::sync::Arc::new(move || {
-                let providers = registry.provider_summaries();
-                nestrs_core::AdminSnapshot::capture(providers, version)
-            });
+        let provider: std::sync::Arc<
+            dyn Fn() -> std::sync::Arc<nestrs_core::AdminSnapshot> + Send + Sync,
+        > = std::sync::Arc::new(move || {
+            let providers = registry.provider_summaries();
+            nestrs_core::AdminSnapshot::capture(providers, version)
+        });
         crate::admin::AdminHandle {
             addr: opts.addr,
             token: opts.token,

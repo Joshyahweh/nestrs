@@ -35,9 +35,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
-use nestrs_mcp::wizard::{
-    editors::Editor, InitArgs, WizardOutcome, WizardTransport, WriteOutcome,
-};
+use nestrs_mcp::wizard::{editors::Editor, InitArgs, WizardOutcome, WizardTransport, WriteOutcome};
 use serde_json::Value as JsonValue;
 use tempfile::TempDir;
 
@@ -233,7 +231,10 @@ fn coordinator_with_yes_writes_all_detected_editors() {
         "Cursor should be selected, got: {:?}",
         outcome.selected
     );
-    assert!(!outcome.dry_run, "without --no-interactive, dry_run is false");
+    assert!(
+        !outcome.dry_run,
+        "without --no-interactive, dry_run is false"
+    );
     assert_eq!(outcome.transport, WizardTransport::Stdio);
 
     let cursor_write = outcome
@@ -448,7 +449,10 @@ fn coordinator_flipping_transport_reports_updated_and_changes_shape() {
     );
 
     let v: JsonValue = serde_json::from_str(&fs::read_to_string(&cursor_path).unwrap()).unwrap();
-    assert_eq!(v["mcpServers"]["nestrs"]["url"], "http://127.0.0.1:7777/mcp");
+    assert_eq!(
+        v["mcpServers"]["nestrs"]["url"],
+        "http://127.0.0.1:7777/mcp"
+    );
     assert!(v["mcpServers"]["nestrs"].get("command").is_none());
 }
 
@@ -539,8 +543,7 @@ fn coordinator_dry_run_does_not_write_files() {
         // 2+ detected → "multiple detected" error, which is the
         // *correct* dry-run behavior per the plan. Confirm the error
         // and move on.
-        let err = nestrs_mcp::wizard::run(args(false, true, WizardTransport::Stdio))
-            .unwrap_err();
+        let err = nestrs_mcp::wizard::run(args(false, true, WizardTransport::Stdio)).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("multiple editors detected"), "got: {msg}");
         // File on disk is still untouched.
@@ -548,8 +551,7 @@ fn coordinator_dry_run_does_not_write_files() {
         assert_eq!(s, "");
     } else {
         // Single detected → dry-run completes.
-        let outcome =
-            nestrs_mcp::wizard::run(args(false, true, WizardTransport::Stdio)).unwrap();
+        let outcome = nestrs_mcp::wizard::run(args(false, true, WizardTransport::Stdio)).unwrap();
         assert!(outcome.dry_run);
         // File on disk is still untouched.
         let s = fs::read_to_string(&codex_path).unwrap();
@@ -591,12 +593,8 @@ fn wizard_public_surface_re_exports_expected_types() {
     let _: Option<WizardOutcome> = None;
     // The merge functions are unit-tested in their own modules but we
     // assert they're reachable from the public path here.
-    let _: fn(
-        &Path,
-        &str,
-        &str,
-        JsonValue,
-    ) -> anyhow::Result<WriteOutcome> = nestrs_mcp::wizard::json_merge::merge_json;
+    let _: fn(&Path, &str, &str, JsonValue) -> anyhow::Result<WriteOutcome> =
+        nestrs_mcp::wizard::json_merge::merge_json;
 }
 
 // ------------------------------------------------------------------
@@ -611,8 +609,7 @@ fn cli_top_level_transport_flag_is_still_accepted() {
         #[arg(long, default_value = "stdio")]
         transport: String,
     }
-    let parsed =
-        <CliMirror as clap::Parser>::try_parse_from(["nestrs-mcp", "--transport", "http"])
-            .expect("top-level --transport should still parse");
+    let parsed = <CliMirror as clap::Parser>::try_parse_from(["nestrs-mcp", "--transport", "http"])
+        .expect("top-level --transport should still parse");
     assert_eq!(parsed.transport, "http");
 }

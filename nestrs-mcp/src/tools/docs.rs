@@ -91,7 +91,12 @@ impl DocsTools {
             parse_scope(&args.scope),
             args.limit,
         );
-        Ok(Json(hits.into_iter().map(serde_json::to_value).filter_map(Result::ok).collect()))
+        Ok(Json(
+            hits.into_iter()
+                .map(serde_json::to_value)
+                .filter_map(Result::ok)
+                .collect(),
+        ))
     }
 
     #[tool(
@@ -112,7 +117,13 @@ impl DocsTools {
             Some(s) => crate::docs::changelog_entries(&s),
             None => Vec::new(),
         };
-        Ok(Json(entries.into_iter().map(serde_json::to_value).filter_map(Result::ok).collect()))
+        Ok(Json(
+            entries
+                .into_iter()
+                .map(serde_json::to_value)
+                .filter_map(Result::ok)
+                .collect(),
+        ))
     }
 
     #[tool(

@@ -209,9 +209,16 @@ fn list_modules_returns_both_module_structs() {
     let parsed = parse_workspace(tmp.path()).expect("parse should succeed");
     let names: Vec<&str> = parsed.modules.iter().map(|m| m.name.as_str()).collect();
     assert!(names.contains(&"AppModule"), "AppModule missing: {names:?}");
-    assert!(names.contains(&"OtherModule"), "OtherModule missing: {names:?}");
+    assert!(
+        names.contains(&"OtherModule"),
+        "OtherModule missing: {names:?}"
+    );
 
-    let app = parsed.modules.iter().find(|m| m.name == "AppModule").unwrap();
+    let app = parsed
+        .modules
+        .iter()
+        .find(|m| m.name == "AppModule")
+        .unwrap();
     assert!(app.controllers.contains(&"UserController".to_string()));
     assert!(app.controllers.contains(&"OrderController".to_string()));
     assert!(app.providers.contains(&"UserService".to_string()));
@@ -249,7 +256,10 @@ fn list_controllers_returns_both_with_prefixes() {
         .find(|c| c.name == "UserController")
         .unwrap();
     assert_eq!(user.prefix.as_deref(), Some("/users"));
-    assert!(user.version.is_none(), "no kv form was set on this controller");
+    assert!(
+        user.version.is_none(),
+        "no kv form was set on this controller"
+    );
     assert!(user.host.is_none());
     assert_eq!(user.controller_guards, vec!["AuthGuard".to_string()]);
     assert_eq!(user.state.as_deref(), Some("AppState"));
@@ -273,10 +283,18 @@ fn get_controller_returns_routes_guards_and_state() {
         .iter()
         .find(|c| c.name == "UserController")
         .unwrap();
-    assert_eq!(user.routes.len(), 16, "expected all 16 routes parsed, got {}", user.routes.len());
+    assert_eq!(
+        user.routes.len(),
+        16,
+        "expected all 16 routes parsed, got {}",
+        user.routes.len()
+    );
     let methods: Vec<&str> = user.routes.iter().map(|r| r.method.as_str()).collect();
     for m in &["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] {
-        assert!(methods.contains(m), "missing HTTP method {m} in {methods:?}");
+        assert!(
+            methods.contains(m),
+            "missing HTTP method {m} in {methods:?}"
+        );
     }
     assert!(methods.contains(&"ALL"), "ALL method missing: {methods:?}");
 }
@@ -327,14 +345,25 @@ fn list_routes_returns_routes_from_all_controllers() {
         .iter()
         .find(|c| c.name == "UserController")
         .unwrap();
-    assert!(user.routes.len() >= 16, "user has {} routes", user.routes.len());
+    assert!(
+        user.routes.len() >= 16,
+        "user has {} routes",
+        user.routes.len()
+    );
     let order = parsed
         .controllers
         .iter()
         .find(|c| c.name == "OrderController")
         .unwrap();
-    assert!(!order.routes.is_empty(), "order has {} routes", order.routes.len());
-    assert!(order.routes.iter().any(|r| r.method == "GET" && r.path == "/"));
+    assert!(
+        !order.routes.is_empty(),
+        "order has {} routes",
+        order.routes.len()
+    );
+    assert!(order
+        .routes
+        .iter()
+        .any(|r| r.method == "GET" && r.path == "/"));
 }
 
 #[test]
@@ -353,7 +382,11 @@ fn get_route_finds_by_method_and_path() {
         .expect("POST / route missing");
     assert_eq!(create.handler, "create");
     assert!(
-        create.body_type.as_deref().map(|s| s.contains("ValidatedBody")).unwrap_or(false),
+        create
+            .body_type
+            .as_deref()
+            .map(|s| s.contains("ValidatedBody"))
+            .unwrap_or(false),
         "POST body_type should mention ValidatedBody, got: {:?}",
         create.body_type
     );
@@ -367,35 +400,65 @@ fn get_route_finds_by_method_and_path() {
         .iter()
         .find(|r| r.method == "GET" && r.path == "/admin")
         .expect("GET /admin missing");
-    assert_eq!(admin.version.as_deref(), Some("v2"), "ver override captured");
+    assert_eq!(
+        admin.version.as_deref(),
+        Some("v2"),
+        "ver override captured"
+    );
 
     let guarded = user
         .routes
         .iter()
         .find(|r| r.handler == "guarded")
         .expect("guarded route missing");
-    assert_eq!(guarded.guards, vec!["RoleGuard".to_string(), "RateLimitGuard".to_string()]);
+    assert_eq!(
+        guarded.guards,
+        vec!["RoleGuard".to_string(), "RateLimitGuard".to_string()]
+    );
 
     let intercepted = user
         .routes
         .iter()
         .find(|r| r.handler == "intercepted")
         .unwrap();
-    assert_eq!(intercepted.interceptors, vec!["LoggingInterceptor".to_string()]);
+    assert_eq!(
+        intercepted.interceptors,
+        vec!["LoggingInterceptor".to_string()]
+    );
 
     let piped = user.routes.iter().find(|r| r.handler == "piped").unwrap();
     assert_eq!(piped.pipes, vec!["TrimPipe".to_string()]);
 
-    let filtered = user.routes.iter().find(|r| r.handler == "filtered").unwrap();
+    let filtered = user
+        .routes
+        .iter()
+        .find(|r| r.handler == "filtered")
+        .unwrap();
     assert_eq!(filtered.filters, vec!["AllExceptionsFilter".to_string()]);
 
     let meta = user.routes.iter().find(|r| r.handler == "meta").unwrap();
-    assert_eq!(meta.metadata.get("feature_flag").map(|s| s.as_str()), Some("experimental"));
-    assert_eq!(meta.metadata.get("roles").map(|s| s.as_str()), Some("admin,ops"));
+    assert_eq!(
+        meta.metadata.get("feature_flag").map(|s| s.as_str()),
+        Some("experimental")
+    );
+    assert_eq!(
+        meta.metadata.get("roles").map(|s| s.as_str()),
+        Some("admin,ops")
+    );
 
-    let op = user.routes.iter().find(|r| r.handler == "openapi_doc").unwrap();
-    assert_eq!(op.metadata.get("openapi.summary").map(|s| s.as_str()), Some("List users"));
-    assert_eq!(op.metadata.get("openapi.operation_id").map(|s| s.as_str()), Some("listUsers"));
+    let op = user
+        .routes
+        .iter()
+        .find(|r| r.handler == "openapi_doc")
+        .unwrap();
+    assert_eq!(
+        op.metadata.get("openapi.summary").map(|s| s.as_str()),
+        Some("List users")
+    );
+    assert_eq!(
+        op.metadata.get("openapi.operation_id").map(|s| s.as_str()),
+        Some("listUsers")
+    );
 }
 
 #[test]
@@ -406,8 +469,15 @@ fn list_dtos_returns_both_with_field_counts() {
     assert!(names.contains(&"CreateUserDto"));
     assert!(names.contains(&"AddressDto"));
 
-    let create = parsed.dtos.iter().find(|d| d.name == "CreateUserDto").unwrap();
-    assert_eq!(create.field_count, 7, "name + email + website + age + username + address + bio = 7");
+    let create = parsed
+        .dtos
+        .iter()
+        .find(|d| d.name == "CreateUserDto")
+        .unwrap();
+    assert_eq!(
+        create.field_count, 7,
+        "name + email + website + age + username + address + bio = 7"
+    );
 
     let addr = parsed.dtos.iter().find(|d| d.name == "AddressDto").unwrap();
     assert!(addr.allow_unknown_fields);
@@ -434,8 +504,14 @@ fn list_schedules_catches_interval_and_cron() {
     let tmp = make_workspace();
     let parsed = parse_workspace(tmp.path()).unwrap();
     let names: Vec<&str> = parsed.schedules.iter().map(|s| s.as_str()).collect();
-    assert!(names.iter().any(|s| s.contains("interval::tick")), "interval::tick in {names:?}");
-    assert!(names.iter().any(|s| s.contains("cron::hourly")), "cron::hourly in {names:?}");
+    assert!(
+        names.iter().any(|s| s.contains("interval::tick")),
+        "interval::tick in {names:?}"
+    );
+    assert!(
+        names.iter().any(|s| s.contains("cron::hourly")),
+        "cron::hourly in {names:?}"
+    );
 }
 
 #[test]
@@ -444,7 +520,9 @@ fn list_event_handlers_catches_on_event() {
     let parsed = parse_workspace(tmp.path()).unwrap();
     let names: Vec<&str> = parsed.event_handlers.iter().map(|s| s.as_str()).collect();
     assert!(
-        names.iter().any(|s| s.contains("on_event::on_user_created")),
+        names
+            .iter()
+            .any(|s| s.contains("on_event::on_user_created")),
         "on_event::on_user_created in {names:?}"
     );
 }
@@ -468,7 +546,10 @@ fn parse_errors_on_missing_cargo_toml() {
     let result = parse_workspace(tmp.path());
     let err = result.expect_err("should error on no Cargo.toml");
     let msg = format!("{err:?}");
-    assert!(msg.contains("Cargo.toml") || msg.contains("workspace"), "got: {msg}");
+    assert!(
+        msg.contains("Cargo.toml") || msg.contains("workspace"),
+        "got: {msg}"
+    );
 }
 
 #[test]
@@ -476,7 +557,10 @@ fn parse_errors_on_nonexistent_workspace() {
     let result = parse_workspace(Path::new("/this/path/does/not/exist/anywhere"));
     let err = result.expect_err("should error on nonexistent path");
     let msg = format!("{err}");
-    assert!(msg.contains("does not exist") || msg.contains("not found"), "got: {msg}");
+    assert!(
+        msg.contains("does not exist") || msg.contains("not found"),
+        "got: {msg}"
+    );
 }
 
 #[test]
@@ -548,7 +632,11 @@ pub struct AppModule;
         .warnings
         .iter()
         .any(|w| w.kind == "module" && w.message.contains("unrecognized"));
-    assert!(has_warning, "expected an unrecognized module warning, got: {:?}", parsed.warnings);
+    assert!(
+        has_warning,
+        "expected an unrecognized module warning, got: {:?}",
+        parsed.warnings
+    );
 }
 
 #[test]
@@ -599,8 +687,16 @@ fn stats_reflect_workspace_shape() {
     assert_eq!(parsed.stats.controllers, 2);
     assert_eq!(parsed.stats.providers, 2);
     assert_eq!(parsed.stats.dtos, 2);
-    assert!(parsed.stats.routes >= 17, "expected >= 17 routes, got {}", parsed.stats.routes);
-    assert!(parsed.stats.warnings == 0, "expected no warnings, got {}", parsed.stats.warnings);
+    assert!(
+        parsed.stats.routes >= 17,
+        "expected >= 17 routes, got {}",
+        parsed.stats.routes
+    );
+    assert!(
+        parsed.stats.warnings == 0,
+        "expected no warnings, got {}",
+        parsed.stats.warnings
+    );
     assert_eq!(parsed.schedules.len(), 2);
     assert_eq!(parsed.event_handlers.len(), 1);
     assert_eq!(parsed.queue_processors.len(), 1);

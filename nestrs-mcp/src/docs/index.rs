@@ -86,9 +86,7 @@ impl DocStore {
             .filter_map(Result::ok)
         {
             let p = entry.path();
-            if p.is_file()
-                && p.file_name().and_then(|s| s.to_str()) == Some("README.md")
-            {
+            if p.is_file() && p.file_name().and_then(|s| s.to_str()) == Some("README.md") {
                 if let Ok(src) = load(p.to_path_buf(), DocKind::Readme) {
                     readmes.push(src);
                 }
@@ -131,10 +129,7 @@ fn walkdir_has_readme(root: &Path) -> bool {
         .max_depth(3)
         .into_iter()
         .filter_map(Result::ok)
-        .any(|e| {
-            e.file_type().is_file()
-                && e.file_name().to_str() == Some("README.md")
-        })
+        .any(|e| e.file_type().is_file() && e.file_name().to_str() == Some("README.md"))
 }
 
 /// Convenience: return the changelog section headings (the lines starting
@@ -149,7 +144,11 @@ pub fn changelog_entries(source: &DocSource) -> Vec<ChangelogEntry> {
         if let Some(rest) = trimmed.strip_prefix("## [") {
             if let Some(end) = rest.find(']') {
                 let version = rest[..end].to_string();
-                let date = rest[end + 1..].trim().trim_start_matches('-').trim().to_string();
+                let date = rest[end + 1..]
+                    .trim()
+                    .trim_start_matches('-')
+                    .trim()
+                    .to_string();
                 if !version.is_empty() {
                     out.push(ChangelogEntry { version, date });
                 }

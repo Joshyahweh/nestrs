@@ -171,15 +171,14 @@ pub fn run(args: InitArgs) -> Result<WizardOutcome> {
             WizardTransport::Http => {
                 // We're sync but `spawn` is async. We use `tokio::runtime::Handle::current()`
                 // so the wizard still works inside the `#[tokio::main]` binary.
-                let handle = tokio::runtime::Handle::try_current()
-                    .context("--start-http-server requires a tokio runtime; the binary always provides one")?;
+                let handle = tokio::runtime::Handle::try_current().context(
+                    "--start-http-server requires a tokio runtime; the binary always provides one",
+                )?;
                 let bin = std::env::current_exe().context("failed to resolve current_exe")?;
                 server = Some(handle.block_on(spawn::spawn_http_server(&bin, &http_addr))?);
             }
             WizardTransport::Stdio => {
-                eprintln!(
-                    "--start-http-server has no effect with --transport=stdio; ignoring."
-                );
+                eprintln!("--start-http-server has no effect with --transport=stdio; ignoring.");
             }
         }
     }

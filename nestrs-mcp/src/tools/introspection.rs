@@ -154,7 +154,11 @@ impl IntrospectionTools {
         let controllers: Vec<_> = parsed
             .controllers
             .into_iter()
-            .filter(|c| args.module.as_deref().is_none_or(|m| c.module_path.contains(m)))
+            .filter(|c| {
+                args.module
+                    .as_deref()
+                    .is_none_or(|m| c.module_path.contains(m))
+            })
             .map(jsonify)
             .collect();
         Ok(Json(controllers))
@@ -332,7 +336,9 @@ impl IntrospectionTools {
         Parameters(args): Parameters<WorkspacePath>,
     ) -> Result<Json<Vec<serde_json::Value>>, ErrorData> {
         let parsed = parse(&args.workspace_path).map_err(into_rmcp)?;
-        Ok(Json(parsed.event_handlers.into_iter().map(jsonify).collect()))
+        Ok(Json(
+            parsed.event_handlers.into_iter().map(jsonify).collect(),
+        ))
     }
 
     #[tool(
@@ -345,7 +351,9 @@ impl IntrospectionTools {
         Parameters(args): Parameters<WorkspacePath>,
     ) -> Result<Json<Vec<serde_json::Value>>, ErrorData> {
         let parsed = parse(&args.workspace_path).map_err(into_rmcp)?;
-        Ok(Json(parsed.queue_processors.into_iter().map(jsonify).collect()))
+        Ok(Json(
+            parsed.queue_processors.into_iter().map(jsonify).collect(),
+        ))
     }
 }
 

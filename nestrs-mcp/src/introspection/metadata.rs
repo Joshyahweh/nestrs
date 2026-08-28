@@ -43,20 +43,38 @@ pub enum Validator {
     IsBoolean,
     IsUrl,
     IsOptional,
-    MinLength { value: u64 },
-    MaxLength { value: u64 },
-    Length { min: u64, max: u64 },
-    Min { value: String },
-    Max { value: String },
-    Matches { pattern: String },
-    Contains { substring: String },
+    MinLength {
+        value: u64,
+    },
+    MaxLength {
+        value: u64,
+    },
+    Length {
+        min: u64,
+        max: u64,
+    },
+    Min {
+        value: String,
+    },
+    Max {
+        value: String,
+    },
+    Matches {
+        pattern: String,
+    },
+    Contains {
+        substring: String,
+    },
     ValidateNested,
     Expose,
     Exclude,
     /// An attribute the parser doesn't recognize. Surfaced so the model can
     /// mention it ("this field has `MyCustomValidator` — I don't know what
     /// that does") rather than silently dropping it.
-    Unknown { name: String, args: String },
+    Unknown {
+        name: String,
+        args: String,
+    },
 }
 
 /// Summary of a DTO struct, suitable for listing.

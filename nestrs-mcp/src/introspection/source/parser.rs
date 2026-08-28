@@ -254,7 +254,6 @@ impl syn::parse::Parse for RoutesArgsParser {
     }
 }
 
-
 /// If this `impl` is `#[routes(SomeName)] impl SomeName { ... }`,
 /// return the target controller name so callers can attach the routes
 /// to the right ControllerSummary. Returns `None` for other impls.
@@ -293,7 +292,9 @@ pub(super) fn parse_module_impl(
 ) -> Option<ModuleSummary> {
     let attr = find_attr(&item_impl.attrs, NESTRS_ATTR_MODULE)?;
     let name = match &*item_impl.self_ty {
-        Type::Path(TypePath { path, .. }) => last_path_segment(path).unwrap_or_else(|| "<anon>".into()),
+        Type::Path(TypePath { path, .. }) => {
+            last_path_segment(path).unwrap_or_else(|| "<anon>".into())
+        }
         _ => "<anon>".into(),
     };
     let mut imports = Vec::new();
@@ -364,9 +365,7 @@ pub(super) fn parse_controller_impl(
             // `#[controller("/users")]` is a bare path literal;
             // `#[controller(prefix = "/users", version = "v2", host = "...")]` is kv.
             if let Meta::List(list) = &attr.meta {
-                let parsed = list
-                    .parse_args::<proc_macro2::TokenStream>()
-                    .ok();
+                let parsed = list.parse_args::<proc_macro2::TokenStream>().ok();
                 if let Some(ts) = parsed {
                     // Try to parse as a single string literal first.
                     if let Ok(lit) = syn::parse2::<LitStr>(ts.clone()) {
@@ -466,14 +465,8 @@ pub(super) fn parse_route_method(
             None => continue,
         };
         match ident.as_str() {
-            NESTRS_ATTR_GET
-            | NESTRS_ATTR_POST
-            | NESTRS_ATTR_PUT
-            | NESTRS_ATTR_PATCH
-            | NESTRS_ATTR_DELETE
-            | NESTRS_ATTR_OPTIONS
-            | NESTRS_ATTR_HEAD
-            | NESTRS_ATTR_ALL => {
+            NESTRS_ATTR_GET | NESTRS_ATTR_POST | NESTRS_ATTR_PUT | NESTRS_ATTR_PATCH
+            | NESTRS_ATTR_DELETE | NESTRS_ATTR_OPTIONS | NESTRS_ATTR_HEAD | NESTRS_ATTR_ALL => {
                 let path = attr.parse_args::<syn::LitStr>().ok()?.value();
                 found = Some((method_name_to_http(ident.as_str()), path));
             }
@@ -743,7 +736,10 @@ pub(super) fn parse_schedule_attr(attrs: &[Attribute]) -> Option<&'static str> {
             }
         }
     }
-    if attrs.iter().any(|a| a.path().is_ident(NESTRS_ATTR_SCHEDULE_ROUTES)) {
+    if attrs
+        .iter()
+        .any(|a| a.path().is_ident(NESTRS_ATTR_SCHEDULE_ROUTES))
+    {
         return Some("schedule_routes");
     }
     None
@@ -757,7 +753,10 @@ pub(super) fn parse_event_attr(attrs: &[Attribute]) -> Option<&'static str> {
             }
         }
     }
-    if attrs.iter().any(|a| a.path().is_ident(NESTRS_ATTR_EVENT_ROUTES)) {
+    if attrs
+        .iter()
+        .any(|a| a.path().is_ident(NESTRS_ATTR_EVENT_ROUTES))
+    {
         return Some("event_routes");
     }
     None
@@ -897,12 +896,18 @@ fn read_min_max(attr: &Attribute) -> Option<(u64, u64)> {
     let inner: syn::ExprTuple = attr.parse_args().ok()?;
     let mut iter = inner.elems.iter();
     let min = match iter.next()? {
-        syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(i), .. }) => i.base10_parse().ok()?,
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(i),
+            ..
+        }) => i.base10_parse().ok()?,
         _ => return None,
     };
     let _comma: Option<syn::Token![,]> = iter.next().map(|_| Default::default());
     let max = match iter.next()? {
-        syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(i), .. }) => i.base10_parse().ok()?,
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(i),
+            ..
+        }) => i.base10_parse().ok()?,
         _ => return None,
     };
     Some((min, max))

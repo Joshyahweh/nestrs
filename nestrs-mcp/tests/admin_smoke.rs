@@ -109,8 +109,7 @@ async fn admin_port_serves_health_routes_providers() {
     );
 
     // 4) Drive the same endpoints through the MCP runtime client.
-    let c = AdminClient::new(base.clone(), Some("smoke-token".into()))
-        .expect("client build");
+    let c = AdminClient::new(base.clone(), Some("smoke-token".into())).expect("client build");
     let h = c.health().await.expect("client health");
     assert_eq!(h.status, "ok");
     let p = c.providers().await.expect("client providers");

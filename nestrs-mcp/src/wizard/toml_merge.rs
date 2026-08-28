@@ -157,11 +157,23 @@ name = "gpt-5"
         assert_eq!(outcome, WriteOutcome::Added);
 
         let s = std::fs::read_to_string(&path).unwrap();
-        assert!(s.contains("[mcp_servers.other]"), "other entry preserved: {s}");
-        assert!(s.contains("command = \"x\""), "other command preserved: {s}");
+        assert!(
+            s.contains("[mcp_servers.other]"),
+            "other entry preserved: {s}"
+        );
+        assert!(
+            s.contains("command = \"x\""),
+            "other command preserved: {s}"
+        );
         assert!(s.contains("[model]"), "unrelated table preserved: {s}");
-        assert!(s.contains("name = \"gpt-5\""), "unrelated key preserved: {s}");
-        assert!(s.contains("[mcp_servers.nestrs]"), "nestrs entry added: {s}");
+        assert!(
+            s.contains("name = \"gpt-5\""),
+            "unrelated key preserved: {s}"
+        );
+        assert!(
+            s.contains("[mcp_servers.nestrs]"),
+            "nestrs entry added: {s}"
+        );
     }
 
     #[test]
@@ -179,7 +191,10 @@ url = "http://old/mcp"
         let outcome = merge_toml(&path, "mcp_servers", "nestrs", stdio_inline()).unwrap();
         assert_eq!(outcome, WriteOutcome::Updated);
         let s = std::fs::read_to_string(&path).unwrap();
-        assert!(s.contains("command = \"nestrs-mcp\""), "stdio shape written: {s}");
+        assert!(
+            s.contains("command = \"nestrs-mcp\""),
+            "stdio shape written: {s}"
+        );
         assert!(!s.contains("http://old"), "old URL gone: {s}");
     }
 
@@ -204,10 +219,7 @@ url = "http://old/mcp"
         std::fs::write(&path, "this is = = not valid toml [[[").unwrap();
         let err = merge_toml(&path, "mcp_servers", "nestrs", stdio_inline()).unwrap_err();
         let msg = format!("{err:?}");
-        assert!(
-            msg.contains("failed to parse existing TOML"),
-            "got: {msg}"
-        );
+        assert!(msg.contains("failed to parse existing TOML"), "got: {msg}");
     }
 
     #[test]

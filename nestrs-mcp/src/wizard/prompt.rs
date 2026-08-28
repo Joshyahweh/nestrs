@@ -97,7 +97,9 @@ pub fn select_editors(
                 return Err(anyhow!("aborted by user"));
             }
             _ => {
-                eprintln!("unrecognized answer `{trimmed}` — press enter to confirm or `cancel` to abort");
+                eprintln!(
+                    "unrecognized answer `{trimmed}` — press enter to confirm or `cancel` to abort"
+                );
             }
         }
     }
@@ -145,7 +147,10 @@ pub fn select_transport(args: &InitArgs, is_tty: bool) -> Result<WizardTransport
         return Ok(args.transport);
     }
     loop {
-        print!("Transport? [stdio/http] (default {}): ", transport_label(args.transport));
+        print!(
+            "Transport? [stdio/http] (default {}): ",
+            transport_label(args.transport)
+        );
         let _ = io::stdout().flush();
         let mut input = String::new();
         io::stdin().read_line(&mut input).map_err(io_to_anyhow)?;

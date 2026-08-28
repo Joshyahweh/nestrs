@@ -41,7 +41,9 @@ pub enum Error {
 impl From<SourceParserError> for Error {
     fn from(e: SourceParserError) -> Self {
         match e {
-            SourceParserError::WorkspaceNotFound(s) => Error::WorkspaceNotFound(s.to_string_lossy().into_owned()),
+            SourceParserError::WorkspaceNotFound(s) => {
+                Error::WorkspaceNotFound(s.to_string_lossy().into_owned())
+            }
             SourceParserError::NotADirectory(s) => {
                 Error::InvalidArgument(format!("{} is not a directory", s.to_string_lossy()))
             }
@@ -49,9 +51,7 @@ impl From<SourceParserError> for Error {
                 Error::InvalidArgument(format!("no Cargo.toml in {}", s.to_string_lossy()))
             }
             SourceParserError::Io { source, .. } => Error::Io(source),
-            SourceParserError::Syn { file, message } => {
-                Error::Parse(format!("{file}: {message}"))
-            }
+            SourceParserError::Syn { file, message } => Error::Parse(format!("{file}: {message}")),
         }
     }
 }
@@ -67,4 +67,3 @@ impl From<SnapshotError> for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-

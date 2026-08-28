@@ -43,7 +43,8 @@ fn finds_hits_in_changelog_and_readme() {
     assert!(!hits.is_empty(), "expected at least one hit for 'sentinel'");
     // The top hit should mention sentinel.
     assert!(
-        hits.iter().any(|h| h.context.iter().any(|l| l.contains("sentinel"))),
+        hits.iter()
+            .any(|h| h.context.iter().any(|l| l.contains("sentinel"))),
         "expected at least one hit context line containing 'sentinel'"
     );
 }

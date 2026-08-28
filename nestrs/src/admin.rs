@@ -71,7 +71,10 @@ impl AdminHandle {
     pub async fn serve(self) -> std::io::Result<()> {
         let token = self.token.clone();
         let provider = self.snapshot_provider.clone();
-        let state = AdminState { token, snapshot_provider: provider };
+        let state = AdminState {
+            token,
+            snapshot_provider: provider,
+        };
         let app: Router = Router::new()
             .route("/__nestrs/health", get(get_health))
             .route("/__nestrs/providers", get(get_providers))
@@ -149,7 +152,14 @@ async fn get_health(
     headers: axum::http::HeaderMap,
     Query(q): Query<TokenQuery>,
 ) -> Response {
-    match authed(State(state), headers, Query(q), axum::http::Request::new(())).await {
+    match authed(
+        State(state),
+        headers,
+        Query(q),
+        axum::http::Request::new(()),
+    )
+    .await
+    {
         Ok(snap) => {
             let body = serde_json::json!({
                 "status": "ok",
@@ -167,10 +177,20 @@ async fn get_providers(
     headers: axum::http::HeaderMap,
     Query(q): Query<TokenQuery>,
 ) -> Response {
-    match authed(State(state), headers, Query(q), axum::http::Request::new(())).await {
+    match authed(
+        State(state),
+        headers,
+        Query(q),
+        axum::http::Request::new(()),
+    )
+    .await
+    {
         Ok(snap) => {
-            let providers: Vec<ProviderSummaryJson> =
-                snap.providers.iter().map(ProviderSummaryJson::from).collect();
+            let providers: Vec<ProviderSummaryJson> = snap
+                .providers
+                .iter()
+                .map(ProviderSummaryJson::from)
+                .collect();
             (StatusCode::OK, Json(providers)).into_response()
         }
         Err(r) => r,
@@ -182,10 +202,16 @@ async fn get_routes(
     headers: axum::http::HeaderMap,
     Query(q): Query<TokenQuery>,
 ) -> Response {
-    match authed(State(state), headers, Query(q), axum::http::Request::new(())).await {
+    match authed(
+        State(state),
+        headers,
+        Query(q),
+        axum::http::Request::new(()),
+    )
+    .await
+    {
         Ok(snap) => {
-            let routes: Vec<RouteInfoJson> =
-                snap.routes.iter().map(RouteInfoJson::from).collect();
+            let routes: Vec<RouteInfoJson> = snap.routes.iter().map(RouteInfoJson::from).collect();
             (StatusCode::OK, Json(routes)).into_response()
         }
         Err(r) => r,
@@ -197,7 +223,14 @@ async fn get_openapi(
     headers: axum::http::HeaderMap,
     Query(q): Query<TokenQuery>,
 ) -> Response {
-    match authed(State(state), headers, Query(q), axum::http::Request::new(())).await {
+    match authed(
+        State(state),
+        headers,
+        Query(q),
+        axum::http::Request::new(()),
+    )
+    .await
+    {
         Ok(_snap) => {
             // The real OpenAPI doc comes from the `openapi` feature. When
             // that's not enabled, return a minimal summary so callers can
@@ -226,7 +259,10 @@ impl From<&ProviderSummary> for ProviderSummaryJson {
             nestrs_core::ProviderScope::Transient => "transient",
             nestrs_core::ProviderScope::Request => "request",
         };
-        Self { type_name: p.type_name.to_string(), scope: scope.to_string() }
+        Self {
+            type_name: p.type_name.to_string(),
+            scope: scope.to_string(),
+        }
     }
 }
 

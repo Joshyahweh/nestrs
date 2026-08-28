@@ -78,7 +78,9 @@ impl ScaffoldTools {
     ) -> Result<Json<serde_json::Value>, ErrorData> {
         let report = new_project(&PathBuf::from(args.path), &args.name, &args.transports)
             .map_err(into_rmcp)?;
-        Ok(Json(serde_json::to_value(report).unwrap_or(serde_json::Value::Null)))
+        Ok(Json(
+            serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+        ))
     }
 
     #[tool(
@@ -92,7 +94,9 @@ impl ScaffoldTools {
     ) -> Result<Json<serde_json::Value>, ErrorData> {
         let report = create_module(&PathBuf::from(args.path), &args.name, &args.transports)
             .map_err(into_rmcp)?;
-        Ok(Json(serde_json::to_value(report).unwrap_or(serde_json::Value::Null)))
+        Ok(Json(
+            serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+        ))
     }
 
     #[tool(
@@ -111,7 +115,9 @@ impl ScaffoldTools {
             args.transport,
         )
         .map_err(into_rmcp)?;
-        Ok(Json(serde_json::to_value(report).unwrap_or(serde_json::Value::Null)))
+        Ok(Json(
+            serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+        ))
     }
 
     #[tool(
@@ -123,9 +129,11 @@ impl ScaffoldTools {
         &self,
         Parameters(args): Parameters<CreateDtoArgs>,
     ) -> Result<Json<serde_json::Value>, ErrorData> {
-        let report = create_dto(&PathBuf::from(args.path), &args.name, &args.fields)
-            .map_err(into_rmcp)?;
-        Ok(Json(serde_json::to_value(report).unwrap_or(serde_json::Value::Null)))
+        let report =
+            create_dto(&PathBuf::from(args.path), &args.name, &args.fields).map_err(into_rmcp)?;
+        Ok(Json(
+            serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+        ))
     }
 
     #[tool(
@@ -143,7 +151,9 @@ impl ScaffoldTools {
             transports: args.transports,
         };
         let report = generate_crud(&PathBuf::from(args.path), &spec).map_err(into_rmcp)?;
-        Ok(Json(serde_json::to_value(report).unwrap_or(serde_json::Value::Null)))
+        Ok(Json(
+            serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+        ))
     }
 }
 

@@ -12,11 +12,7 @@ use crate::Result;
 
 use super::ScaffoldReport;
 
-pub fn new_project(
-    path: &Path,
-    name: &str,
-    transports: &[String],
-) -> Result<ScaffoldReport> {
+pub fn new_project(path: &Path, name: &str, transports: &[String]) -> Result<ScaffoldReport> {
     if name.is_empty() {
         return Err(crate::Error::InvalidArgument(
             "project name must be non-empty".into(),
@@ -67,10 +63,7 @@ fn render_cargo_toml(name: &str, transports: &[String]) -> String {
     let transport_features = if transports.is_empty() {
         String::new()
     } else {
-        let list: Vec<String> = transports
-            .iter()
-            .map(|t| format!("\"{t}\""))
-            .collect();
+        let list: Vec<String> = transports.iter().map(|t| format!("\"{t}\"")).collect();
         format!(", features = [{}]", list.join(", "))
     };
     format!(
@@ -88,8 +81,7 @@ tokio = {{ version = "1", features = ["full"] }}
 
 fn render_main_rs(name: &str, _transports: &[String]) -> String {
     let module = name.replace('-', "_");
-    (
-        r#"use nestrs::{NestFactory, NestApplication};
+    (r#"use nestrs::{NestFactory, NestApplication};
 
 mod app;
 
@@ -99,8 +91,7 @@ async fn main() -> anyhow::Result<()> {
     app.listen("0.0.0.0:3000".parse()?).await?;
     Ok(())
 }
-"#
-    )
+"#)
     .replace("mod app;", &format!("mod {module};"))
 }
 

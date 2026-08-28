@@ -134,8 +134,7 @@ mod tests {
         let path = temp.path().join("mcp.json");
         let outcome = merge_json(&path, "mcpServers", "nestrs", stdio_value()).unwrap();
         assert_eq!(outcome, WriteOutcome::Created);
-        let v: Value =
-            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["nestrs"], stdio_value());
     }
 
@@ -156,7 +155,10 @@ mod tests {
         assert_eq!(outcome, WriteOutcome::Added);
 
         let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(v["mcpServers"]["other"], serde_json::json!({ "command": "x" }));
+        assert_eq!(
+            v["mcpServers"]["other"],
+            serde_json::json!({ "command": "x" })
+        );
         assert_eq!(
             v["mcpServers"]["third"],
             serde_json::json!({ "url": "http://y" })
@@ -212,10 +214,7 @@ mod tests {
         fs::write(&path, "{ this is not json").unwrap();
         let err = merge_json(&path, "mcpServers", "nestrs", stdio_value()).unwrap_err();
         let msg = format!("{err:?}");
-        assert!(
-            msg.contains("failed to parse existing JSON"),
-            "got: {msg}"
-        );
+        assert!(msg.contains("failed to parse existing JSON"), "got: {msg}");
     }
 
     #[test]

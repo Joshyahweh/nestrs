@@ -8,11 +8,7 @@ use crate::Result;
 
 use super::ScaffoldReport;
 
-pub fn create_module(
-    path: &Path,
-    name: &str,
-    _transports: &[String],
-) -> Result<ScaffoldReport> {
+pub fn create_module(path: &Path, name: &str, _transports: &[String]) -> Result<ScaffoldReport> {
     if !is_safe_ident(name) {
         return Err(crate::Error::InvalidArgument(format!(
             "module name `{name}` is not a valid Rust ident"
@@ -23,7 +19,11 @@ pub fn create_module(
     let mut report = ScaffoldReport::new();
 
     write(&dir.join("mod.rs"), &render_mod_rs(name), &mut report)?;
-    write(&dir.join("controller.rs"), &render_controller(name), &mut report)?;
+    write(
+        &dir.join("controller.rs"),
+        &render_controller(name),
+        &mut report,
+    )?;
     write(&dir.join("service.rs"), &render_service(name), &mut report)?;
 
     // Register the new module in the parent `lib.rs`/`main.rs`/`mod.rs`.
@@ -118,6 +118,8 @@ pub struct {cap}Service {{}}
 
 fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
-    let Some(first) = chars.next() else { return String::new() };
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
     first.to_ascii_uppercase().to_string() + chars.as_str()
 }

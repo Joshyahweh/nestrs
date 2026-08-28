@@ -18,8 +18,8 @@ pub mod source;
 pub use metadata::{DtoField, DtoSummary, Validator};
 pub use registry::{LiveProviderSummary, LiveRouteSummary, SnapshotError};
 pub use source::{
-    ControllerSummary, ModuleSummary, ParsedWorkspace, ParserWarning, ProviderSummary, RouteSummary,
-    SourceParser, WorkspaceStats,
+    ControllerSummary, ModuleSummary, ParsedWorkspace, ParserWarning, ProviderSummary,
+    RouteSummary, SourceParser, WorkspaceStats,
 };
 
 use std::path::Path;

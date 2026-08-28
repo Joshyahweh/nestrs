@@ -282,9 +282,7 @@ impl SourceParser {
     ) {
         match item {
             syn::Item::Impl(item_impl) => {
-                if let Some(module) =
-                    parser::parse_module_impl(item_impl, file, warnings)
-                {
+                if let Some(module) = parser::parse_module_impl(item_impl, file, warnings) {
                     modules.push(module);
                 }
                 // `#[routes(X)] impl X { ... }` — attach routes to the
@@ -295,15 +293,11 @@ impl SourceParser {
                 // to the legacy `parse_controller_impl` path when no
                 // struct-level controller was found.
                 if let Some(target) = parser::parse_routes_target(item_impl) {
-                    let (state, controller_guards) =
-                        parser::parse_routes_args(item_impl);
+                    let (state, controller_guards) = parser::parse_routes_args(item_impl);
                     for method in &item_impl.items {
                         if let syn::ImplItem::Fn(m) = method {
                             if let Some(r) = parser::parse_route_method(m, warnings) {
-                                if let Some(c) = controllers
-                                    .iter_mut()
-                                    .find(|c| c.name == target)
-                                {
+                                if let Some(c) = controllers.iter_mut().find(|c| c.name == target) {
                                     c.routes.push(r);
                                     *route_count += 1;
                                     // Back-fill from `#[routes(...)]` so the
@@ -315,8 +309,7 @@ impl SourceParser {
                                         c.state = state.clone();
                                     }
                                     if c.controller_guards.is_empty() {
-                                        c.controller_guards =
-                                            controller_guards.clone();
+                                        c.controller_guards = controller_guards.clone();
                                     }
                                 }
                             }
@@ -330,9 +323,7 @@ impl SourceParser {
                 }
             }
             syn::Item::Struct(item_struct) => {
-                if let Some(module) =
-                    parser::parse_module_struct(item_struct, file, warnings)
-                {
+                if let Some(module) = parser::parse_module_struct(item_struct, file, warnings) {
                     modules.push(module);
                 }
                 if let Some(controller) =
@@ -340,9 +331,7 @@ impl SourceParser {
                 {
                     controllers.push(controller);
                 }
-                if let Some(dto) =
-                    parser::parse_dto_struct(item_struct, file, warnings)
-                {
+                if let Some(dto) = parser::parse_dto_struct(item_struct, file, warnings) {
                     dtos.push(dto);
                 }
                 if parser::is_injectable_struct(item_struct) {

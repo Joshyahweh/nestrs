@@ -41,7 +41,9 @@ impl RuntimeTools {
     ) -> Result<Json<serde_json::Value>, ErrorData> {
         let c = client(&args).map_err(into_rmcp)?;
         let h: crate::runtime::AdminHealth = c.health().await.map_err(into_rmcp)?;
-        Ok(Json(serde_json::to_value(h).unwrap_or(serde_json::Value::Null)))
+        Ok(Json(
+            serde_json::to_value(h).unwrap_or(serde_json::Value::Null),
+        ))
     }
 
     #[tool(
@@ -55,7 +57,9 @@ impl RuntimeTools {
     ) -> Result<Json<serde_json::Value>, ErrorData> {
         let c = client(&args).map_err(into_rmcp)?;
         let r: crate::runtime::AdminRoutes = c.routes().await.map_err(into_rmcp)?;
-        Ok(Json(serde_json::to_value(r).unwrap_or(serde_json::Value::Null)))
+        Ok(Json(
+            serde_json::to_value(r).unwrap_or(serde_json::Value::Null),
+        ))
     }
 
     #[tool(
@@ -69,7 +73,9 @@ impl RuntimeTools {
     ) -> Result<Json<serde_json::Value>, ErrorData> {
         let c = client(&args).map_err(into_rmcp)?;
         let p: crate::runtime::AdminProviders = c.providers().await.map_err(into_rmcp)?;
-        Ok(Json(serde_json::to_value(p).unwrap_or(serde_json::Value::Null)))
+        Ok(Json(
+            serde_json::to_value(p).unwrap_or(serde_json::Value::Null),
+        ))
     }
 }
 

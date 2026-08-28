@@ -59,7 +59,11 @@ impl DocSearcher {
             .filter_map(|s| score(s, &terms))
             .collect();
 
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         hits.truncate(limit);
         hits
     }
@@ -86,7 +90,11 @@ fn score(source: &DocSource, terms: &[String]) -> Option<DocHit> {
         }
         if line_score > 0.0 {
             total += line_score;
-            if best_line.as_ref().map(|(_, s)| line_score > *s).unwrap_or(true) {
+            if best_line
+                .as_ref()
+                .map(|(_, s)| line_score > *s)
+                .unwrap_or(true)
+            {
                 best_line = Some((i, line_score));
             }
         }

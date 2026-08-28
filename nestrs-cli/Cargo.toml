@@ -14,7 +14,16 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 serde_json = "1"
+# Optional MCP server mount. A future `nestrs mcp` subcommand will
+# re-export the `nestrs_mcp::NestrsMcpServer` here so the CLI can serve
+# stdio/HTTP without spawning a subprocess. Stubbed (off by default) for
+# now so existing CLI builds are unaffected.
+nestrs-mcp = { path = "../nestrs-mcp", version = "0.5.0", optional = true }
 
 [[bin]]
 name = "nestrs"
 path = "src/main.rs"
+
+[features]
+default = []
+mcp = ["dep:nestrs-mcp", "nestrs-mcp/admin"]

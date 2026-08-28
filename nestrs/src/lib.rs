@@ -95,6 +95,8 @@ mod mvc;
 pub mod otel;
 mod pipes;
 pub mod problem;
+#[cfg(feature = "admin")]
+pub mod admin;
 #[cfg(feature = "queues")]
 pub mod queues;
 mod raw_body;
@@ -2144,6 +2146,31 @@ impl NestApplication {
     pub async fn listen_graceful(self, port: u16) {
         self.listen_with_shutdown(port, nestrs_shutdown_signal())
             .await;
+    }
+
+    /// Bind a localhost-only HTTP admin port that exposes the live
+    /// provider / route / metadata registries. Consume the returned
+    /// [`crate::admin::AdminHandle`] via `tokio::spawn(handle.serve())`.
+    ///
+    /// Requires the `admin` Cargo feature. Refuses to bind to a
+    /// non-loopback address when `token` is `None`.
+    #[cfg(feature = "admin")]
+    pub fn use_admin(&self, opts: crate::admin::AdminOptions) -> crate::admin::AdminHandle {
+        if let Err(e) = crate::admin::validate_addr(opts.addr, opts.token.as_deref()) {
+            panic!("{e}");
+        }
+        let registry = self.registry.clone();
+        let version = env!("CARGO_PKG_VERSION");
+        let provider: std::sync::Arc<dyn Fn() -> std::sync::Arc<nestrs_core::AdminSnapshot> + Send + Sync> =
+            std::sync::Arc::new(move || {
+                let providers = registry.provider_summaries();
+                nestrs_core::AdminSnapshot::capture(providers, version)
+            });
+        crate::admin::AdminHandle {
+            addr: opts.addr,
+            token: opts.token,
+            snapshot_provider: provider,
+        }
     }
 }
 

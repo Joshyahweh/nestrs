@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-nestrs = { path = "../../nestrs" }
+nestrs = { path = "../../nestrs", features = ["admin"] }
 nestrs-prisma = { path = "../../nestrs-prisma", features = ["sqlx"] }
 axum.workspace = true
 tokio.workspace = true

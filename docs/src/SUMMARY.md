@@ -7,6 +7,7 @@
 - [Custom decorators (Nest → Rust)](custom-decorators.md)
 - [Fundamentals (DI, scopes, lifecycle)](fundamentals.md)
 - [CLI (nestrs-scaffold)](cli.md)
+- [Model Context Protocol (MCP) server](mcp.md)
 - [Observability](observability.md)
 - [Ecosystem modules](ecosystem.md)
 - [Microservices](microservices.md)

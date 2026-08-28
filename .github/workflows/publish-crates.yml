@@ -105,6 +105,8 @@ jobs:
           publish_pkg nestrs-prisma
           sleep 30
           publish_pkg nestrs-scaffold
+          sleep 30
+          publish_pkg nestrs-mcp
 
   github-release:
     name: GitHub Release

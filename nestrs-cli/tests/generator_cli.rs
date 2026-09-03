@@ -12,10 +12,17 @@ fn unique_tmp_dir(name: &str) -> PathBuf {
 }
 
 fn cli_bin() -> PathBuf {
-    PathBuf::from(
-        std::env::var("CARGO_BIN_EXE_nestrs-cli")
-            .expect("CARGO_BIN_EXE_nestrs-cli is set by Cargo for integration tests"),
-    )
+    // Cargo exposes the binary path as `CARGO_BIN_EXE_<name>`. Newer
+    // toolchains preserve dashes verbatim, so a binary named `nestrs-cli`
+    // gets `CARGO_BIN_EXE_nestrs-cli`. Older toolchains (pre-1.89)
+    // normalized dashes to underscores (`CARGO_BIN_EXE_nestrs_cli`).
+    // Try both so the test works on every supported toolchain.
+    let dash = std::env::var("CARGO_BIN_EXE_nestrs-cli").ok();
+    let underscore = std::env::var("CARGO_BIN_EXE_nestrs_cli").ok();
+    let raw = dash
+        .or(underscore)
+        .expect("CARGO_BIN_EXE_nestrs-cli (or _nestrs_cli) is set by Cargo for integration tests");
+    PathBuf::from(raw)
 }
 
 fn run_cli(args: &[&str]) {

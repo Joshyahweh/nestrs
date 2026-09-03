@@ -23,8 +23,8 @@ name = "nestrs-mcp"
 path = "src/main.rs"
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "0.5.0" }
-nestrs = { path = "../nestrs", version = "0.5.0", optional = true }
+nestrs-core = { path = "../nestrs-core", version = "0.5.1" }
+nestrs = { path = "../nestrs", version = "0.5.1", optional = true }
 
 # MCP SDK — stdio transport is the default (Claude Code, Cursor, VS Code).
 # Streamable HTTP transport is gated behind the `http` feature for hosted use.
@@ -74,10 +74,10 @@ tokio = { version = "1", features = ["full", "process", "io-util", "macros", "rt
 # Live admin-port smoke test needs the `#[injectable]` / `#[module]`
 # proc-macro attributes. The test itself is `#[cfg(feature = "admin")]`
 # so the macro dep is unused when the feature is off — that's fine.
-nestrs-macros = { path = "../nestrs-macros", version = "0.5.0" }
+nestrs-macros = { path = "../nestrs-macros", version = "0.5.1" }
 # `RouteRegistry::clear_for_tests` and friends — only used by the
 # admin-port smoke test to make the route-registry state deterministic.
-nestrs-core = { path = "../nestrs-core", version = "0.5.0", features = ["test-hooks"] }
+nestrs-core = { path = "../nestrs-core", version = "0.5.1", features = ["test-hooks"] }
 
 [features]
 default = ["stdio"]

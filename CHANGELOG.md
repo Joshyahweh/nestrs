@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-03
+
+### Fixed
+
+- **CI test compatibility**: `nestrs-scaffold` integration tests now read the binary path through `std::env::var("CARGO_BIN_EXE_nestrs-cli")` (with an underscore-form fallback for Rust ≤ 1.88, which still normalizes dashes to underscores in build-script env vars). Without the fallback, the test-matrix (1.88) CI job failed with `CARGO_BIN_EXE_nestrs-cli ... NotPresent` on every test.
+- **crates.io publish order**: `publish-crates.yml` now publishes `nestrs-mcp` before `nestrs-scaffold` so that `nestrs-scaffold`'s optional `nestrs-mcp` dependency can be resolved against crates.io. The previous order published `nestrs-scaffold` 11th, which failed with `no matching package named nestrs-mcp found` because `nestrs-mcp` was 12th.
+
+> Note: v0.5.0 was partially published to crates.io (10 of 12 crates). v0.5.1 is the first complete 0.5.x release and supersedes v0.5.0. The v0.5.0 crates remain on crates.io for anyone who pinned to them; v0.5.1 is the recommended upgrade.
+
 ## [0.5.0] - 2026-08-27
 
 ### Added

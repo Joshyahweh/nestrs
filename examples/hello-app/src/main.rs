@@ -209,8 +209,29 @@ async fn main() {
     // e.g. this app serves `GET /platform/v1/api/` and `POST /platform/v1/api/users`.
     // To get the common `/platform/api/v1/...` shape instead, put `api` in the global
     // prefix (`set_global_prefix("platform/api")`) and drop it from `#[controller(prefix)]`.
-    NestFactory::create::<AppModule>()
-        .set_global_prefix("platform")
-        .listen_graceful(3000)
-        .await;
+    let app = NestFactory::create::<AppModule>().set_global_prefix("platform");
+
+    // Spin up the localhost-only admin sidecar that `nestrs-mcp`'s
+    // `get_app_health` / `get_app_routes` / `get_app_providers` tools
+    // hit. Token is optional — without one, the listener still refuses
+    // to bind to anything but loopback AND responds 401 to every
+    // request, so it stays safe even if you bind `0.0.0.0` by accident.
+    let admin_handle = app.use_admin(nestrs::admin::AdminOptions {
+        addr: "127.0.0.1:7777".parse().expect("valid admin addr"),
+        token: std::env::var("NESTRS_ADMIN_TOKEN").ok(),
+    });
+    let admin_task = tokio::spawn(async move {
+        if let Err(e) = admin_handle.serve().await {
+            eprintln!("hello-app admin sidecar exited: {e}");
+        }
+    });
+
+    // Allow the listen port to be overridden via env var so the live
+    // smoke test can coexist with a dev server on 3000.
+    let listen_port: u16 = std::env::var("NESTRS_HELLO_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3000);
+    app.listen_graceful(listen_port).await;
+    admin_task.abort();
 }

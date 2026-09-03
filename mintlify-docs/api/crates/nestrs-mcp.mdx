@@ -1,0 +1,147 @@
+---
+title: "nestrs-mcp: Model Context Protocol server"
+description: "Reference for nestrs-mcp: the NestrsMcpServer tool surface, CLI transport flags, admin-port client, and feature flags."
+---
+
+`nestrs-mcp` is the [Model Context Protocol](https://modelcontextprotocol.io/) server for the nestrs framework. It exposes project structure, live runtime state, scaffolding actions, and docs search to MCP-aware clients (Claude Code, Cursor, VS Code, Codex CLI).
+
+The full narrative guide — install, client wiring for each editor, live-runtime setup — lives on the [Connect an AI editor to your nestrs project](/guides/mcp) page. This page is the API reference.
+
+## Features
+
+| Feature | What it does | Pulls in |
+|---|---|---|
+| `stdio` (default) | stdio transport — the client spawns the binary and speaks JSON-RPC over its stdin/stdout | `rmcp/transport-io` |
+| `http` | Streamable HTTP transport at `/mcp` | `rmcp/transport-streamable-http-server`, `axum` |
+| `admin` | `nestrs-mcp::runtime::AdminClient` and the live-runtime tools (`get_app_health`, `get_app_routes`, `get_app_providers`) that talk to a running nestrs app's `__nestrs/*` sidecar | `nestrs`, `nestrs/admin` |
+
+```toml
+# Cargo.toml
+[dependencies]
+nestrs-mcp = "*"
+
+# Or pull in the optional features:
+# nestrs-mcp = { version = "*", features = ["http", "admin"] }
+```
+
+## CLI
+
+The `nestrs-mcp` binary runs as either a server (no subcommand, with a `--transport` flag) or as a setup wizard (`init` / `setup` subcommand). `--transport` defaults to `stdio`; `--http-addr` is required when `--transport http` is set on the server path.
+
+```bash
+nestrs-mcp --help
+```
+
+```
+Run as an MCP server over stdio (default) or HTTP, or run `init`/`setup` to detect installed editors and write the right config files for the `nestrs` server.
+
+Usage: nestrs-mcp [OPTIONS] [COMMAND]
+
+Commands:
+  init   Detect installed editors and write the nestrs MCP config into each one
+  setup  Alias for `init` (matches the post-install UX verb used in the docs)
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --transport <TRANSPORT>
+          Transport for the server mode (no subcommand). Ignored when a subcommand is given
+
+          [default: stdio]
+          [possible values: stdio, http]
+
+      --http-addr <HTTP_ADDR>
+          HTTP listen address for the server mode. Required when `--transport http`. Ignored otherwise
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+```
+
+The wizard's own flags are documented in the [setup wizard section](/guides/mcp#setup-wizard) of the guide.
+
+## Tool surface
+
+The server is a `rmcp` `ServerHandler` with a `#[tool_router]` macro that declares each tool. Tools are aggregated into a single `NestrsMcpServer` struct.
+
+### Introspection (read-only, `read_only_hint = true`)
+
+Every tool takes `workspace_path: String` as its first argument so one server instance can serve multiple projects over a long session.
+
+| Tool | Returns |
+|---|---|
+| `list_modules({workspace_path})` | `Vec<ModuleSummary>` |
+| `get_module({workspace_path, name})` | `ModuleDetail` — providers, controllers, imports, exports |
+| `list_controllers({workspace_path, module?})` | `Vec<ControllerSummary>` |
+| `get_controller({workspace_path, name})` | `ControllerDetail` — routes, guards, interceptors, body type, response type |
+| `list_providers({workspace_path, module?})` | `Vec<ProviderSummary>` |
+| `get_provider({workspace_path, name})` | `ProviderDetail` — constructor args, scope, deps |
+| `list_routes({workspace_path, controller?})` | `Vec<RouteSummary>` — method, path, handler, guards |
+| `get_route({workspace_path, method, path})` | `RouteDetail` — handler sig, all middlewares, OpenAPI op |
+| `list_dtos({workspace_path})` | `Vec<DtoSummary>` |
+| `get_dto({workspace_path, name})` | `DtoDetail` — fields, types, validators from `#[validate(...)]` |
+| `list_schedules({workspace_path})` | `Vec<ScheduleSummary>` |
+| `list_event_handlers({workspace_path})` | `Vec<EventHandlerSummary>` |
+| `list_queue_processors({workspace_path})` | `Vec<QueueProcessorSummary>` |
+
+### Runtime (requires a running app with `admin` feature)
+
+| Tool | Returns |
+|---|---|
+| `get_app_health({base_url, token?})` | `HealthStatus` — liveness, readiness, uptime |
+| `get_app_routes({base_url, token?})` | `Vec<LiveRoute>` — what's actually mounted |
+| `get_app_providers({base_url, token?})` | `Vec<LiveProvider>` — live DI graph |
+
+Backed by an `AdminClient` (reqwest + rustls-tls) hitting the app's localhost-only admin port. Token auth via `Authorization: Bearer <token>`.
+
+### Scaffolding (write actions, `destructive_hint = true`)
+
+| Tool | Action |
+|---|---|
+| `new_project({path, name, transports?})` | Full crate: `Cargo.toml`, `src/main.rs`, `src/app.rs`, `.gitignore`, `README.md` |
+| `create_module({path, name, transports?})` | `src/<name>/{mod.rs, controller.rs, service.rs}` + `pub mod <name>;` in the parent file |
+| `create_resource({path, name, dto_fields, transport})` | DTO + controller + service + module, wired up. Transport: `"http" \| "graphql" \| "ws" \| "tcp"` |
+| `create_dto({path, name, fields, validators?})` | `#[derive(FromRow, Serialize, Deserialize, Validate)] struct` |
+| `generate_crud({path, resource, transports})` | Full resource across multiple transports |
+
+All write actions return `{ files_created: [..], files_modified: [..] }` so the model can show the user exactly what changed before any irreversible step. Scaffolding actions check that the target path is inside a `Cargo.toml` workspace before any write to defend against `path = "../../"` footguns.
+
+### Docs search (read-only, `read_only_hint = true`)
+
+| Tool | Action |
+|---|---|
+| `search_docs({query, scope, limit?})` | Substring + token-weighted scoring over `CHANGELOG.md`, `docs/src/**/*.md`, and `**/README.md`. Scope: `"changelog" \| "book" \| "readme" \| "all"` |
+| `get_changelog({limit?})` | `Vec<ReleaseEntry>` |
+| `get_doc({path})` | `DocContent` — fetch one doc by path |
+
+## `AdminClient`
+
+```rust
+use nestrs_mcp::runtime::AdminClient;
+
+let client = AdminClient::new("http://127.0.0.1:7777", Some("token".into()))?;
+let health = client.health().await?;
+let routes = client.routes().await?;
+let providers = client.providers().await?;
+```
+
+Construct with a `base_url` (no trailing `/__nestrs/*`) and an optional bearer token. All three methods apply the token if present. Request timeout is 5 seconds; no retries — the model decides whether to re-invoke.
+
+## Error conventions
+
+- **Tool-level failure** (operation ran but failed): the tool returns a `CallToolResult::error` so the model can see the message and recover. Examples: file not found, parse error, app not reachable.
+- **Protocol-level failure** (bad params, server can't process): the tool returns `Err(McpError::invalid_params(...))`.
+
+## Embedding in another binary
+
+`nestrs-mcp` is a library as well as a binary. Embedders (e.g. a future `nestrs mcp` subcommand in the CLI) can mount `NestrsMcpServer` directly without spawning a subprocess:
+
+```rust
+use nestrs_mcp::server::NestrsMcpServer;
+
+let server = NestrsMcpServer::default();
+serve_server(server, transport).await?;
+```
+
+The `nestrs-cli` Cargo manifest already has `nestrs-mcp` as an optional dep behind an `mcp` feature so the subcommand is a one-file follow-up.

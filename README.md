@@ -20,6 +20,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - DTO validation pipeline and class-validator-style ergonomics
 - Cross-cutting pipeline: guards, pipes, interceptors, exception filters, strategies
 - Production controls: backpressure, metrics, request tracing, security runbooks
+- **Model Context Protocol server** (`nestrs-mcp`) for Claude Code, Cursor, VS Code, Codex CLI — project introspection, live runtime, scaffolding, docs search ([guide](docs/src/mcp.md))
 - Performance hardening workflows: benchmark gating (HTTP, DI, validated JSON), history tracking, dashboard artifacts; scheduled libFuzzer smoke runs
 
 ## Ownership and release
@@ -51,6 +52,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs-prisma/` - Prisma integration crate
 - `nestrs-microservices/` - transport/client/event primitives
 - `nestrs-openapi/`, `nestrs-graphql/`, `nestrs-ws/` - parity extension crates
+- `nestrs-mcp/` - Model Context Protocol server (stdio + Streamable HTTP)
 - `website/` - landing page + docs hub (light/dark theme)
 
 ## Quick Start
@@ -92,6 +94,7 @@ Then open:
 - `website/docs.html` - docs portal entrypoint
 - **NestJS → nestrs** — mdBook: [`docs/src/nestjs-migration.md`](docs/src/nestjs-migration.md); website hub: [`website/docs/migration/nestjs-to-nestrs.md`](website/docs/migration/nestjs-to-nestrs.md)
 - **Security defaults & ordering** — mdBook: [`docs/src/secure-defaults.md`](docs/src/secure-defaults.md), [`docs/src/http-pipeline-order.md`](docs/src/http-pipeline-order.md)
+- **MCP / AI editor integration** — mdBook: [`docs/src/mcp.md`](docs/src/mcp.md); Mintlify: [`mintlify-docs/guides/mcp.mdx`](mintlify-docs/guides/mcp.mdx)
 - `CHANGELOG.md` - release history
 - `STABILITY.md` - semver, public vs `#[doc(hidden)]` API, **`test-hooks`** / global registries
 

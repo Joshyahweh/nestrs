@@ -44,7 +44,8 @@
               "guides/observability",
               "guides/api-versioning",
               "guides/microservices",
-              "guides/graphql-websockets"
+              "guides/graphql-websockets",
+              "guides/mcp"
             ]
           },
           {
@@ -118,7 +119,8 @@
             "pages": [
               "api/crates/nestrs-core",
               "api/crates/nestrs-microservices",
-              "api/crates/nestrs-openapi"
+              "api/crates/nestrs-openapi",
+              "api/crates/nestrs-mcp"
             ]
           }
         ]

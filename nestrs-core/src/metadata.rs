@@ -1,6 +1,6 @@
 //! Lightweight metadata registry for custom decorator patterns.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{OnceLock, RwLock};
 
 type Registry = HashMap<String, HashMap<String, String>>;
@@ -32,5 +32,20 @@ impl MetadataRegistry {
     pub fn clear_for_tests() {
         let mut guard = store().write().expect("metadata lock poisoned");
         guard.clear();
+    }
+
+    /// Whole-registry snapshot as a `BTreeMap` (stable iteration order,
+    /// JSON-friendly). Used by the `nestrs::admin` sidecar.
+    pub fn snapshot() -> BTreeMap<String, BTreeMap<String, String>> {
+        let guard = store().read().expect("metadata lock poisoned");
+        guard
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    v.iter().map(|(k2, v2)| (k2.clone(), v2.clone())).collect(),
+                )
+            })
+            .collect()
     }
 }

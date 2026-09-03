@@ -2,8 +2,9 @@
 //!
 //! [`crate::HttpException::into_response`] stores a copy of the exception in the response
 //! [`Extensions`](axum::http::Extensions). When you call [`crate::NestApplication::use_global_exception_filter`],
-//! an inner middleware runs [`ExceptionFilter::catch`] for those responses before outer layers (CORS,
-//! production error sanitization, etc.).
+//! an outermost middleware runs [`ExceptionFilter::catch`] for those responses after all inner
+//! layers (CORS, production error sanitization, etc.). The filter is the last thing to see the
+//! response on the way out, so its body survives production sanitization.
 
 use axum::extract::Request;
 use axum::middleware::Next;

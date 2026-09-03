@@ -9,6 +9,7 @@ use std::sync::RwLock;
 use async_trait::async_trait;
 use axum::Router;
 
+mod admin_snapshot;
 mod database;
 mod discovery;
 mod execution_context;
@@ -20,6 +21,7 @@ mod platform;
 mod route_registry;
 mod strategy;
 
+pub use admin_snapshot::AdminSnapshot;
 pub use database::DatabasePing;
 pub use discovery::DiscoveryService;
 pub use execution_context::{ExecutionContext, HostType, HttpExecutionArguments};
@@ -49,6 +51,14 @@ pub enum ProviderScope {
     Transient,
     /// One instance per request/task scope (requires request-scope middleware).
     Request,
+}
+
+/// A lightweight `(name, scope)` view of a registered provider, suitable
+/// for serialization. Returned by [`ProviderRegistry::provider_summaries`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProviderSummary {
+    pub type_name: &'static str,
+    pub scope: ProviderScope,
 }
 
 #[derive(Clone)]
@@ -298,6 +308,22 @@ impl ProviderRegistry {
         self.order
             .iter()
             .filter_map(|id| self.entries.get(id).map(|e| e.type_name))
+            .collect()
+    }
+
+    /// Pair of `(type_name, scope)` for every registered provider, in
+    /// registration order. Powers the `nestrs::admin` sidecar's
+    /// `GET /__nestrs/providers` endpoint and `nestrs-mcp`'s
+    /// `get_app_providers` tool.
+    pub fn provider_summaries(&self) -> Vec<ProviderSummary> {
+        self.order
+            .iter()
+            .filter_map(|id| {
+                self.entries.get(id).map(|e| ProviderSummary {
+                    type_name: e.type_name,
+                    scope: e.scope,
+                })
+            })
             .collect()
     }
 

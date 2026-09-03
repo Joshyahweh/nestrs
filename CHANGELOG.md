@@ -7,6 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-27
+
+### Added
+
+- **`nestrs-mcp`**: new workspace member (`nestrs-mcp/`). Model Context Protocol server exposing project introspection (modules, controllers, providers, routes, DTOs), scaffolding actions (new project, create module, create resource, create DTO, generate CRUD), local docs search, and live runtime queries against the new `nestrs::admin` sidecar. Speaks stdio (default) and Streamable HTTP (`--features http`, mounted at `/mcp`). Build with `cargo install nestrs-mcp` and add the binary to any MCP-aware client.
+- **`nestrs-mcp` setup wizard**: new `init` / `setup` subcommand runs a post-install setup wizard that detects installed editors (Claude Code, Cursor, VS Code Copilot, Codex CLI) and writes the right MCP config into each one. Multi-select prompt mirrors the hand-rolled `nestrs-cli` style (no new prompt dependencies). Flags: `--yes` to accept all detected editors, `--no-interactive` for dry-run / scripted use, `--start-http-server` to spawn the server in the background after writing configs. JSON and TOML merges are idempotent and preserve all unrelated keys. Docs updated in `nestrs-mcp/README.md`, `docs/src/mcp.md`, and `mintlify-docs/guides/mcp.mdx` / `mintlify-docs/api/crates/nestrs-mcp.mdx`.
+- **`nestrs::admin`**: new `admin` Cargo feature (off by default) wires a localhost-only HTTP sidecar into `NestApplication::use_admin(AdminOptions)`. Exposes `GET /__nestrs/health`, `/__nestrs/providers`, `/__nestrs/routes`, `/__nestrs/openapi.json` over the live registries. Optional bearer token (refuses to bind non-loopback without one). Consumed by `nestrs-mcp`'s `get_app_health` / `get_app_routes` / `get_app_providers` tools.
+- **`AdminSnapshot` value type** in `nestrs-core` (always available, no feature gate): a serializable view of the provider, route, and metadata registries for tooling and external introspection.
+
+### Changed
+
+- **BREAKING: `NestApplication::use_admin` now takes `&self` instead of `self`.** Previously the call consumed the application, forcing the admin handle to be the last builder step before `listen*`. Now you can mount the admin sidecar at any point in the builder chain. The signature is the only break — no behavior changed. Code that wrote `let app = NestFactory::create::<AppModule>(); let h = app.use_admin(opts); app.listen(...).await;` now compiles without a `mem::replace` dance. Code that wrote `app.use_admin(opts).serve().await` in one expression is unaffected (the result is still an owned `AdminHandle`).
+
+### Fixed
+
+- **`nestrs-mcp` source parser**: `state` and `controller_guards` from `#[routes(X, state = T, controller_guards = (...))]` are now back-filled onto the struct-form controller (previously they were silently dropped when the controller was declared as a struct + separate `impl`). `body_type` extraction now walks past the `&self` receiver to find the first typed arg. `set_metadata("k", "v")` positional form is now recognized. `#[roles("a", "b", ...)]` positional form is now recognized. `#[openapi(summary = "...", operation_id = "...")]` now collects every kv pair (previously kept only the last one). 20 new tests in `tests/source_parser_coverage.rs` lock these contracts in.
+- **`hello-app` smoke harness**: `use_admin` wired into `examples/hello-app/src/main.rs` so the live admin port is reachable in the canonical example app. `NESTRS_HELLO_PORT` env var overrides the listen port (default `3000`) for environments where 3000 is already taken. `NESTRS_ADMIN_TOKEN` enables bearer auth on the sidecar (still refuses non-loopback binds without one).
+
 ## [0.4.0] - 2026-08-26
 
 ### Added

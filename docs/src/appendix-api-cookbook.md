@@ -583,23 +583,23 @@ struct AppModule;
 
 ---
 
-## CLI (`nestrs` / `nestrs-scaffold`)
+## CLI (`nestrs-cli` / `nestrs-scaffold`)
 
 ```bash
 cargo install nestrs-scaffold
 
-nestrs new my-api
+nestrs-cli new my-api
 cd my-api && cargo run
 
-nestrs doctor
+nestrs-cli doctor
 
-nestrs generate service users/UserService --path src
-nestrs g controller health/HealthController --path src
-nestrs g module billing/BillingModule --path src
-nestrs g guard auth/AuthGuard --path src
-nestrs g dto items/ItemDto --path src
+nestrs-cli generate service users/UserService --path src
+nestrs-cli g controller health/HealthController --path src
+nestrs-cli g module billing/BillingModule --path src
+nestrs-cli g guard auth/AuthGuard --path src
+nestrs-cli g dto items/ItemDto --path src
 
-nestrs g resource orders --transport rest --path src
+nestrs-cli g resource orders --transport rest --path src
 ```
 
 See [CLI](cli.md).

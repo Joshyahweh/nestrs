@@ -1,15 +1,15 @@
 ---
-title: "Generate code with nestrs generate"
-description: "Use nestrs generate (or nestrs g) to scaffold services, controllers, modules, DTOs, guards, pipes, filters, interceptors, and full CRUD resources."
+title: "Generate code with nestrs-cli generate"
+description: "Use nestrs-cli generate (or nestrs-cli g) to scaffold services, controllers, modules, DTOs, guards, pipes, filters, interceptors, and full CRUD resources."
 ---
 
-`nestrs generate` (aliased as `nestrs g`) creates individual source files or full multi-file resource scaffolds from built-in templates. Every generated file uses real nestrs macros and compiles out of the box. For resource generators, the CLI also automatically wires the new module into your parent `main.rs`, `lib.rs`, or `mod.rs`.
+`nestrs-cli generate` (aliased as `nestrs-cli g`) creates individual source files or full multi-file resource scaffolds from built-in templates. Every generated file uses real nestrs macros and compiles out of the box. For resource generators, the CLI also automatically wires the new module into your parent `main.rs`, `lib.rs`, or `mod.rs`.
 
 ## Syntax
 
 ```bash
-nestrs g <kind> <name> [flags]
-nestrs generate <kind> <name> [flags]
+nestrs-cli g <kind> <name> [flags]
+nestrs-cli generate <kind> <name> [flags]
 ```
 
 `<name>` is converted to `snake_case` for file names and field references and to `PascalCase` for struct names automatically.
@@ -110,13 +110,13 @@ The `resource` generator is the most complete generator — it creates a module,
 
 ```bash
 # Interactive prompt (when stdin is a terminal)
-nestrs g resource users
+nestrs-cli g resource users
 
 # Explicit transport
-nestrs g resource users --transport rest --path src
+nestrs-cli g resource users --transport rest --path src
 
 # Dry run first
-nestrs g resource users --transport graphql --path src --dry-run
+nestrs-cli g resource users --transport graphql --path src --dry-run
 ```
 
 Each transport produces a different entry file while sharing the same CRUD service and DTOs.
@@ -275,7 +275,7 @@ The code below shows the exact template output for a generator named `users` (sn
   </Accordion>
 
   <Accordion title="resolver (standalone)">
-    The standalone `resolver` generator produces a bare stub. For a full GraphQL CRUD resolver, use `nestrs g resource users --transport graphql`.
+    The standalone `resolver` generator produces a bare stub. For a full GraphQL CRUD resolver, use `nestrs-cli g resource users --transport graphql`.
 
     ```rust
     pub struct UsersResolver;
@@ -283,7 +283,7 @@ The code below shows the exact template output for a generator named `users` (sn
   </Accordion>
 
   <Accordion title="gateway (standalone)">
-    The standalone `gateway` generator produces a bare stub. For a full WebSocket gateway, use `nestrs g resource users --transport ws`.
+    The standalone `gateway` generator produces a bare stub. For a full WebSocket gateway, use `nestrs-cli g resource users --transport ws`.
 
     ```rust
     pub struct UsersGateway;
@@ -305,7 +305,7 @@ The code below shows the exact template output for a generator named `users` (sn
   </Accordion>
 
   <Accordion title="transport (standalone)">
-    The standalone `transport` generator produces a bare stub. For full message patterns, use `nestrs g resource users --transport microservice` or `--transport grpc`.
+    The standalone `transport` generator produces a bare stub. For full message patterns, use `nestrs-cli g resource users --transport microservice` or `--transport grpc`.
 
     ```rust
     pub struct UsersTransport;
@@ -861,21 +861,21 @@ The code below shows the exact template output for a generator named `users` (sn
 <CodeGroup>
 
 ```bash generate a REST resource
-nestrs g resource invoices --transport rest --path src
+nestrs-cli g resource invoices --transport rest --path src
 ```
 
 ```bash generate a WebSocket resource
-nestrs g resource notifications --transport ws --path src
+nestrs-cli g resource notifications --transport ws --path src
 ```
 
 ```bash generate individual files
-nestrs g service payments --path src
-nestrs g guard auth --path src
-nestrs g dto create-payment --path src
+nestrs-cli g service payments --path src
+nestrs-cli g guard auth --path src
+nestrs-cli g dto create-payment --path src
 ```
 
 ```bash dry run before committing
-nestrs g resource orders --transport grpc --path src --dry-run
+nestrs-cli g resource orders --transport grpc --path src --dry-run
 ```
 
 </CodeGroup>

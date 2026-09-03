@@ -1,21 +1,21 @@
-# CLI (`nestrs` / `nestrs-scaffold`)
+# CLI (`nestrs-cli` / `nestrs-scaffold`)
 
-The **nestrs** command-line tool scaffolds projects and source files. On [crates.io](https://crates.io/crates/nestrs-scaffold) the package is published as **`nestrs-scaffold`** (the `nestrs-cli` name is taken); the binary you run is still **`nestrs`**.
+The **nestrs-cli** command-line tool scaffolds projects and source files. On [crates.io](https://crates.io/crates/nestrs-scaffold) the package is published as **`nestrs-scaffold`** (the `nestrs-cli` name is taken); the binary you run is **`nestrs-cli`**.
 
-**Command examples:** See the [API cookbook](appendix-api-cookbook.md) for additional **`nestrs g …`** invocations alongside the **Examples** section below.
+**Command examples:** See the [API cookbook](appendix-api-cookbook.md) for additional **`nestrs-cli g …`** invocations alongside the **Examples** section below.
 
 ```bash
 cargo install nestrs-scaffold
-nestrs --help
+nestrs-cli --help
 ```
 
 ## Commands (overview)
 
 | Command | Purpose |
 |---------|---------|
-| `nestrs new <name>` | Create a new single-crate app with `Cargo.toml`, `src/main.rs`, starter module/controller, `.env.example`, optional git init. |
-| `nestrs generate …` / `nestrs g …` | Generate **resource** (multi-transport scaffold), **service**, **controller**, **module**, **dto**, **guard**, **pipe**, **filter**, **interceptor**, **strategy**, **resolver**, **gateway**, **microservice**, **transport**, or bulk **resources**. |
-| `nestrs doctor` | Print `rustc` / `cargo` versions, scan `Cargo.toml` for `nestrs` feature hints, and heuristically check `src/**/*.rs` for common misconfigurations (e.g. `enable_openapi()` without the `openapi` feature). Does not replace `cargo check`. |
+| `nestrs-cli new <name>` | Create a new single-crate app with `Cargo.toml`, `src/main.rs`, starter module/controller, `.env.example`, optional git init. |
+| `nestrs-cli generate …` / `nestrs-cli g …` | Generate **resource** (multi-transport scaffold), **service**, **controller**, **module**, **dto**, **guard**, **pipe**, **filter**, **interceptor**, **strategy**, **resolver**, **gateway**, **microservice**, **transport**, or bulk **resources**. |
+| `nestrs-cli doctor` | Print `rustc` / `cargo` versions, scan `Cargo.toml` for `nestrs` feature hints, and heuristically check `src/**/*.rs` for common misconfigurations (e.g. `enable_openapi()` without the `openapi` feature). Does not replace `cargo check`. |
 
 ### Running from a nestrs git clone (`cargo nestrs`)
 
@@ -26,9 +26,9 @@ cargo nestrs doctor
 cargo nestrs generate resource items --transport rest --path src
 ```
 
-This is implemented in [`.cargo/config.toml`](../../.cargo/config.toml) as `run -p nestrs-scaffold --bin nestrs --`.
+This is implemented in [`.cargo/config.toml`](../../.cargo/config.toml) as `run -p nestrs-scaffold --bin nestrs-cli --`.
 
-Short aliases for `generate`: `g`, and for kinds (`res`, `co`, `mo`, `dto`, …) — see `nestrs g --help` in your install.
+Short aliases for `generate`: `g`, and for kinds (`res`, `co`, `mo`, `dto`, …) — see `nestrs-cli g --help` in your install.
 
 Flags common to generators: `--style nest|rust` (file layout), `--path <dir>`, `--dry-run`, `--force`, `--quiet`. `g resource` also supports `--transport rest|graphql|ws|grpc|microservice` and `--no-interactive`.
 
@@ -38,8 +38,8 @@ Nest’s CLI covers **application lifecycle**, **monorepos**, **libraries**, **p
 
 | Nest CLI area | nestrs | What to use instead |
 |---------------|--------|---------------------|
-| `nest new` / app skeleton | **Yes (partial)** | `nestrs new` — single crate, opinionated starter, not every Nest default file. |
-| `nest generate` (CRUD, modules, …) | **Yes (partial)** | `nestrs generate` — overlapping generators; naming and file trees differ; see templates in repo. |
+| `nest new` / app skeleton | **Yes (partial)** | `nestrs-cli new` — single crate, opinionated starter, not every Nest default file. |
+| `nest generate` (CRUD, modules, …) | **Yes (partial)** | `nestrs-cli generate` — overlapping generators; naming and file trees differ; see templates in repo. |
 | **Workspaces** (multiple apps/libs in one repo) | **No** | [Cargo workspaces](https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html): one root `Cargo.toml` with `[workspace].members`, `cargo new` / `cargo new --lib` per crate, path dependencies. |
 | **Libraries** (publishable `@nestjs/...`-style packages) | **No** | `cargo new --lib`, workspace members, versioned crates published to crates.io, or path/git deps — same as any Rust library. |
 | **Scripts** (`npm run …` in `package.json`) | **No** | `cargo run --bin <name>`, [cargo-make](https://github.com/sagiegurari/cargo-make), [just](https://github.com/casey/just), Make, or shell scripts committed beside the repo. |
@@ -50,7 +50,7 @@ This keeps **one** Rust toolchain story (Cargo) instead of duplicating workspace
 
 ## Package manager note
 
-`nestrs new` accepts `--package-manager cargo` (default). Other package managers are not supported — there is no parallel to Nest’s npm/yarn/pnpm integration.
+`nestrs-cli new` accepts `--package-manager cargo` (default). Other package managers are not supported — there is no parallel to Nest’s npm/yarn/pnpm integration.
 
 ## Examples
 
@@ -58,7 +58,7 @@ This keeps **one** Rust toolchain story (Cargo) instead of duplicating workspace
 
 ```bash
 cargo install nestrs-scaffold
-nestrs new billing-api
+nestrs-cli new billing-api
 cd billing-api
 cargo run
 ```
@@ -66,8 +66,8 @@ cargo run
 **Generate a REST-shaped resource** into `src/` (dry run first in unfamiliar trees):
 
 ```bash
-nestrs generate resource invoices --transport rest --path src --dry-run
-nestrs generate resource invoices --transport rest --path src
+nestrs-cli generate resource invoices --transport rest --path src --dry-run
+nestrs-cli generate resource invoices --transport rest --path src
 ```
 
 **Workspace doctor** (from a clone of nestrs):

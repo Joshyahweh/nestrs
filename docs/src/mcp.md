@@ -345,7 +345,7 @@ surface.
 
 ## See also
 
-- [CLI (nestrs-scaffold)](cli.md) — `nestrs new`, `nestrs generate resource`
+- [CLI (nestrs-scaffold)](cli.md) — `nestrs-cli new`, `nestrs-cli generate resource`
 - [Production runbook](production.md) — observability and metrics
 - [OpenAPI & HTTP](openapi-http.md) — schema generation
 - [Custom decorators](custom-decorators.md) — building your own

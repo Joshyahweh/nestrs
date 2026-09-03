@@ -48,7 +48,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs/` - main framework crate (public runtime API)
 - `nestrs-core/` - runtime primitives (context, traits, metadata, strategy)
 - `nestrs-macros/` - proc macros and helper attributes
-- `nestrs-cli/` - scaffold/generate CLI (crates.io package name: **`nestrs-scaffold`**, binary: `nestrs`)
+- `nestrs-cli/` - scaffold/generate CLI (crates.io package name: **`nestrs-scaffold`**, binary: `nestrs-cli`)
 - `nestrs-prisma/` - Prisma integration crate
 - `nestrs-microservices/` - transport/client/event primitives
 - `nestrs-openapi/`, `nestrs-graphql/`, `nestrs-ws/` - parity extension crates

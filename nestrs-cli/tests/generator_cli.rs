@@ -48,7 +48,11 @@ fn cli_bin() -> PathBuf {
     };
     for candidate in [
         workspace_root.join("target").join("debug").join(bin_name),
-        workspace_root.join("target").join("debug").join("deps").join(bin_name),
+        workspace_root
+            .join("target")
+            .join("debug")
+            .join("deps")
+            .join(bin_name),
     ] {
         if candidate.is_file() {
             return candidate;

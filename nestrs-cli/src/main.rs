@@ -52,24 +52,24 @@ fn run() -> Result<(), String> {
 }
 
 fn print_help() -> Result<(), String> {
-    println!("nestrs CLI (crate: nestrs-scaffold)");
+    println!("nestrs-cli (crate: nestrs-scaffold)");
     println!();
     println!("Codegen and project skeletons for https://crates.io/crates/nestrs");
     println!("Not a Nest CLI clone: no workspace wizard, library packages, or npm-style scripts — use Cargo workspaces, `cargo new --lib`, and cargo-make/just/shell.");
     println!();
     println!("Usage:");
-    println!("  nestrs new <name> [--no-git] [--strict] [--package-manager cargo]");
+    println!("  nestrs-cli new <name> [--no-git] [--strict] [--package-manager cargo]");
     println!("    --strict: generated src/main.rs starts with #![deny(unsafe_code)]");
-    println!("  nestrs doctor   (toolchain + nestrs feature hints for the current crate)");
-    println!("  nestrs g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
-    println!("  nestrs g <res|s|co|mo|dto|gu|pi|fi|in|st|r|ga|ms|tr> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
-    println!("  nestrs g resource <name> [--transport rest|graphql|ws|grpc|microservice] [--style nest|rust] [--path <dir>] [--no-interactive] [--dry-run] [--force] [--quiet]");
+    println!("  nestrs-cli doctor   (toolchain + nestrs feature hints for the current crate)");
+    println!("  nestrs-cli g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
+    println!("  nestrs-cli g <res|s|co|mo|dto|gu|pi|fi|in|st|r|ga|ms|tr> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
+    println!("  nestrs-cli g resource <name> [--transport rest|graphql|ws|grpc|microservice] [--style nest|rust] [--path <dir>] [--no-interactive] [--dry-run] [--force] [--quiet]");
     Ok(())
 }
 
 fn create_new_project(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
-        return Err("expected `nestrs new <name> ...`".to_string());
+        return Err("expected `nestrs-cli new <name> ...`".to_string());
     }
 
     let name = args[0].clone();
@@ -127,7 +127,7 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
     fs::write(root.join(".env.example"), env_example).map_err(|e| e.to_string())?;
     fs::write(root.join(".env"), env_example).map_err(|e| e.to_string())?;
     let readme = format!(
-        "# {name}\n\nGenerated with `nestrs new`.\n\n## Development\n\n```bash\ncargo run\n```\n\nServer defaults:\n- App: `http://127.0.0.1:3000/api`\n- Health: `http://127.0.0.1:3000/health`\n- Metrics: `http://127.0.0.1:3000/metrics`\n\n## Production profile\n\n```bash\nNESTRS_ENV=production RUST_LOG=info cargo run --release\n```\n\n## Docker\n\n```bash\ndocker build -t {name}:latest .\ndocker run -p 3000:3000 --env NESTRS_ENV=production {name}:latest\n```\n\n## Operations notes\n\n- `enable_production_errors_from_env()` sanitizes 5xx responses in production.\n- Configure CORS/security headers/rate limits per deployment needs.\n- Run DB migrations/seeds before release rollout when using a real database.\n"
+        "# {name}\n\nGenerated with `nestrs-cli new`.\n\n## Development\n\n```bash\ncargo run\n```\n\nServer defaults:\n- App: `http://127.0.0.1:3000/api`\n- Health: `http://127.0.0.1:3000/health`\n- Metrics: `http://127.0.0.1:3000/metrics`\n\n## Production profile\n\n```bash\nNESTRS_ENV=production RUST_LOG=info cargo run --release\n```\n\n## Docker\n\n```bash\ndocker build -t {name}:latest .\ndocker run -p 3000:3000 --env NESTRS_ENV=production {name}:latest\n```\n\n## Operations notes\n\n- `enable_production_errors_from_env()` sanitizes 5xx responses in production.\n- Configure CORS/security headers/rate limits per deployment needs.\n- Run DB migrations/seeds before release rollout when using a real database.\n"
     );
     fs::write(root.join("README.md"), readme).map_err(|e| e.to_string())?;
     let dockerfile = format!(
@@ -146,7 +146,7 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
 
 fn generate(args: &[String]) -> Result<(), String> {
     if args.len() < 2 {
-        return Err("expected `nestrs g <kind> <name> ...`".to_string());
+        return Err("expected `nestrs-cli g <kind> <name> ...`".to_string());
     }
 
     let kind = args[0].as_str();

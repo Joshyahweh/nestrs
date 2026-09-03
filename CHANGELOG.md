@@ -19,11 +19,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **BREAKING: `NestApplication::use_admin` now takes `&self` instead of `self`.** Previously the call consumed the application, forcing the admin handle to be the last builder step before `listen*`. Now you can mount the admin sidecar at any point in the builder chain. The signature is the only break — no behavior changed. Code that wrote `let app = NestFactory::create::<AppModule>(); let h = app.use_admin(opts); app.listen(...).await;` now compiles without a `mem::replace` dance. Code that wrote `app.use_admin(opts).serve().await` in one expression is unaffected (the result is still an owned `AdminHandle`).
+- **BREAKING: CLI binary renamed from `nestrs` to `nestrs-cli`.** The `nestrs-scaffold` crate now installs as the `nestrs-cli` binary (it was previously `nestrs`). The crate name on crates.io is unchanged because `nestrs-cli` is already owned by another publisher there. Install with `cargo install nestrs-scaffold` and invoke as `nestrs-cli new …` / `nestrs-cli generate …`. The Cargo alias (`cargo nestrs …`) keeps the short name and is unchanged. All docs and the `nestrs-cli` help text reflect the new name.
 
 ### Fixed
 
 - **`nestrs-mcp` source parser**: `state` and `controller_guards` from `#[routes(X, state = T, controller_guards = (...))]` are now back-filled onto the struct-form controller (previously they were silently dropped when the controller was declared as a struct + separate `impl`). `body_type` extraction now walks past the `&self` receiver to find the first typed arg. `set_metadata("k", "v")` positional form is now recognized. `#[roles("a", "b", ...)]` positional form is now recognized. `#[openapi(summary = "...", operation_id = "...")]` now collects every kv pair (previously kept only the last one). 20 new tests in `tests/source_parser_coverage.rs` lock these contracts in.
 - **`hello-app` smoke harness**: `use_admin` wired into `examples/hello-app/src/main.rs` so the live admin port is reachable in the canonical example app. `NESTRS_HELLO_PORT` env var overrides the listen port (default `3000`) for environments where 3000 is already taken. `NESTRS_ADMIN_TOKEN` enables bearer auth on the sidecar (still refuses non-loopback binds without one).
+- **`nestrs::admin` auth error boxing**: `AdminSnapshot::authed` now returns a small `AuthError` enum instead of a full `axum::response::Response` in the `Err` slot, silencing `clippy::result_large_err` on the lint-and-docs CI gate without changing behavior (`AuthError` converts to a `Response` via the existing `From` impl).
+- **Exception filter ordering**: the global exception filter is now applied as the outermost layer in the Axum middleware stack, so it observes responses *before* outer middleware does. The `global_exception_filter_runs_before_outer_middleware` ordering contract test in `tests/bootstrap_composition.rs` now passes.
+- **`nestrs-scaffold` integration tests** now read the binary path through `std::env::var("CARGO_BIN_EXE_nestrs-cli")` at test time, surviving any future binary renames without source edits.
 
 ## [0.4.0] - 2026-08-26
 

@@ -20,7 +20,7 @@ Enable features on the **`nestrs`** dependency in your `Cargo.toml` (exact featu
 - **Queues**: `queues`.  
 - **i18n**: follow the crate’s feature flags in the embedded ecosystem document.  
 
-If something fails at link time or with “feature not enabled” errors, compare your **`Cargo.toml`** with the [CLI](cli.md) **`nestrs doctor`** output and the crate READMEs under `nestrs-*` in the repo.
+If something fails at link time or with “feature not enabled” errors, compare your **`Cargo.toml`** with the [CLI](cli.md) **`nestrs-cli doctor`** output and the crate READMEs under `nestrs-*` in the repo.
 
 **`NestApplication` helpers:** [`use_i18n`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.use_i18n) is documented in rustdoc; see also the [API cookbook](appendix-api-cookbook.md) for related app-wide methods.
 

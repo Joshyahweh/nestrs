@@ -11,9 +11,15 @@ fn unique_tmp_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("nestrs-cli-{name}-{nanos}"))
 }
 
+fn cli_bin() -> PathBuf {
+    PathBuf::from(
+        std::env::var("CARGO_BIN_EXE_nestrs-cli")
+            .expect("CARGO_BIN_EXE_nestrs-cli is set by Cargo for integration tests"),
+    )
+}
+
 fn run_cli(args: &[&str]) {
-    let bin = env!("CARGO_BIN_EXE_nestrs");
-    let status = Command::new(bin)
+    let status = Command::new(cli_bin())
         .args(args)
         .status()
         .expect("failed to execute nestrs cli");
@@ -21,8 +27,7 @@ fn run_cli(args: &[&str]) {
 }
 
 fn run_cli_output(args: &[&str]) -> std::process::Output {
-    let bin = env!("CARGO_BIN_EXE_nestrs");
-    Command::new(bin)
+    Command::new(cli_bin())
         .args(args)
         .output()
         .expect("failed to execute nestrs cli with output capture")
@@ -329,8 +334,7 @@ fn force_overwrites_existing_file() {
     let existing = out.join("billing.service.rs");
     fs::write(&existing, "old-content").expect("seed existing file");
 
-    let bin = env!("CARGO_BIN_EXE_nestrs");
-    let status_without_force = Command::new(bin)
+    let status_without_force = Command::new(cli_bin())
         .args([
             "g",
             "service",

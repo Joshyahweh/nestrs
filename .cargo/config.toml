@@ -2,4 +2,4 @@
 #   cargo nestrs doctor
 #   cargo nestrs generate resource users --transport rest
 [alias]
-nestrs = "run -p nestrs-scaffold --bin nestrs --"
+nestrs = "run -p nestrs-scaffold --bin nestrs-cli --"

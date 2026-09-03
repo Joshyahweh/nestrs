@@ -5,7 +5,7 @@ use std::process::Command;
 
 /// Run from repo root or app crate directory (where `Cargo.toml` lives).
 pub fn run() -> Result<(), String> {
-    println!("nestrs doctor");
+    println!("nestrs-cli doctor");
     println!();
 
     print_cmd_version("rustc", &["--version"])?;

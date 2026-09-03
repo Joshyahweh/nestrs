@@ -1,5 +1,5 @@
 [package]
-# crates.io: `nestrs-cli` is taken by another owner; install with `cargo install nestrs-scaffold` (binary: `nestrs`).
+# crates.io: `nestrs-cli` is taken by another owner; install with `cargo install nestrs-scaffold` (binary: `nestrs-cli`).
 name = "nestrs-scaffold"
 version.workspace = true
 edition.workspace = true
@@ -21,7 +21,7 @@ serde_json = "1"
 nestrs-mcp = { path = "../nestrs-mcp", version = "0.5.0", optional = true }
 
 [[bin]]
-name = "nestrs"
+name = "nestrs-cli"
 path = "src/main.rs"
 
 [features]

@@ -9,7 +9,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/nestrs-mcp"
 readme = "README.md"
 description = "Model Context Protocol server for nestrs: project introspection, live runtime, scaffolding, and docs search."
-keywords = ["mcp", "model-context-protocol", "introspection", "nest", "axum"]
+keywords = ["mcp", "mcp-protocol", "introspection", "nest", "axum"]
 categories = ["development-tools", "api-bindings"]
 
 [lib]

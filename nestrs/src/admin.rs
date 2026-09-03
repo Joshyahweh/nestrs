@@ -107,6 +107,19 @@ fn unauthorized() -> Response {
     (StatusCode::UNAUTHORIZED, "bearer token required").into_response()
 }
 
+/// Small error type for [`authed`]. Returning a full [`Response`] would trip
+/// `clippy::result_large_err` (≥128 B) without changing any call-site ergonomics.
+#[derive(Debug)]
+enum AuthError {
+    Unauthorized,
+}
+
+impl From<AuthError> for Response {
+    fn from(_: AuthError) -> Self {
+        unauthorized()
+    }
+}
+
 fn check_token(state: &AdminState, auth: Option<&str>, query: Option<&str>) -> bool {
     let Some(expected) = state.token.as_deref() else {
         return false; // no token configured → refuse everything
@@ -133,7 +146,7 @@ async fn authed<B>(
     headers: axum::http::HeaderMap,
     Query(q): Query<TokenQuery>,
     req: axum::http::Request<B>,
-) -> Result<Arc<AdminSnapshot>, Response>
+) -> Result<Arc<AdminSnapshot>, AuthError>
 where
     B: Send + 'static,
 {
@@ -141,7 +154,7 @@ where
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok());
     if !check_token(&state, auth, q.token.as_deref()) {
-        return Err(unauthorized());
+        return Err(AuthError::Unauthorized);
     }
     let _ = req; // satisfy unused
     Ok(snapshot(&state))
@@ -168,7 +181,7 @@ async fn get_health(
             });
             (StatusCode::OK, Json(body)).into_response()
         }
-        Err(r) => r,
+        Err(e) => e.into(),
     }
 }
 
@@ -193,7 +206,7 @@ async fn get_providers(
                 .collect();
             (StatusCode::OK, Json(providers)).into_response()
         }
-        Err(r) => r,
+        Err(e) => e.into(),
     }
 }
 
@@ -214,7 +227,7 @@ async fn get_routes(
             let routes: Vec<RouteInfoJson> = snap.routes.iter().map(RouteInfoJson::from).collect();
             (StatusCode::OK, Json(routes)).into_response()
         }
-        Err(r) => r,
+        Err(e) => e.into(),
     }
 }
 
@@ -242,7 +255,7 @@ async fn get_openapi(
             });
             (StatusCode::OK, Json(body)).into_response()
         }
-        Err(r) => r,
+        Err(e) => e.into(),
     }
 }
 

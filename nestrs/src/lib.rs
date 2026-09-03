@@ -1842,13 +1842,6 @@ impl NestApplication {
             router = router.fallback(axum::routing::any(nestrs_default_not_found_handler));
         }
 
-        if let Some(filter) = self.exception_filter.clone() {
-            router = router.layer(axum::middleware::from_fn_with_state(
-                filter,
-                exception_filter::exception_filter_middleware,
-            ));
-        }
-
         if request_scope {
             router = router.layer(axum::middleware::from_fn_with_state(
                 registry.clone(),
@@ -1905,6 +1898,19 @@ impl NestApplication {
         if production_errors {
             router = router.layer(axum::middleware::from_fn(
                 production_error_sanitize_middleware,
+            ));
+        }
+
+        if let Some(filter) = self.exception_filter.clone() {
+            // Applied last so the filter is the outermost layer and is the last
+            // thing to see the response on the way out. In particular, this
+            // means the filter runs *after* `production_error_sanitize`
+            // (applied just above) and the filter's body survives the
+            // sanitizer — matching the contract documented on
+            // `nestrs::ExceptionFilter`.
+            router = router.layer(axum::middleware::from_fn_with_state(
+                filter,
+                exception_filter::exception_filter_middleware,
             ));
         }
 

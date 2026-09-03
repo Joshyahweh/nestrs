@@ -9,6 +9,8 @@ This guide is the **nestrs** counterpart to Nest’s *Introduction* and *First s
 
 As you add **`NestApplication::…`** calls (CORS, metrics, CSRF, etc.), use the [API cookbook](appendix-api-cookbook.md) for minimal examples of each builder method.
 
+> **AI editor?** Install `nestrs-mcp` (`cargo install nestrs-mcp`) and add it to your editor's MCP config so the model can ask "what routes does this app define?" instead of re-parsing the source tree on every turn. Full setup for Claude Code, Cursor, VS Code, and Codex CLI is on the [MCP page](mcp.md).
+
 ## 1) Create or open a project
 
 **Option A — CLI scaffold** (closest to `nest new`):

@@ -73,6 +73,8 @@ pub use nestrs_openapi;
 #[cfg(feature = "ws")]
 pub use nestrs_ws as ws;
 
+#[cfg(feature = "admin")]
+pub mod admin;
 mod cache;
 mod client_ip;
 mod config;
@@ -1840,13 +1842,6 @@ impl NestApplication {
             router = router.fallback(axum::routing::any(nestrs_default_not_found_handler));
         }
 
-        if let Some(filter) = self.exception_filter.clone() {
-            router = router.layer(axum::middleware::from_fn_with_state(
-                filter,
-                exception_filter::exception_filter_middleware,
-            ));
-        }
-
         if request_scope {
             router = router.layer(axum::middleware::from_fn_with_state(
                 registry.clone(),
@@ -1903,6 +1898,19 @@ impl NestApplication {
         if production_errors {
             router = router.layer(axum::middleware::from_fn(
                 production_error_sanitize_middleware,
+            ));
+        }
+
+        if let Some(filter) = self.exception_filter.clone() {
+            // Applied last so the filter is the outermost layer and is the last
+            // thing to see the response on the way out. In particular, this
+            // means the filter runs *after* `production_error_sanitize`
+            // (applied just above) and the filter's body survives the
+            // sanitizer — matching the contract documented on
+            // `nestrs::ExceptionFilter`.
+            router = router.layer(axum::middleware::from_fn_with_state(
+                filter,
+                exception_filter::exception_filter_middleware,
             ));
         }
 
@@ -2144,6 +2152,32 @@ impl NestApplication {
     pub async fn listen_graceful(self, port: u16) {
         self.listen_with_shutdown(port, nestrs_shutdown_signal())
             .await;
+    }
+
+    /// Bind a localhost-only HTTP admin port that exposes the live
+    /// provider / route / metadata registries. Consume the returned
+    /// [`crate::admin::AdminHandle`] via `tokio::spawn(handle.serve())`.
+    ///
+    /// Requires the `admin` Cargo feature. Refuses to bind to a
+    /// non-loopback address when `token` is `None`.
+    #[cfg(feature = "admin")]
+    pub fn use_admin(&self, opts: crate::admin::AdminOptions) -> crate::admin::AdminHandle {
+        if let Err(e) = crate::admin::validate_addr(opts.addr, opts.token.as_deref()) {
+            panic!("{e}");
+        }
+        let registry = self.registry.clone();
+        let version = env!("CARGO_PKG_VERSION");
+        let provider: std::sync::Arc<
+            dyn Fn() -> std::sync::Arc<nestrs_core::AdminSnapshot> + Send + Sync,
+        > = std::sync::Arc::new(move || {
+            let providers = registry.provider_summaries();
+            nestrs_core::AdminSnapshot::capture(providers, version)
+        });
+        crate::admin::AdminHandle {
+            addr: opts.addr,
+            token: opts.token,
+            snapshot_provider: provider,
+        }
     }
 }
 

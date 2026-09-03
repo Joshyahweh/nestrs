@@ -80,32 +80,49 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
+          # `publish_pkg` wraps `cargo publish` with a retry loop that
+          # tolerates crates.io HTTP 429 (rate limit) responses. crates.io
+          # sometimes throttles back-to-back publishes from the same
+          # account/IP even with 30s gaps; the retry with backoff recovers
+          # from transient 429s without restarting the whole job.
           publish_pkg() {
-            echo "Publishing $1 ..."
-            cargo publish -p "$1" --locked
+            local pkg="$1"
+            local attempt=1
+            local max_attempts=5
+            while [ "$attempt" -le "$max_attempts" ]; do
+              echo "Publishing $pkg (attempt $attempt/$max_attempts) ..."
+              if cargo publish -p "$pkg" --locked; then
+                return 0
+              fi
+              echo "::warning::cargo publish for $pkg failed on attempt $attempt; sleeping before retry"
+              sleep $((attempt * 30))
+              attempt=$((attempt + 1))
+            done
+            echo "::error::cargo publish for $pkg failed after $max_attempts attempts"
+            return 1
           }
           publish_pkg nestrs-macros
-          sleep 30
+          sleep 60
           publish_pkg nestrs-core
-          sleep 30
+          sleep 60
           publish_pkg nestrs-events
-          sleep 30
+          sleep 60
           publish_pkg nestrs-ws
-          sleep 30
+          sleep 60
           publish_pkg nestrs-graphql
-          sleep 30
+          sleep 60
           publish_pkg nestrs-openapi
-          sleep 30
+          sleep 60
           publish_pkg nestrs-cqrs
-          sleep 30
+          sleep 60
           publish_pkg nestrs-microservices
-          sleep 30
+          sleep 60
           publish_pkg nestrs
-          sleep 30
+          sleep 60
           publish_pkg nestrs-prisma
-          sleep 30
+          sleep 60
           publish_pkg nestrs-mcp
-          sleep 30
+          sleep 60
           publish_pkg nestrs-scaffold
 
   github-release:

@@ -401,16 +401,20 @@ mod tests {
         let registry = ProviderRegistry::new();
         let cache = CacheService::construct(&registry);
 
+        // Use a 500ms TTL with a 1s sleep so the test is robust to CI
+        // scheduler noise; the previous 30ms/60ms values were flaky under
+        // load (a single slow tick could land the first assertion past
+        // the expiry window).
         cache
             .set(
                 "k",
                 &serde_json::json!({"v": 1}),
-                Some(Duration::from_millis(30)),
+                Some(Duration::from_millis(500)),
             )
             .await
             .unwrap();
         assert!(cache.ttl("k").await.is_some());
-        tokio::time::sleep(Duration::from_millis(60)).await;
+        tokio::time::sleep(Duration::from_millis(1_000)).await;
         assert!(cache.get_json("k").await.is_none());
         assert!(cache.ttl("k").await.is_none());
     }

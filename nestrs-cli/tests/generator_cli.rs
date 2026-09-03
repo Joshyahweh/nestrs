@@ -12,17 +12,52 @@ fn unique_tmp_dir(name: &str) -> PathBuf {
 }
 
 fn cli_bin() -> PathBuf {
-    // Cargo exposes the binary path as `CARGO_BIN_EXE_<name>`. Newer
-    // toolchains preserve dashes verbatim, so a binary named `nestrs-cli`
-    // gets `CARGO_BIN_EXE_nestrs-cli`. Older toolchains (pre-1.89)
-    // normalized dashes to underscores (`CARGO_BIN_EXE_nestrs_cli`).
-    // Try both so the test works on every supported toolchain.
-    let dash = std::env::var("CARGO_BIN_EXE_nestrs-cli").ok();
-    let underscore = std::env::var("CARGO_BIN_EXE_nestrs_cli").ok();
-    let raw = dash
-        .or(underscore)
-        .expect("CARGO_BIN_EXE_nestrs-cli (or _nestrs_cli) is set by Cargo for integration tests");
-    PathBuf::from(raw)
+    // Locate the `nestrs-cli` binary in a way that works on every supported
+    // toolchain. Three strategies, in order:
+    //
+    // 1. `CARGO_BIN_EXE_nestrs-cli` — set by Cargo when the binary lives in
+    //    a separate package (the standard cross-crate integration test
+    //    pattern), or on newer toolchains that always set the env var.
+    // 2. `CARGO_BIN_EXE_nestrs_cli` — set by Cargo ≤ 1.88 when it
+    //    normalized dashes in binary names to underscores.
+    // 3. Walk up from `CARGO_MANIFEST_DIR` to the workspace root, then look
+    //    in `target/debug/` (and `target/debug/deps/`) for a `nestrs-cli`
+    //    (or `nestrs-cli.exe`) executable. This covers the case where the
+    //    binary is in the same crate as the test and the toolchain does
+    //    not set `CARGO_BIN_EXE_*` at all (e.g. Cargo ≤ 1.88 for a hybrid
+    //    crate that contains both a library and a [[bin]]).
+    if let Ok(p) = std::env::var("CARGO_BIN_EXE_nestrs-cli") {
+        return PathBuf::from(p);
+    }
+    if let Ok(p) = std::env::var("CARGO_BIN_EXE_nestrs_cli") {
+        return PathBuf::from(p);
+    }
+    let manifest = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR is set for integration tests");
+    let crate_dir = PathBuf::from(manifest);
+    let workspace_root = crate_dir
+        .ancestors()
+        .find(|p| p.join("Cargo.toml").exists() && p.join("nestrs-cli").exists())
+        .or_else(|| crate_dir.ancestors().nth(1))
+        .unwrap_or(&crate_dir)
+        .to_path_buf();
+    let bin_name = if cfg!(windows) {
+        "nestrs-cli.exe"
+    } else {
+        "nestrs-cli"
+    };
+    for candidate in [
+        workspace_root.join("target").join("debug").join(bin_name),
+        workspace_root.join("target").join("debug").join("deps").join(bin_name),
+    ] {
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    panic!(
+        "could not locate the `nestrs-cli` binary. Tried:\n  - $CARGO_BIN_EXE_nestrs-cli\n  - $CARGO_BIN_EXE_nestrs_cli\n  - {}/target/debug/{}\n  - {}/target/debug/deps/{}\nBuild the workspace once with `cargo build -p nestrs-scaffold` so the binary exists in target/debug/.",
+        workspace_root.display(), bin_name, workspace_root.display(), bin_name,
+    );
 }
 
 fn run_cli(args: &[&str]) {

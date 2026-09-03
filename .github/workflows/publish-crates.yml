@@ -80,18 +80,35 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
-          # `publish_pkg` wraps `cargo publish` with a retry loop that
-          # tolerates crates.io HTTP 429 (rate limit) responses. crates.io
-          # sometimes throttles back-to-back publishes from the same
-          # account/IP even with 30s gaps; the retry with backoff recovers
-          # from transient 429s without restarting the whole job.
+          # `publish_pkg` wraps `cargo publish` so the workflow is
+          # idempotent across re-runs and resilient to transient
+          # crates.io failures:
+          #
+          # 1. If the crate@version is already on crates.io (because a
+          #    previous run partially completed, was cancelled, or
+          #    raced with a parallel run), skip with a notice. Detected
+          #    by the exact `error: crate <name>@<version> already
+          #    exists on crates.io index` message `cargo publish` emits
+          #    in that case.
+          # 2. Otherwise retry up to 5 times with exponential backoff
+          #    (30s/60s/90s/120s) on any other failure — usually
+          #    transient crates.io HTTP 429 (rate limit) responses.
+          # 3. After 5 failed attempts, abort so the failure surfaces
+          #    in the run summary.
           publish_pkg() {
             local pkg="$1"
             local attempt=1
             local max_attempts=5
+            local log
             while [ "$attempt" -le "$max_attempts" ]; do
               echo "Publishing $pkg (attempt $attempt/$max_attempts) ..."
-              if cargo publish -p "$pkg" --locked; then
+              if log=$(cargo publish -p "$pkg" --locked 2>&1); then
+                echo "$log"
+                return 0
+              fi
+              echo "$log"
+              if grep -qE "crate ${pkg}@[0-9]+\.[0-9]+\.[0-9]+ already exists on crates.io index" <<<"$log"; then
+                echo "::notice::$pkg is already on crates.io at this version; skipping"
                 return 0
               fi
               echo "::warning::cargo publish for $pkg failed on attempt $attempt; sleeping before retry"

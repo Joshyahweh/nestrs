@@ -66,8 +66,8 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 
 | Nest CLI | nestrs | Status | Notes |
 |----------|--------|--------|--------|
-| `nest new` | `nestrs new` | **Partial** | Single-crate scaffold—[CLI](cli.md). |
-| `nest generate` | `nestrs generate` (`nestrs g`) | **Partial** | Resource, service, controller, DTO, guard, …—[CLI](cli.md). |
+| `nest new` | `nestrs-cli new` | **Partial** | Single-crate scaffold—[CLI](cli.md). |
+| `nest generate` | `nestrs-cli generate` (`nestrs-cli g`) | **Partial** | Resource, service, controller, DTO, guard, …—[CLI](cli.md). |
 | Monorepo / plugins | — | **Out of scope (today)** | Use Cargo workspaces and standard Rust tooling—[CLI](cli.md). |
 
 ## Testing and stability

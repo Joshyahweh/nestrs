@@ -1,9 +1,9 @@
 ---
 title: "nestrs CLI: scaffold and manage projects"
-description: "Install nestrs-scaffold, create new projects with nestrs new, generate code with nestrs generate, and diagnose your setup with nestrs doctor."
+description: "Install nestrs-scaffold, create new projects with nestrs-cli new, generate code with nestrs-cli generate, and diagnose your setup with nestrs-cli doctor."
 ---
 
-The nestrs CLI is published to crates.io as **`nestrs-scaffold`** — the binary you run is still `nestrs`. It scaffolds new single-crate applications, generates source files, and runs a lightweight diagnostic against your toolchain and `Cargo.toml`. Unlike the Nest CLI, it stays entirely within Cargo-native workflows and does not add Node-style scripts, monorepo management, or library packaging.
+The nestrs CLI is published to crates.io as **`nestrs-scaffold`** — the binary you run is **`nestrs-cli`**. It scaffolds new single-crate applications, generates source files, and runs a lightweight diagnostic against your toolchain and `Cargo.toml`. Unlike the Nest CLI, it stays entirely within Cargo-native workflows and does not add Node-style scripts, monorepo management, or library packaging.
 
 ## Install
 
@@ -15,13 +15,13 @@ The nestrs CLI is published to crates.io as **`nestrs-scaffold`** — the binary
   </Step>
   <Step title="Verify the binary">
     ```bash
-    nestrs --help
+    nestrs-cli --help
     ```
   </Step>
 </Steps>
 
 <Note>
-  The crates.io package is `nestrs-scaffold` because the name `nestrs-cli` is already taken. The installed binary is `nestrs` in either case.
+  The crates.io package is `nestrs-scaffold` because the name `nestrs-cli` is already taken. The installed binary is `nestrs-cli` in either case.
 </Note>
 
 If you are working inside a clone of the nestrs repository, the workspace defines a Cargo alias so you can skip the global install:
@@ -31,22 +31,22 @@ cargo nestrs doctor
 cargo nestrs generate resource items --transport rest --path src
 ```
 
-This alias is configured in `.cargo/config.toml` as `run -p nestrs-scaffold --bin nestrs --`.
+This alias is configured in `.cargo/config.toml` as `run -p nestrs-scaffold --bin nestrs-cli --`.
 
 ## Available commands
 
 | Command | Purpose |
 |---------|---------|
-| `nestrs new <name>` | Create a new single-crate app with `Cargo.toml`, `src/main.rs`, starter module/controller, `.env`, `.env.example`, `Dockerfile`, `.gitignore`, and `README.md`. |
-| `nestrs generate` / `nestrs g` | Generate resources, services, controllers, modules, DTOs, guards, pipes, filters, interceptors, strategies, resolvers, gateways, microservices, and transports. |
-| `nestrs doctor` | Print `rustc` and `cargo` versions, scan `Cargo.toml` for nestrs feature flags, and heuristically check `src/**/*.rs` for common misconfigurations. |
+| `nestrs-cli new <name>` | Create a new single-crate app with `Cargo.toml`, `src/main.rs`, starter module/controller, `.env`, `.env.example`, `Dockerfile`, `.gitignore`, and `README.md`. |
+| `nestrs-cli generate` / `nestrs-cli g` | Generate resources, services, controllers, modules, DTOs, guards, pipes, filters, interceptors, strategies, resolvers, gateways, microservices, and transports. |
+| `nestrs-cli doctor` | Print `rustc` and `cargo` versions, scan `Cargo.toml` for nestrs feature flags, and heuristically check `src/**/*.rs` for common misconfigurations. |
 
-## nestrs new
+## nestrs-cli new
 
-`nestrs new <name>` creates a ready-to-run single-crate application. Run it from any directory — it creates a new subdirectory named after your project.
+`nestrs-cli new <name>` creates a ready-to-run single-crate application. Run it from any directory — it creates a new subdirectory named after your project.
 
 ```bash
-nestrs new billing-api
+nestrs-cli new billing-api
 cd billing-api
 cargo run
 ```
@@ -60,12 +60,12 @@ cargo run
 | `--package-manager cargo` | `cargo` | Only `cargo` is supported. Other values are rejected. |
 
 <Tip>
-  Use `--dry-run` on generators before writing to an existing tree — but `nestrs new` always creates a fresh directory, so there is no equivalent flag for it.
+  Use `--dry-run` on generators before writing to an existing tree — but `nestrs-cli new` always creates a fresh directory, so there is no equivalent flag for it.
 </Tip>
 
 ### Generated project structure
 
-After `nestrs new billing-api`, your project contains:
+After `nestrs-cli new billing-api`, your project contains:
 
 ```
 billing-api/
@@ -202,12 +202,12 @@ billing-api/
   </Accordion>
 </AccordionGroup>
 
-## nestrs doctor
+## nestrs-cli doctor
 
-`nestrs doctor` is a lightweight sanity check you run from the root of a nestrs crate (where `Cargo.toml` lives). It does not replace `cargo check` or your CI matrix — use it as a first-pass hint list.
+`nestrs-cli doctor` is a lightweight sanity check you run from the root of a nestrs crate (where `Cargo.toml` lives). It does not replace `cargo check` or your CI matrix — use it as a first-pass hint list.
 
 ```bash
-nestrs doctor
+nestrs-cli doctor
 ```
 
 ### What it checks
@@ -231,7 +231,7 @@ nestrs doctor
 Example output when no issues are found:
 
 ```
-nestrs doctor
+nestrs-cli doctor
 
 rustc: rustc 1.78.0 (9b00956e5 2024-04-29)
 cargo: cargo 1.78.0 (54d8815d0 2024-04-09)
@@ -247,7 +247,7 @@ Done. This does not replace `cargo check` or security audits.
 ```
 
 <Warning>
-  `nestrs doctor` uses string heuristics on your source files — it can produce false positives and will miss issues that only appear at compile time. Always follow up with `cargo check` and your full CI pipeline.
+  `nestrs-cli doctor` uses string heuristics on your source files — it can produce false positives and will miss issues that only appear at compile time. Always follow up with `cargo check` and your full CI pipeline.
 </Warning>
 
 ## Scope compared to the Nest CLI
@@ -255,13 +255,13 @@ Done. This does not replace `cargo check` or security audits.
 The Nest CLI covers application lifecycle management, monorepos, publishable library packages, and npm-style scripts. nestrs intentionally stays closer to Cargo and normal Rust workflows.
 
 <Note>
-  The nestrs CLI focuses on **file and code generation** and a **single-crate** `nestrs new` skeleton. It does not replace Cargo for workspaces, libraries, or task runners.
+  The nestrs CLI focuses on **file and code generation** and a **single-crate** `nestrs-cli new` skeleton. It does not replace Cargo for workspaces, libraries, or task runners.
 </Note>
 
 | Nest CLI area | nestrs | What to use instead |
 |---------------|--------|---------------------|
-| `nest new` / app skeleton | Partial | `nestrs new` — single crate, opinionated starter. |
-| `nest generate` | Partial | `nestrs generate` — overlapping generators; naming and file trees differ. |
+| `nest new` / app skeleton | Partial | `nestrs-cli new` — single crate, opinionated starter. |
+| `nest generate` | Partial | `nestrs-cli generate` — overlapping generators; naming and file trees differ. |
 | Workspaces (multiple apps/libs) | No | [Cargo workspaces](https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html) with `[workspace].members`. |
 | Publishable library packages | No | `cargo new --lib`, crates.io, path/git dependencies. |
 | Scripts (`npm run …`) | No | `cargo run --bin <name>`, [cargo-make](https://github.com/sagiegurari/cargo-make), [just](https://github.com/casey/just), or shell scripts. |

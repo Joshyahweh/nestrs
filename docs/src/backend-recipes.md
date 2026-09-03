@@ -2201,18 +2201,18 @@ Subscribe to **`order.created`** (NATS/Kafka/`on_event`) and update a read-optim
 | WebSockets + DB | **`ws`** + **`nestrs-ws`** + same providers |
 | Kafka / NATS / Redis micros | **`microservices-*`** features |
 | OpenAPI + any DB | **`openapi`** + services calling Prisma/Mongo/SQLx |
-| CLI scaffolds | **`nestrs generate resource --transport …`** — [CLI](cli.md) |
+| CLI scaffolds | **`nestrs-cli generate resource --transport …`** — [CLI](cli.md) |
 
 ---
 
 ## CLI acceleration (many transports)
 
 ```bash
-nestrs generate resource users --transport rest
-nestrs generate resource users --transport graphql
-nestrs generate resource users --transport grpc
-nestrs generate resource users --transport ws
-nestrs generate resource audit --transport microservice
+nestrs-cli generate resource users --transport rest
+nestrs-cli generate resource users --transport graphql
+nestrs-cli generate resource users --transport grpc
+nestrs-cli generate resource users --transport ws
+nestrs-cli generate resource audit --transport microservice
 ```
 
 Replace generated stub providers with **Recipes A–G** (CRUD stacks **A–D**, RPC **E**, brokers **F**, events **G**).

@@ -16,12 +16,12 @@ As you add **`NestApplication::…`** calls (CORS, metrics, CSRF, etc.), use the
 **Option A — CLI scaffold** (closest to `nest new`):
 
 ```bash
-cargo install nestrs-scaffold   # binary name: nestrs
-nestrs new my-api
+cargo install nestrs-scaffold   # binary name: nestrs-cli
+nestrs-cli new my-api
 cd my-api
 ```
 
-See [CLI](cli.md) and `nestrs-cli/README.md` for `nestrs generate` and templates.
+See [CLI](cli.md) and `nestrs-cli/README.md` for `nestrs-cli generate` and templates.
 
 **Option B — Cargo only**:
 

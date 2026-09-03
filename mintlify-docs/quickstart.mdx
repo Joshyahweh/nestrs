@@ -18,7 +18,7 @@ cargo install nestrs-scaffold
 Verify the installation:
 
 ```bash
-nestrs --help
+nestrs-cli --help
 ```
 
 You should see output like:
@@ -38,10 +38,10 @@ Codegen and project skeletons for https://crates.io/crates/nestrs
 
 <Step title="Create a new project">
 
-Run `nestrs new` with your project name:
+Run `nestrs-cli new` with your project name:
 
 ```bash
-nestrs new my-api
+nestrs-cli new my-api
 cd my-api
 ```
 
@@ -81,7 +81,7 @@ panic = "abort"
 ```
 
 <Tip>
-  Use `nestrs new my-api --strict` to add `#![deny(unsafe_code)]` to the generated `src/main.rs`. Use `--no-git` to skip initialising a git repository.
+  Use `nestrs-cli new my-api --strict` to add `#![deny(unsafe_code)]` to the generated `src/main.rs`. Use `--no-git` to skip initialising a git repository.
 </Tip>
 
 </Step>
@@ -241,6 +241,6 @@ Source lives at `examples/hello-app/src/main.rs`.
     Use `#[dto]`, `#[IsEmail]`, `#[Length]`, and other validation macros to validate request bodies automatically.
   </Card>
   <Card title="CLI reference" icon="terminal" href="/cli/overview">
-    Generate controllers, services, guards, pipes, and more with `nestrs generate`.
+    Generate controllers, services, guards, pipes, and more with `nestrs-cli generate`.
   </Card>
 </CardGroup>

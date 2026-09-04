@@ -44,6 +44,14 @@ otel = [
   "dep:opentelemetry-otlp",
   "dep:tracing-opentelemetry",
 ]
+## First-class authentication: `JwtService` (EdDSA via `jsonwebtoken`), `Argon2idPasswordHasher`,
+## `Principal`/`OptionalPrincipal` extractors, `AuthnGuard` (with `#[roles(...)]` enforcement), and
+## `AuthnModule::register(AuthnOptions)`.
+authn = ["dep:jsonwebtoken", "dep:argon2", "dep:getrandom"]
+## First-class authorization: CASL-style `Ability` / `AbilityBuilder`, `PoliciesGuard`,
+## `#[check_policies(...)]` route metadata, and `PoliciesModule::register(PoliciesOptions)`.
+## Pairs with `authn` so guards can read the verified `PrincipalIdentity`.
+authz = []
 ## Enables a localhost-only HTTP admin port with `/__nestrs/{health,routes,providers,openapi.json}` endpoints. Consumed by `nestrs-mcp`'s live-runtime tools.
 admin = []
 ## Clears `nestrs-core` global registries in tests (`RouteRegistry`, `MetadataRegistry`). See `STABILITY.md`.
@@ -80,7 +88,7 @@ opentelemetry = { version = "0.31.0", features = ["trace"], optional = true }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.31.1", default-features = false, features = ["trace", "grpc-tonic"], optional = true }
 tracing-opentelemetry = { version = "0.32.1", default-features = false, optional = true }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "postgres", "sqlite"], optional = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "macros", "postgres", "sqlite"], optional = true }
 mongodb = { version = "3", optional = true, default-features = false, features = ["compat-3-0-0", "rustls-tls"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 tower-cookies = { version = "0.10", optional = true }
@@ -88,6 +96,9 @@ subtle = { version = "2.6", optional = true }
 tower-sessions = { version = "0.10", default-features = false, features = ["memory-store"], optional = true }
 minijinja = { version = "2", optional = true, default-features = false, features = ["serde"] }
 tokio-util = { version = "0.7", features = ["io"], optional = true }
+jsonwebtoken = { workspace = true, optional = true }
+argon2 = { workspace = true, optional = true, features = ["rand"] }
+getrandom = { version = "0.2", optional = true }
 
 [dev-dependencies]
 async-graphql = "=7.0.17"
@@ -96,6 +107,10 @@ tower = { version = "0.5", features = ["util"] }
 serial_test = "3"
 criterion = { version = "0.5", features = ["async_tokio"] }
 futures-util = "0.3"
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "std", "rand_core"] }
+ed25519 = { version = "2", features = ["pkcs8", "pem"] }
+rand = "0.8"
+pkcs8 = { version = "0.10", features = ["pem"] }
 
 [[bench]]
 name = "router_hot_path"

@@ -6,9 +6,9 @@ pub use axum;
 use axum::body::{to_bytes, Body};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 pub use nestrs_macros::{
-    all, controller, cron, delete, dto, event_pattern, event_routes, get, head, http_code,
-    injectable, interval, message_pattern, micro_routes, module, on_event, openapi, options, patch,
-    post, put, queue_processor, raw_body, redirect, response_header, roles, routes,
+    all, check_policies, controller, cron, delete, dto, event_pattern, event_routes, get, head,
+    http_code, injectable, interval, message_pattern, micro_routes, module, on_event, openapi,
+    options, patch, post, put, queue_processor, raw_body, redirect, response_header, roles, routes,
     schedule_routes, serialize, set_metadata, sse, subscribe_message, use_filters, use_guards,
     use_interceptors, use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes,
     use_ws_guards, use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes,
@@ -75,6 +75,8 @@ pub use nestrs_ws as ws;
 
 #[cfg(feature = "admin")]
 pub mod admin;
+#[cfg(feature = "authn")]
+mod authn;
 mod cache;
 mod client_ip;
 mod config;
@@ -88,6 +90,8 @@ mod http_client;
 mod http_execution_context;
 mod i18n;
 mod interceptor;
+#[cfg(all(feature = "authz", feature = "authn"))]
+mod masking;
 #[cfg(feature = "mongo")]
 mod mongo;
 mod multipart;
@@ -96,27 +100,40 @@ mod mvc;
 #[cfg(feature = "otel")]
 pub mod otel;
 mod pipes;
+#[cfg(feature = "authz")]
+mod policies;
 pub mod problem;
 #[cfg(feature = "queues")]
 pub mod queues;
 mod raw_body;
+#[cfg(all(feature = "database-sqlx", feature = "authz"))]
+mod repository;
 mod request_context;
 mod request_scoped;
 #[cfg(feature = "schedule")]
 pub mod schedule;
 mod security;
 mod serialization;
+mod server_timing;
 pub mod sse;
 mod testing;
+#[cfg(feature = "database-sqlx")]
+mod transactional;
 mod versioning;
 
+#[cfg(feature = "authn")]
+pub use authn::{
+    build_jwt_service, install_authn_middleware, Argon2idParams, Argon2idPasswordHasher,
+    AuthnGuard, AuthnModule, AuthnOptions, JwtService, OptionalPrincipal, PasswordHasher,
+    Principal, PrincipalIdentity,
+};
 #[cfg(feature = "cache-redis")]
 pub use cache::RedisCacheOptions;
 pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
 pub use client_ip::{ClientIp, ClientIpMissing};
 pub use config::{load_config, ConfigError, ConfigModule};
 #[cfg(feature = "database-sqlx")]
-pub use database_sqlx::{SqlxDatabaseModule, SqlxDatabaseService};
+pub use database_sqlx::{install_default_drivers, SqlxDatabaseModule, SqlxDatabaseService};
 pub use exception_filter::ExceptionFilter;
 #[cfg(feature = "files")]
 pub use files::{stream_file_octet_stream, stream_file_or_response, stream_file_with_content_type};
@@ -125,6 +142,8 @@ pub use http_client::{HttpModule, HttpService};
 pub use http_execution_context::{ExecutionContextMissing, HttpExecutionContext};
 pub use i18n::{I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale};
 pub use interceptor::{Interceptor, LoggingInterceptor};
+#[cfg(all(feature = "authz", feature = "authn"))]
+pub use masking::{json_response, mask_response, MaskingConfig, PolicyMaskingInterceptor};
 #[cfg(feature = "mongo")]
 pub use mongo::{MongoModule, MongoService};
 #[cfg(feature = "mvc")]
@@ -133,6 +152,13 @@ pub use mvc::{MvcModule, MvcService};
 pub use otel::{OpenTelemetryConfig, OtlpProtocol};
 pub use pipes::ParseIntPipe;
 pub use pipes::ValidationPipe;
+#[cfg(feature = "authz")]
+pub use policies::current_ability;
+#[cfg(feature = "authz")]
+pub use policies::{
+    install_policies_middleware, parse_policy_entries, with_ability, Ability, AbilityBuilder,
+    Action, Conditions, PoliciesGuard, PoliciesModule, PoliciesOptions, PolicyEntry, Rule, Subject,
+};
 pub use problem::ProblemDetails;
 #[cfg(feature = "queues")]
 pub use queues::{
@@ -140,6 +166,8 @@ pub use queues::{
     QueuesRuntime, QueuesService,
 };
 pub use raw_body::RawBody;
+#[cfg(all(feature = "database-sqlx", feature = "authz"))]
+pub use repository::{CrudService, Entity, Repository};
 pub use request_context::{RequestContext, RequestContextMissing};
 pub use request_scoped::{RequestScoped, RequestScopedMissing};
 #[cfg(feature = "schedule")]
@@ -151,7 +179,13 @@ pub use security::{
     DemoXRoleMetadataGuard, OptionalBearerToken,
 };
 pub use serialization::strip_null_json_value;
+pub use server_timing::{ServerTiming, ServerTimingConfig};
 pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
+#[cfg(feature = "database-sqlx")]
+pub use transactional::{
+    current_transaction, install_transactional_middleware, TransactionSlot,
+    TransactionalInterceptor,
+};
 pub use versioning::{
     host_restriction_middleware, ApiVersioningPolicy, NestApiVersion, VersioningType,
 };
@@ -245,6 +279,18 @@ pub mod prelude {
         UnsupportedMediaTypeException, ValidatedBody, ValidatedPath, ValidatedQuery,
         ValidationPipe, VersioningType,
     };
+    #[cfg(feature = "authn")]
+    pub use crate::{
+        build_jwt_service, install_authn_middleware, Argon2idParams, Argon2idPasswordHasher,
+        AuthnGuard, AuthnModule, AuthnOptions, JwtService, OptionalPrincipal, PasswordHasher,
+        Principal, PrincipalIdentity,
+    };
+    #[cfg(feature = "authz")]
+    pub use crate::{
+        check_policies, install_policies_middleware, parse_policy_entries, Ability, AbilityBuilder,
+        Action, Conditions, PoliciesGuard, PoliciesModule, PoliciesOptions, PolicyEntry, Rule,
+        Subject,
+    };
     pub use crate::{
         parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
         DemoXRoleMetadataGuard, OptionalBearerToken,
@@ -268,6 +314,7 @@ pub mod prelude {
     pub use crate::{OpenTelemetryConfig, OtlpProtocol};
     #[cfg(feature = "schedule")]
     pub use crate::{ScheduleModule, ScheduleRuntime};
+    pub use crate::{ServerTiming, ServerTimingConfig};
     #[cfg(feature = "database-sqlx")]
     pub use crate::{SqlxDatabaseModule, SqlxDatabaseService};
     pub use axum::{extract::Multipart, extract::State, response::IntoResponse, Json};
@@ -853,6 +900,10 @@ pub struct NestApplication {
     readiness: Option<(String, Vec<std::sync::Arc<dyn HealthIndicator>>)>,
     /// Prometheus scrape path at server root (see [`Self::enable_metrics`]).
     metrics_path: Option<String>,
+    /// When `Some`, install the `Server-Timing` middleware (RFC 8628) and append a
+    /// `Server-Timing: total;dur=<ms>` header (plus any user-recorded named timers) to
+    /// every response. See [`Self::use_server_timing`].
+    server_timing: Option<server_timing::ServerTimingConfig>,
     #[cfg(feature = "openapi")]
     openapi: Option<nestrs_openapi::OpenApiOptions>,
     request_tracing: Option<RequestTracingOptions>,
@@ -916,6 +967,7 @@ impl NestApplication {
             liveness_path: None,
             readiness: None,
             metrics_path: None,
+            server_timing: None,
             #[cfg(feature = "openapi")]
             openapi: None,
             request_tracing: None,
@@ -1478,6 +1530,24 @@ impl NestApplication {
         self
     }
 
+    /// Enables the `Server-Timing` middleware (RFC 8628) and the [`crate::ServerTiming`]
+    /// extractor. Every response gets a `Server-Timing: total;dur=<ms>` header; handlers
+    /// can record named timers via the extractor and they will be appended to the header.
+    pub fn use_server_timing(mut self) -> Self {
+        self.server_timing = Some(crate::server_timing::ServerTimingConfig::default());
+        self
+    }
+
+    /// Like [`Self::use_server_timing`] but with a custom configuration (e.g. a higher
+    /// `min_ms_to_report` to suppress trivial entries).
+    pub fn use_server_timing_with(
+        mut self,
+        config: crate::server_timing::ServerTimingConfig,
+    ) -> Self {
+        self.server_timing = Some(config);
+        self
+    }
+
     /// Enables request-scoped providers (`ProviderScope::Request`) and the [`RequestScoped`] extractor.
     ///
     /// This installs a middleware that:
@@ -1722,6 +1792,7 @@ impl NestApplication {
         let liveness_path = self.liveness_path;
         let readiness = self.readiness;
         let metrics_path = self.metrics_path.clone();
+        let server_timing = self.server_timing;
         let request_tracing = self.request_tracing;
         let global_layers = self.global_layers;
         let default_404_fallback = self.default_404_fallback;
@@ -1949,6 +2020,13 @@ impl NestApplication {
             router = router.layer(axum::middleware::from_fn_with_state(
                 HttpMetricsState { scrape_path },
                 http_metrics_middleware,
+            ));
+        }
+
+        if let Some(server_timing_cfg) = server_timing {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                std::sync::Arc::new(server_timing_cfg),
+                server_timing::server_timing_middleware,
             ));
         }
 
@@ -2253,13 +2331,15 @@ async fn axum_serve(
     }
 }
 
-/// Runs destroy-phase lifecycle hooks (application shutdown, then module destroy) in reverse
-/// init order, optionally bounded by a timeout so a hung hook cannot block process exit.
+/// Runs destroy-phase lifecycle hooks (before-application-shutdown, then application shutdown,
+/// then module destroy) in reverse init order, optionally bounded by a timeout so a hung hook
+/// cannot block process exit.
 async fn run_destroy_phase(
     registry: &std::sync::Arc<crate::core::ProviderRegistry>,
     hook_timeout: Option<std::time::Duration>,
 ) {
     let hooks = async {
+        registry.run_on_before_application_shutdown().await;
         registry.run_on_application_shutdown().await;
         registry.run_on_module_destroy().await;
     };

@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-04
+
+### Changed
+
+- Workspace and crate versions bumped 0.5.1 -> 0.5.2. The 0.5.1 publish
+  was unable to land `nestrs-mcp` and `nestrs-scaffold` to crates.io
+  (10 of 12 crates made it; the remaining two were blocked by a
+  crates.io 400 from the 22-char `model-context-protocol` keyword in
+  `nestrs-mcp` and a flaky preflight test gating the publish job).
+  v0.5.2 ships the keyword fix and retries past the flake.
+
+> Note: v0.5.0 and v0.5.1 are both partial releases on crates.io. v0.5.2
+> is the first complete 0.5.x release and the recommended upgrade for
+> anyone who pinned to either partial version. v0.5.0 and v0.5.1
+> crates remain on crates.io for compatibility.
+
 ## [0.5.1] - 2026-09-03
 
 ### Fixed

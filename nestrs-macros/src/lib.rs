@@ -1664,6 +1664,39 @@ fn parse_roles(attrs: &[syn::Attribute]) -> Result<Vec<(LitStr, LitStr)>> {
     Ok(out)
 }
 
+/// Parse `#[check_policies("read:Post", "update:User")]` and emit a single
+/// `("check_policies", "read:Post,update:User")` metadata entry. Same shape as
+/// `parse_roles` (CSV in the value field) so it slots into the existing
+/// metadata pipeline without a new registry API.
+fn parse_check_policies(attrs: &[syn::Attribute]) -> Result<Vec<(LitStr, LitStr)>> {
+    let mut out = Vec::new();
+    for attr in attrs {
+        if !attr.path().is_ident("check_policies") {
+            continue;
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "check_policies expects one or more string literals, e.g. #[check_policies(\"read:Post\")]",
+            ));
+        };
+        let args: Punctuated<LitStr, Token![,]> = Punctuated::<LitStr, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())
+            .map_err(|_| {
+                syn::Error::new_spanned(
+                    list,
+                    "check_policies expects action:Subject tokens, e.g. #[check_policies(\"read:Post\", \"update:User\")]",
+                )
+            })?;
+        let joined = args.iter().map(|s| s.value()).collect::<Vec<_>>().join(",");
+        out.push((
+            LitStr::new("check_policies", attr.span()),
+            LitStr::new(&joined, attr.span()),
+        ));
+    }
+    Ok(out)
+}
+
 struct OpenApiResponsePair(LitInt, LitStr);
 
 impl Parse for OpenApiResponsePair {
@@ -1940,6 +1973,10 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             Err(e) => return e.to_compile_error().into(),
         };
         match parse_roles(&func.attrs) {
+            Ok(v) => metadata.extend(v),
+            Err(e) => return e.to_compile_error().into(),
+        }
+        match parse_check_policies(&func.attrs) {
             Ok(v) => metadata.extend(v),
             Err(e) => return e.to_compile_error().into(),
         }
@@ -3235,6 +3272,11 @@ pub fn set_metadata(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn roles(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn check_policies(attr: TokenStream, item: TokenStream) -> TokenStream {
     passthrough(attr, item)
 }
 

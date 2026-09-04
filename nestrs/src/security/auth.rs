@@ -29,6 +29,13 @@ pub fn route_roles_csv(parts: &Parts) -> Option<String> {
     MetadataRegistry::get(handler, "roles")
 }
 
+/// Generic route metadata CSV (e.g. for `check_policies`). Returns the metadata value
+/// stored under `key` on the current handler, if any.
+pub fn route_metadata_csv(parts: &Parts, key: &str) -> Option<String> {
+    let handler = parts.extensions.get::<HandlerKey>().map(|h| h.0)?;
+    MetadataRegistry::get(handler, key)
+}
+
 /// Requires a non-empty `Authorization: Bearer …` header and exposes the token (UTF-8).
 #[derive(Debug, Clone)]
 pub struct BearerToken(pub String);

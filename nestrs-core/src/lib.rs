@@ -76,6 +76,9 @@ struct ProviderEntry {
     on_module_init: HookFn,
     on_module_destroy: HookFn,
     on_application_bootstrap: HookFn,
+    /// NestJS `beforeApplicationShutdown`: fires before `onApplicationShutdown` /
+    /// `onModuleDestroy` during graceful shutdown.
+    on_before_application_shutdown: HookFn,
     on_application_shutdown: HookFn,
 }
 
@@ -98,6 +101,7 @@ fn create_entry_for_injectable<T: Injectable + Send + Sync + 'static>() -> Provi
         on_module_init: hook_on_module_init::<T>,
         on_module_destroy: hook_on_module_destroy::<T>,
         on_application_bootstrap: hook_on_application_bootstrap::<T>,
+        on_before_application_shutdown: hook_on_before_application_shutdown::<T>,
         on_application_shutdown: hook_on_application_shutdown::<T>,
     }
 }
@@ -150,6 +154,7 @@ impl ProviderRegistry {
                 on_module_init: noop_hook,
                 on_module_destroy: noop_hook,
                 on_application_bootstrap: noop_hook,
+                on_before_application_shutdown: noop_hook,
                 on_application_shutdown: noop_hook,
             },
         );
@@ -183,6 +188,7 @@ impl ProviderRegistry {
                 on_module_init: noop_hook,
                 on_module_destroy: noop_hook,
                 on_application_bootstrap: noop_hook,
+                on_before_application_shutdown: noop_hook,
                 on_application_shutdown: noop_hook,
             },
         );
@@ -213,6 +219,7 @@ impl ProviderRegistry {
             on_module_init: hook_on_module_init::<T>,
             on_module_destroy: hook_on_module_destroy::<T>,
             on_application_bootstrap: hook_on_application_bootstrap::<T>,
+            on_before_application_shutdown: hook_on_before_application_shutdown::<T>,
             on_application_shutdown: hook_on_application_shutdown::<T>,
         };
 
@@ -490,6 +497,17 @@ impl ProviderRegistry {
         }
     }
 
+    /// NestJS `beforeApplicationShutdown` mirror: fires BEFORE `run_on_application_shutdown` and
+    /// `run_on_module_destroy` during graceful shutdown. Reverse initialization order so that
+    /// providers holding resources release them after their dependents have shut down.
+    pub async fn run_on_before_application_shutdown(&self) {
+        for type_id in self.ordered_singletons().into_iter().rev() {
+            if let Some(entry) = self.entries.get(&type_id) {
+                (entry.on_before_application_shutdown)(self).await;
+            }
+        }
+    }
+
     /// Shutdown hooks run in **reverse** initialization order (dependencies torn down after dependents).
     pub async fn run_on_application_shutdown(&self) {
         for type_id in self.ordered_singletons().into_iter().rev() {
@@ -548,6 +566,16 @@ where
     })
 }
 
+fn hook_on_before_application_shutdown<'a, T>(registry: &'a ProviderRegistry) -> HookFuture<'a>
+where
+    T: Injectable + Send + Sync + 'static,
+{
+    Box::pin(async move {
+        let v = registry.get::<T>();
+        v.on_before_application_shutdown().await;
+    })
+}
+
 fn hook_on_application_shutdown<'a, T>(registry: &'a ProviderRegistry) -> HookFuture<'a>
 where
     T: Injectable + Send + Sync + 'static,
@@ -579,6 +607,10 @@ pub trait Injectable: Send + Sync + 'static {
     async fn on_module_init(&self) {}
     async fn on_module_destroy(&self) {}
     async fn on_application_bootstrap(&self) {}
+    /// NestJS `beforeApplicationShutdown`: fires before `on_application_shutdown` /
+    /// `on_module_destroy` during graceful shutdown. Use to flush caches, close
+    /// long-lived connections, or release resources while dependents are still alive.
+    async fn on_before_application_shutdown(&self) {}
     async fn on_application_shutdown(&self) {}
 }
 
@@ -872,6 +904,24 @@ where
     REQUEST_SCOPE_CACHE
         .scope(std::cell::RefCell::new(HashMap::new()), future)
         .await
+}
+
+/// Look up a value previously inserted into the request scope via
+/// `request_scope_insert` or by the `RequestScoped<T>` provider. Returns
+/// `None` outside of a request scope.
+pub fn request_scope_get(type_id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
+    REQUEST_SCOPE_CACHE
+        .try_with(|c| c.borrow().get(&type_id).cloned())
+        .ok()
+        .flatten()
+}
+
+/// Insert a value into the request scope. Must be called from inside a
+/// `with_request_scope` future; otherwise it's a no-op.
+pub fn request_scope_insert(type_id: TypeId, value: Arc<dyn Any + Send + Sync>) {
+    let _ = REQUEST_SCOPE_CACHE.try_with(|c| {
+        c.borrow_mut().insert(type_id, value);
+    });
 }
 
 thread_local! {

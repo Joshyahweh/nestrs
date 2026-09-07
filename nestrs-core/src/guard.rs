@@ -5,11 +5,17 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
-/// Failure returned from [`CanActivate::can_activate`]; becomes a JSON error body (401 / 403).
+/// Failure returned from [`CanActivate::can_activate`]; becomes a JSON error body (401 / 403 / 429).
 #[derive(Debug, Clone)]
 pub enum GuardError {
     Unauthorized(String),
     Forbidden(String),
+    /// Rate-limit rejection (`ThrottlerGuard`). The response carries
+    /// `Retry-After` and `X-RateLimit-Remaining: 0` headers.
+    TooManyRequests {
+        message: String,
+        retry_after_secs: u64,
+    },
 }
 
 impl GuardError {
@@ -20,24 +26,51 @@ impl GuardError {
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self::Forbidden(message.into())
     }
+
+    pub fn too_many_requests(message: impl Into<String>, retry_after_secs: u64) -> Self {
+        Self::TooManyRequests {
+            message: message.into(),
+            retry_after_secs,
+        }
+    }
 }
 
 impl IntoResponse for GuardError {
     fn into_response(self) -> Response {
-        let (status, message, error_label) = match &self {
-            GuardError::Unauthorized(m) => (
-                axum::http::StatusCode::UNAUTHORIZED,
-                m.clone(),
-                "Unauthorized",
-            ),
-            GuardError::Forbidden(m) => (axum::http::StatusCode::FORBIDDEN, m.clone(), "Forbidden"),
-        };
-        let body = axum::Json(json!({
-            "statusCode": status.as_u16(),
-            "message": message,
-            "error": error_label,
-        }));
-        (status, body).into_response()
+        match self {
+            GuardError::TooManyRequests {
+                message,
+                retry_after_secs,
+            } => {
+                let body = axum::Json(json!({
+                    "statusCode": 429,
+                    "message": message,
+                    "error": "Too Many Requests",
+                }));
+                let mut resp = (axum::http::StatusCode::TOO_MANY_REQUESTS, body).into_response();
+                if let Ok(v) = retry_after_secs.to_string().parse() {
+                    resp.headers_mut().insert("retry-after", v);
+                }
+                resp.headers_mut()
+                    .insert("x-ratelimit-remaining", "0".parse().expect("static header"));
+                resp
+            }
+            other => {
+                let (status, message, error_label) = match other {
+                    GuardError::Unauthorized(m) => {
+                        (axum::http::StatusCode::UNAUTHORIZED, m, "Unauthorized")
+                    }
+                    GuardError::Forbidden(m) => (axum::http::StatusCode::FORBIDDEN, m, "Forbidden"),
+                    GuardError::TooManyRequests { .. } => unreachable!(),
+                };
+                let body = axum::Json(json!({
+                    "statusCode": status.as_u16(),
+                    "message": message,
+                    "error": error_label,
+                }));
+                (status, body).into_response()
+            }
+        }
     }
 }
 

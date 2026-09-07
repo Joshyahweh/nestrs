@@ -24,7 +24,15 @@ pub use limits::{with_default_limits, Analyzer, DEFAULT_MAX_COMPLEXITY, DEFAULT_
 pub use router_options::{graphql_router_with_options, GraphQlHttpOptions};
 pub use sdl::{export_schema_sdl, export_schema_sdl_with_options, SDLExportOptions};
 
-pub use async_graphql::{BatchRequest, ObjectType, Schema, SubscriptionType};
+pub use async_graphql::{
+    BatchRequest, BatchResponse, Error, ObjectType, Request, Response, Schema, SubscriptionType,
+    Value,
+};
+
+#[cfg(feature = "dataloader")]
+pub mod data_loader;
+#[cfg(feature = "dataloader")]
+pub use data_loader::{data_loader, data_loader_cached, DataLoader, DataLoaderRegistry, Loader};
 use axum::Router;
 
 pub fn graphql_router<Q, Mutation, Subscription>(
@@ -38,3 +46,12 @@ where
 {
     graphql_router_with_options(schema, path, GraphQlHttpOptions::default())
 }
+
+// `graphql-authz` feature: low-level trait-based hook that the main
+// `nestrs` crate's typed wrappers (in `nestrs::graphql_authz`) build on.
+// Exposed here so the main crate can wire the hook into the GraphQL
+// router without depending on `nestrs` (Cargo would reject the cycle).
+#[cfg(feature = "graphql-authz")]
+pub mod gql_data_context;
+#[cfg(feature = "graphql-authz")]
+pub use gql_data_context::{graphql_router_with_hook, GqlHandlerHook, NoopHook};

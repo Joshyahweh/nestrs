@@ -7,7 +7,9 @@
 //!   from the handler name (overridable with `#[openapi(summary = \"...\")]`), and a **`tags`** entry
 //!   inferred from the URL or overridden with `#[openapi(tag = \"...\")]`.
 //! - Responses default to **`200 OK`** only unless you set `#[openapi(responses = ((404, \"...\"), ...))]`;
-//!   request/response **schemas are not** derived from Rust types (unlike Nest `@ApiProperty` / class-validator reflection).
+//!   request/response **schemas** are not inferred from handlers, but `#[dto]` types derive
+//!   `schemars::JsonSchema` — feed [`schema_entry`] / [`OpenApiOptions::with_schemas`] to land them
+//!   under `components.schemas`.
 //!
 //! ## Nest `@nestjs/swagger` parity (practical)
 //!
@@ -16,7 +18,7 @@
 //! | `@ApiTags` / controller grouping | Inferred **`tags`** from path; optional document-level [`OpenApiOptions::document_tags`]. |
 //! | `@ApiOperation` summary | Auto **`summary`** from handler name; override with **`#[openapi(summary = \"...\")]`**. |
 //! | `@ApiResponse` / status codes | Default **200** only; per-route **`#[openapi(responses = ((404, \"...\"), ...))]`** or manual `components`. |
-//! | DTO / schema generation | **Not built-in** — hand-author [`OpenApiOptions::components`].**schemas** or merge output from **`utoipa`** / **`okapi`** / other generators; see the repo mdBook **OpenAPI & HTTP** (`docs/src/openapi-http.md`). |
+//! | DTO / schema generation | **Via `schemars`** — `#[dto]` derives `JsonSchema`; pass [`schema_entry`] outputs to [`OpenApiOptions::with_schemas`] (or hand-author [`OpenApiOptions::components`].**schemas** / merge `utoipa` / `okapi`). |
 //! | `@ApiBearerAuth` / route security | Global [`OpenApiOptions::security`] + [`OpenApiOptions::components`].**securitySchemes**; optional **per-route** [`OpenApiOptions::infer_route_security_from_roles`] (uses [`nestrs_core::MetadataRegistry`] **`roles`** from `#[roles]`). |
 //! | Swagger UI | **Yes** — bundled HTML page at [`OpenApiOptions::docs_path`]. |
 //! | Plugins (CLI, extra decorators) | **No** — keep this crate small; compose with other OpenAPI tools if needed. |
@@ -42,6 +44,12 @@ pub struct OpenApiOptions {
     pub document_tags: Option<Vec<Value>>,
     /// Optional [`components`](https://spec.openapis.org/oas/v3.1.0#components-object) (e.g. `securitySchemes`, `schemas`).
     pub components: Option<Value>,
+    /// DTO schema entries merged into `components`.**`schemas`** (OpenAPI 3.1
+    /// uses JSON Schema directly). Build entries from `#[dto]` types with
+    /// [`schema_entry`] — `#[dto]` derives `schemars::JsonSchema`, so the
+    /// reflected schema (including `#[serde(rename)]` and nested `$ref`
+    /// chains) flows straight into the spec.
+    pub schemas: BTreeMap<String, Value>,
     /// Optional root [`security`](https://spec.openapis.org/oas/v3.1.0#openapi-security) requirements.
     pub security: Option<Vec<Value>>,
     /// When **true**, any route whose handler has **`roles`** metadata (set by `#[roles(...)]` on the
@@ -67,10 +75,39 @@ impl Default for OpenApiOptions {
             servers: None,
             document_tags: None,
             components: None,
+            schemas: BTreeMap::new(),
             security: None,
             infer_route_security_from_roles: false,
             roles_security_scheme: "bearerAuth".to_string(),
         }
+    }
+}
+
+/// Build one `components.schemas` entry `(name, schema)` from a
+/// `schemars::JsonSchema` type (any `#[dto]` struct). OpenAPI 3.1
+/// `components.schemas` values are JSON Schema documents, so the
+/// `schema_for!` output drops in unchanged — nested `#[dto]` fields come
+/// through as `$ref` + `$defs`.
+pub fn schema_entry<T: schemars::JsonSchema>(name: &str) -> (String, Value) {
+    (
+        name.to_string(),
+        serde_json::to_value(schemars::schema_for!(T)).expect("JsonSchema always serializes"),
+    )
+}
+
+impl OpenApiOptions {
+    /// Merge [`schema_entry`] outputs (or hand-authored `components.schemas`
+    /// entries) into the generated spec.
+    pub fn with_schemas(
+        mut self,
+        entries: impl IntoIterator<Item = (impl Into<String>, Value)>,
+    ) -> Self {
+        self.schemas.extend(
+            entries
+                .into_iter()
+                .map(|(name, schema)| (name.into(), schema)),
+        );
+        self
     }
 }
 
@@ -126,6 +163,18 @@ async fn openapi_json(State(options): State<OpenApiOptions>) -> Json<Value> {
         }
     }
     if let Some(components) = options.components.clone() {
+        root.insert("components".into(), components);
+    }
+    if !options.schemas.is_empty() {
+        let mut components = options.components.clone().unwrap_or_else(|| json!({}));
+        let obj = components.as_object_mut().expect("components object");
+        let schemas = obj
+            .entry("schemas".to_string())
+            .or_insert_with(|| json!({}));
+        let schemas_obj = schemas.as_object_mut().expect("schemas object");
+        for (name, schema) in &options.schemas {
+            schemas_obj.insert(name.clone(), schema.clone());
+        }
         root.insert("components".into(), components);
     }
 

@@ -58,6 +58,22 @@ impl RouteRegistry {
         guard.clone()
     }
 
+    /// Exact-match lookup of the handler name for `(method, path)`.
+    ///
+    /// Used by app-level middleware (throttler, probe normalization) that
+    /// cannot read the `HandlerKey` request extension (only the route-level
+    /// guard layer inserts it) but still needs the route's metadata. Paths
+    /// must match the registered form exactly — the controller prefix joined
+    /// with the route path; trailing slashes are normalized upstream by
+    /// tower-http's `normalize-path` when enabled.
+    pub fn handler_for(method: &str, path: &str) -> Option<String> {
+        let guard = store().read().expect("route registry lock poisoned");
+        guard
+            .iter()
+            .find(|r| r.method.eq_ignore_ascii_case(method) && r.path == path)
+            .map(|r| r.handler.to_string())
+    }
+
     /// Clears all registered HTTP routes in this process.
     ///
     /// **Available only with the `test-hooks` feature.** Intended for integration tests that share

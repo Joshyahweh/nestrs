@@ -7,8 +7,8 @@ use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
-    parse_macro_input, DeriveInput, Expr, Field, Fields, Ident, ImplItemFn, Item, ItemStruct,
-    LitInt, LitStr, Meta, Result, Token, Type,
+    parse_macro_input, DeriveInput, Expr, Field, Fields, Ident, ImplItemFn, Item, ItemFn,
+    ItemStruct, LitInt, LitStr, Meta, Result, Token, Type,
 };
 
 struct ModuleArgs {
@@ -1697,6 +1697,113 @@ fn parse_check_policies(attrs: &[syn::Attribute]) -> Result<Vec<(LitStr, LitStr)
     Ok(out)
 }
 
+/// Parse `#[throttle(5, "minute")]` → `("throttle", "5/minute")` and the bare
+/// `#[skip_throttle]` → `("skip_throttle", "true")`. Same CSV-style metadata
+/// pipeline as `parse_check_policies`; the runtime side (`nestrs::throttler`)
+/// parses the value back into a `ThrottleSpec`.
+fn parse_throttle(attrs: &[syn::Attribute]) -> Result<Vec<(LitStr, LitStr)>> {
+    struct ThrottleArgs {
+        limit: LitInt,
+        per: LitStr,
+    }
+    impl Parse for ThrottleArgs {
+        fn parse(input: ParseStream<'_>) -> Result<Self> {
+            let limit: LitInt = input.parse()?;
+            input.parse::<Token![,]>()?;
+            let per: LitStr = input.parse()?;
+            Ok(ThrottleArgs { limit, per })
+        }
+    }
+
+    let mut out = Vec::new();
+    for attr in attrs {
+        if attr.path().is_ident("skip_throttle") {
+            out.push((
+                LitStr::new("skip_throttle", attr.span()),
+                LitStr::new("true", attr.span()),
+            ));
+            continue;
+        }
+        if !attr.path().is_ident("throttle") {
+            continue;
+        }
+        let Meta::List(list) = &attr.meta else {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "throttle expects #[throttle(n, \"second\"|\"minute\"|\"hour\")]",
+            ));
+        };
+        let args: ThrottleArgs = syn::parse2(list.tokens.clone()).map_err(|_| {
+            syn::Error::new_spanned(
+                list,
+                "throttle expects #[throttle(n, \"second\"|\"minute\"|\"hour\")]",
+            )
+        })?;
+        let per = args.per.value();
+        if !matches!(per.as_str(), "second" | "minute" | "hour") {
+            return Err(syn::Error::new_spanned(
+                &args.per,
+                "throttle window must be \"second\", \"minute\" or \"hour\"",
+            ));
+        }
+        let limit: u64 = args.limit.base10_parse().map_err(|_| {
+            syn::Error::new_spanned(&args.limit, "throttle limit must be a positive integer")
+        })?;
+        if limit == 0 {
+            return Err(syn::Error::new_spanned(
+                &args.limit,
+                "throttle limit must be at least 1",
+            ));
+        }
+        out.push((
+            LitStr::new("throttle", attr.span()),
+            LitStr::new(&format!("{limit}/{per}"), attr.span()),
+        ));
+    }
+    Ok(out)
+}
+
+/// Parse the health probe decorators — bare `#[liveness]`, `#[readiness]`,
+/// `#[startup]` on a route handler → `("probe", "<kind>")`. Same CSV-style
+/// metadata pipeline as `parse_throttle`; the runtime side
+/// (`nestrs::health_probes`) resolves the stamped handlers at router-build
+/// time and mounts the `/__nestrs/health/{live,ready,startup}` endpoints.
+/// More than one probe decorator on the same handler is a compile error.
+fn parse_probe(attrs: &[syn::Attribute]) -> Result<Vec<(LitStr, LitStr)>> {
+    let mut out = Vec::new();
+    for attr in attrs {
+        let kind = if attr.path().is_ident("liveness") {
+            "liveness"
+        } else if attr.path().is_ident("readiness") {
+            "readiness"
+        } else if attr.path().is_ident("startup") {
+            "startup"
+        } else {
+            continue;
+        };
+        if let Meta::List(_) | Meta::NameValue(_) = &attr.meta {
+            return Err(syn::Error::new_spanned(
+                attr,
+                format!("#[{kind}] takes no arguments"),
+            ));
+        }
+        if out
+            .iter()
+            .any(|(k, _): &(LitStr, LitStr)| k.value() == "probe")
+        {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "only one probe decorator (`#[liveness]` / `#[readiness]` / `#[startup]`) per route handler",
+            ));
+        }
+        out.push((
+            LitStr::new("probe", attr.span()),
+            LitStr::new(kind, attr.span()),
+        ));
+    }
+    Ok(out)
+}
+
 struct OpenApiResponsePair(LitInt, LitStr);
 
 impl Parse for OpenApiResponsePair {
@@ -1977,6 +2084,14 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             Err(e) => return e.to_compile_error().into(),
         }
         match parse_check_policies(&func.attrs) {
+            Ok(v) => metadata.extend(v),
+            Err(e) => return e.to_compile_error().into(),
+        }
+        match parse_throttle(&func.attrs) {
+            Ok(v) => metadata.extend(v),
+            Err(e) => return e.to_compile_error().into(),
+        }
+        match parse_probe(&func.attrs) {
             Ok(v) => metadata.extend(v),
             Err(e) => return e.to_compile_error().into(),
         }
@@ -3281,6 +3396,40 @@ pub fn check_policies(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
+pub fn throttle(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn skip_throttle(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+/// `#[liveness]` — marks the decorated route handler as the process
+/// liveness probe. `GET /__nestrs/health/live` mirrors the handler's
+/// status (2xx ⇒ up, otherwise down). Consumed by `#[routes]` as route
+/// metadata (`probe => liveness`); the macro itself is a passthrough.
+#[proc_macro_attribute]
+pub fn liveness(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+/// `#[readiness]` — marks the decorated route handler as the readiness
+/// probe, mirrored at `GET /__nestrs/health/ready`.
+#[proc_macro_attribute]
+pub fn readiness(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+/// `#[startup]` — marks the decorated route handler as the startup probe,
+/// mirrored at `GET /__nestrs/health/startup`. The outcome is evaluated
+/// once per process and cached; subsequent probes return the first result.
+#[proc_macro_attribute]
+pub fn startup(attr: TokenStream, item: TokenStream) -> TokenStream {
+    passthrough(attr, item)
+}
+
+#[proc_macro_attribute]
 pub fn message_pattern(attr: TokenStream, item: TokenStream) -> TokenStream {
     passthrough(attr, item)
 }
@@ -3539,7 +3688,11 @@ fn convert_dto_field_attrs(field: &Field, expose_only: bool) -> Vec<syn::Attribu
             "IsString" => {
                 // Type-level no-op in Rust, retained for Nest-like readability.
             }
-            "IsUUID" => out.push(syn::parse_quote!(#[validate(uuid)])),
+            "IsUUID" => {
+                // validator 0.21 dropped the `uuid` built-in; UUID-ness is a
+                // type-level concern (use `uuid::Uuid`), so this is a
+                // type-level no-op like `IsString`.
+            }
             "IsBoolean" => {}
             "IsPositive" => out.push(syn::parse_quote!(#[validate(range(min = 1))])),
             "IsNegative" => out.push(syn::parse_quote!(#[validate(range(max = -1))])),
@@ -3632,6 +3785,124 @@ impl Parse for DtoAttr {
     }
 }
 
+/// `#[dataloader]` options: `key = <Type>` (required), `value = <Type>`
+/// (required), `error = <Type>` (optional — defaults to
+/// `nestrs::graphql::Error`).
+struct DataLoaderAttr {
+    key: syn::Type,
+    value: syn::Type,
+    error: Option<syn::Type>,
+}
+
+impl Parse for DataLoaderAttr {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut key = None;
+        let mut value = None;
+        let mut error = None;
+
+        while !input.is_empty() {
+            let name: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            let ty: syn::Type = input.parse()?;
+            match name.to_string().as_str() {
+                "key" => key = Some(ty),
+                "value" => value = Some(ty),
+                "error" => error = Some(ty),
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        name,
+                        "unknown dataloader option (expected `key`, `value`, or `error`)",
+                    ));
+                }
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        let key = key.ok_or_else(|| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "`#[dataloader]` requires `key = <Type>`",
+            )
+        })?;
+        let value = value.ok_or_else(|| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "`#[dataloader]` requires `value = <Type>`",
+            )
+        })?;
+        Ok(DataLoaderAttr { key, value, error })
+    }
+}
+
+/// Generate a `Loader` impl (plus a `into_data_loader` constructor) for
+/// a batching-loader struct:
+///
+/// ```ignore
+/// #[dataloader(key = i64, value = User, error = MyError)]
+/// struct UserLoader { pool: Arc<AnyPool> }
+///
+/// impl UserLoader {
+///     // exactly one SQL round-trip for every load_one/load_many in the
+///     // request; the generated trait impl delegates here.
+///     async fn batch_load(&self, keys: &[i64]) -> Result<HashMap<i64, User>, MyError> {
+///         /* SELECT ... WHERE id IN (...) */
+///     }
+/// }
+/// ```
+///
+/// The struct keeps its own definition; the macro appends the
+/// `nestrs::graphql::Loader<Key>` impl and a `into_data_loader()`
+/// constructor that wraps it in a fresh `DataLoader` (1 ms batch window,
+/// batch tasks spawned on the current tokio runtime, no internal cache —
+/// per-request instances make memoization redundant). Requires the
+/// `nestrs` `graphql-dataloader` feature and the loader's inherent
+/// `async fn batch_load(&self, keys: &[Key]) -> Result<HashMap<Key, Value>, Error>`.
+#[proc_macro_attribute]
+pub fn dataloader(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let opts = parse_macro_input!(attr as DataLoaderAttr);
+    let item_struct = parse_macro_input!(item as ItemStruct);
+
+    let vis = &item_struct.vis;
+    let ident = &item_struct.ident;
+    let (impl_generics, ty_generics, where_clause) = item_struct.generics.split_for_impl();
+
+    let key_ty = opts.key;
+    let value_ty = opts.value;
+    let error_ty = opts
+        .error
+        .unwrap_or_else(|| syn::parse_quote!(nestrs::graphql::Error));
+
+    quote! {
+        #item_struct
+
+        impl #impl_generics nestrs::graphql::Loader<#key_ty> for #ident #ty_generics #where_clause {
+            type Value = #value_ty;
+            type Error = #error_ty;
+
+            async fn load(
+                &self,
+                keys: &[#key_ty],
+            ) -> Result<std::collections::HashMap<#key_ty, Self::Value>, Self::Error> {
+                <Self>::batch_load(self, keys).await
+            }
+        }
+
+        impl #impl_generics #ident #ty_generics #where_clause {
+            /// Wrap this loader in a fresh per-request `DataLoader`.
+            /// Call once per request (the `DataLoaderRegistry` factory
+            /// closures generated into apps do exactly that): a
+            /// `DataLoader` memoizes for its whole lifetime, so sharing
+            /// one instance across requests would leak results.
+            #vis fn into_data_loader(self) -> nestrs::graphql::DataLoader<Self> {
+                nestrs::graphql::data_loader::data_loader(self)
+            }
+        }
+    }
+    .into()
+}
+
 #[proc_macro_attribute]
 pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
     let opts = parse_macro_input!(attr as DtoAttr);
@@ -3669,7 +3940,7 @@ pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     if deny_unknown_fields {
         quote! {
-            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto)]
+            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto, nestrs::schemars::JsonSchema)]
             #[serde(deny_unknown_fields)]
             #vis struct #ident {
                 #(#field_defs,)*
@@ -3678,7 +3949,7 @@ pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
     } else {
         quote! {
-            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto)]
+            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto, nestrs::schemars::JsonSchema)]
             #vis struct #ident {
                 #(#field_defs,)*
             }
@@ -3743,4 +4014,275 @@ pub fn derive_nest_config(item: TokenStream) -> TokenStream {
     };
 
     expanded.into()
+}
+
+// ---------------------------------------------------------------------------
+// `#[config(namespace = "db")]`
+//
+// Struct-level attribute decorator for the namespaced config system
+// (`NESTRS_<NS>__<KEY>`). Emits the two required derives plus the
+// `nestrs::ConfigNamespace` marker impl:
+//
+//     #[config(namespace = "db")]
+//     #[derive(serde::Deserialize, validator::Validate)]   // emitted by the macro
+//     struct DatabaseConfig { host: String }
+//
+// so the struct itself only needs the attribute. The attribute must come
+// *before* any other derives the user writes (attribute macros run before
+// derives regardless of order, and the emitted derives are additive).
+// ---------------------------------------------------------------------------
+
+#[proc_macro_attribute]
+pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr2 = proc_macro2::TokenStream::from(attr.clone());
+    let meta = match syn::parse2::<syn::Meta>(attr2.clone()) {
+        Ok(m) => m,
+        Err(_) => {
+            return syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "#[config] expects `namespace = \"<name>\"`",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    let namespace = match &meta {
+        syn::Meta::NameValue(nv) if nv.path.is_ident("namespace") => match &nv.value {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) => s.value(),
+            _ => {
+                return syn::Error::new_spanned(&nv.value, "namespace must be a string literal")
+                    .to_compile_error()
+                    .into()
+            }
+        },
+        _ => {
+            return syn::Error::new_spanned(meta, "#[config] expects `namespace = \"<name>\"`")
+                .to_compile_error()
+                .into()
+        }
+    };
+
+    let item2: proc_macro2::TokenStream = item.into();
+    let ident = match syn::parse2::<syn::DeriveInput>(item2.clone()) {
+        Ok(d) => d.ident,
+        Err(_) => {
+            return syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "#[config] can only be applied to a struct or enum",
+            )
+            .to_compile_error()
+            .into()
+        }
+    };
+
+    let expanded = quote! {
+        #[derive(::serde::Deserialize, ::validator::Validate)]
+        #item2
+
+        impl nestrs::ConfigNamespace for #ident {
+            const NAMESPACE: &'static str = #namespace;
+        }
+    };
+
+    expanded.into()
+}
+
+// ---------------------------------------------------------------------------
+// `#[upload_to("bucket", "prefix/{user_id}/file-{file_id}")]`
+//
+// Function-level decorator. Marks a route handler as an upload
+// endpoint and stashes the resolved bucket + key template onto
+// the function via two `pub fn` accessors that mirror the
+// `#[controller]` shape:
+//
+//     pub fn __upload_to_bucket() -> &'static str { "bucket" }
+//     pub fn __upload_to_key_template() -> &'static str { "prefix/{user_id}/..." }
+//     pub fn __upload_to_params() -> &'static [&'static str] { &["user_id", "file_id"] }
+//
+// The runtime helper `nestrs_storage::resolve_upload_key` walks
+// the template, substituting the placeholders in order, and the
+// upload handler calls `upload_to(storage, &key, body)` once the
+// substitution is done. This keeps the proc-macro honest: it only
+// stamps metadata; the body of the handler still calls
+// `upload_to` explicitly (or a `#[post]` wrapper does, in a
+// future wave).
+// ---------------------------------------------------------------------------
+
+struct UploadToArgs {
+    bucket: LitStr,
+    template: LitStr,
+}
+
+impl Parse for UploadToArgs {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let bucket: LitStr = input.parse()?;
+        let _comma: Token![,] = input.parse()?;
+        let template: LitStr = input.parse()?;
+        if !input.is_empty() {
+            return Err(input.error(
+                "#[upload_to(\"bucket\", \"prefix/{id}\")] expects exactly two string literals",
+            ));
+        }
+        Ok(Self { bucket, template })
+    }
+}
+
+/// Extract `{name}` placeholders from a key template. Names
+/// must be valid Rust idents and may not repeat. We return them
+/// in declaration order — that's the order the runtime helper
+/// will substitute them in.
+fn extract_template_params(template: &str) -> syn::Result<Vec<String>> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'{' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len() && bytes[end] != b'}' {
+                end += 1;
+            }
+            if end >= bytes.len() {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!(
+                        "upload_to template `{template}` has unterminated `{{` at byte {start}"
+                    ),
+                ));
+            }
+            let name = &template[start..end];
+            if name.is_empty() {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!("upload_to template `{template}` has empty `{{}}` placeholder"),
+                ));
+            }
+            if !seen.insert(name.to_string()) {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!("upload_to template `{template}` repeats placeholder `{{{name}}}`"),
+                ));
+            }
+            // Validate the name is a valid ident.
+            if syn::parse_str::<Ident>(name).is_err() {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!("upload_to template placeholder `{{{name}}}` is not a valid ident"),
+                ));
+            }
+            out.push(name.to_string());
+            i = end + 1;
+        } else {
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
+#[proc_macro_attribute]
+pub fn upload_to(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as UploadToArgs);
+    let bucket = args.bucket.value();
+    let template = args.template.value();
+    let template_span = args.template.span();
+
+    let params = match extract_template_params(&template) {
+        Ok(p) => p,
+        Err(e) => {
+            // Re-span the error against the original `LitStr` for better
+            // diagnostics, then bail.
+            let span_err = syn::Error::new(template_span, e.to_string());
+            return span_err.to_compile_error().into();
+        }
+    };
+    let param_idents: Vec<Ident> = params
+        .iter()
+        .map(|p| Ident::new(p, proc_macro2::Span::call_site()))
+        .collect();
+
+    // The decorated item can be either a free function or an
+    // inherent impl method. We don't transform its body — we
+    // only stamp three companion `pub fn` accessors. For a
+    // free function, those become free `pub fn`s with a
+    // `__upload_to_<original_fn_name>_*` prefix to avoid name
+    // collisions; for an impl method, they're attached to the
+    // same `impl` block.
+    //
+    // Implementation: try `ItemFn` first; if that fails, try
+    // `ImplItemFn`; if both fail, error.
+    let item_clone = item.clone();
+    if let Ok(item_fn) = syn::parse::<ItemFn>(item.clone()) {
+        let name = &item_fn.sig.ident;
+        let bucket_fn = format_ident!("__upload_to_{}_bucket", name);
+        let template_fn = format_ident!("__upload_to_{}_template", name);
+        let params_fn = format_ident!("__upload_to_{}_params", name);
+        let params_array: Vec<&str> = params.iter().map(String::as_str).collect();
+        let expanded = quote! {
+            #item_fn
+
+            #[doc(hidden)]
+            pub fn #bucket_fn() -> &'static str {
+                #bucket
+            }
+
+            #[doc(hidden)]
+            pub fn #template_fn() -> &'static str {
+                #template
+            }
+
+            #[doc(hidden)]
+            pub fn #params_fn() -> &'static [&'static str] {
+                &[ #(#params_array),* ]
+            }
+        };
+        return expanded.into();
+    }
+
+    if let Ok(impl_fn) = syn::parse::<ImplItemFn>(item_clone) {
+        let name = &impl_fn.sig.ident;
+        let bucket_fn = format_ident!("__upload_to_{}_bucket", name);
+        let template_fn = format_ident!("__upload_to_{}_template", name);
+        let params_fn = format_ident!("__upload_to_{}_params", name);
+        let params_array: Vec<&str> = params.iter().map(String::as_str).collect();
+        // For `impl Foo { #[upload_to(...)] fn handler(...) }` we
+        // emit the method unchanged and attach the three
+        // accessors as free `pub fn` siblings in the parent
+        // module (with a mangled name). The handler is free to
+        // call them — they're not on `Self` because we can't
+        // reach the surrounding `impl` block from inside the
+        // attribute.
+        let expanded = quote! {
+            #impl_fn
+
+            #[doc(hidden)]
+            pub fn #bucket_fn() -> &'static str {
+                #bucket
+            }
+
+            #[doc(hidden)]
+            pub fn #template_fn() -> &'static str {
+                #template
+            }
+
+            #[doc(hidden)]
+            pub fn #params_fn() -> &'static [&'static str] {
+                &[ #(#params_array),* ]
+            }
+        };
+        return expanded.into();
+    }
+
+    // Not a function — error.
+    let _ = param_idents; // silence unused warning when we return the error
+    syn::Error::new(
+        proc_macro2::Span::call_site(),
+        "#[upload_to] can only decorate a function or method",
+    )
+    .to_compile_error()
+    .into()
 }

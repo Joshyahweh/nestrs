@@ -185,15 +185,18 @@ fn ability_builder_reports_rule_count() {
 
 #[derive(Default)]
 #[injectable]
+#[allow(dead_code)] // exercised through the macro-generated tests below
 struct MetaState;
 
 #[controller(prefix = "/p")]
+#[allow(dead_code)] // paired with `MetaState` above
 struct MetaController;
 
 #[routes(state = MetaState)]
 impl MetaController {
     #[get("/policies")]
     #[check_policies("read:Post", "update:User")]
+    #[allow(dead_code)] // dispatched via the macro routes, not a direct call
     async fn has_policies() -> &'static str {
         "ok"
     }
@@ -213,4 +216,84 @@ fn check_policies_metadata_round_trips_through_registry() {
     assert_eq!(csv, "read:Post,update:User");
     // Sanity: an unknown handler name returns None (we never set it).
     assert!(MetadataRegistry::get("no-such-handler", "no-such-key").is_none());
+}
+
+// -- Row-level predicates (Wave 3D) --------------------------------------------
+
+use nestrs::policies::Principal;
+use nestrs::with_principal;
+use std::sync::Arc;
+
+#[test]
+fn instance_predicate_without_principal_denies() {
+    let ab = Ability::builder()
+        .can_with_predicate(
+            Action::Read,
+            "Doc",
+            vec![],
+            |row: &serde_json::Value, p: &Principal| row["author"] == p.subject,
+        )
+        .build();
+    let own = Subject::Instance(json!({ "type": "Doc", "author": "alice" }));
+    // No `with_principal` in scope: the predicate cannot be evaluated, so
+    // `can(Instance)` denies conservatively — never allow-by-default.
+    assert!(!ab.can(&Action::Read, &own));
+}
+
+#[tokio::test]
+async fn instance_predicate_evaluates_against_ambient_principal() {
+    let ab = Arc::new(
+        Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Doc",
+                vec![],
+                |row: &serde_json::Value, p: &Principal| row["author"] == p.subject,
+            )
+            .build(),
+    );
+    let own = Subject::Instance(json!({ "type": "Doc", "author": "alice" }));
+    let theirs = Subject::Instance(json!({ "type": "Doc", "author": "bob" }));
+    let p = Arc::new(Principal {
+        subject: "alice".into(),
+        roles: vec![],
+        claims: json!({}),
+    });
+    with_principal(p, async {
+        assert!(ab.can(&Action::Read, &own));
+        assert!(!ab.can(&Action::Read, &theirs));
+    })
+    .await;
+}
+
+#[test]
+fn can_with_predicate_keeps_field_restrictions() {
+    let ab = Ability::builder()
+        .can_with_predicate(
+            Action::Read,
+            "Doc",
+            vec!["id".into(), "title".into()],
+            |_: &serde_json::Value, _: &Principal| true,
+        )
+        .build();
+    let subject = Subject::Type("Doc");
+    let fields = ab.allowed_fields(&Action::Read, &subject).expect("Some");
+    assert_eq!(fields, vec!["id", "title"]);
+}
+
+#[test]
+fn debug_renders_predicate_presence_not_contents() {
+    // Ability must stay Debug (McpDataContext derives over Option<Arc<Ability>>)
+    // WITHOUT serializing the closure — only its presence renders.
+    let with_pred = Ability::builder()
+        .can_with_predicate(
+            Action::Read,
+            "Doc",
+            vec![],
+            |_: &serde_json::Value, _: &Principal| true,
+        )
+        .build();
+    assert!(format!("{with_pred:?}").contains("predicate: true"));
+    let plain = Ability::builder().can(Action::Read, "Doc").build();
+    assert!(format!("{plain:?}").contains("predicate: false"));
 }

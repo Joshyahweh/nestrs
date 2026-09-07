@@ -26,12 +26,21 @@ use std::any::{Any, TypeId};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-const SLOT_TID: TypeId = TypeId::of::<Arc<TransactionSlot>>();
+// `TypeId::of` in const context is stable from Rust 1.91; project MSRV is
+// 1.88. Use a lazily-resolved `OnceLock` so we can call `TypeId::of` at
+// runtime instead. The TypeId is interned, so the cost is one atomic load
+// per call site — well below any measurement threshold.
+#[allow(clippy::incompatible_msrv)]
+static SLOT_TID: std::sync::OnceLock<TypeId> = std::sync::OnceLock::new();
+
+fn slot_tid() -> TypeId {
+    *SLOT_TID.get_or_init(TypeId::of::<Arc<TransactionSlot>>)
+}
 
 /// Return the in-flight [`TransactionSlot`] for the current request, if any.
 /// Returns `None` when no `#[transactional]` middleware ran.
 pub fn current_transaction() -> Option<Arc<TransactionSlot>> {
-    let any = crate::core::request_scope_get(SLOT_TID)?;
+    let any = crate::core::request_scope_get(slot_tid())?;
     any.downcast::<Arc<TransactionSlot>>()
         .ok()
         .map(|arc| (*arc).clone())
@@ -104,7 +113,7 @@ pub async fn install_transactional_middleware(
     let slot = Arc::new(TransactionSlot::new(tx));
     let response = with_request_scope(async move {
         crate::core::request_scope_insert(
-            SLOT_TID,
+            slot_tid(),
             Arc::new(slot.clone()) as Arc<dyn Any + Send + Sync>,
         );
         let response = next.run(req).await;

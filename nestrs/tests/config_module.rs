@@ -13,7 +13,7 @@ struct ConfigConsumer {
     config: Arc<AppConfig>,
 }
 
-#[module(imports = [ConfigModule::<AppConfig>], providers = [ConfigConsumer])]
+#[module(imports = [TypedConfigModule::<AppConfig>], providers = [ConfigConsumer])]
 struct AppModule;
 
 #[tokio::test]

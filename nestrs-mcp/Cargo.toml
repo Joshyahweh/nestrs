@@ -25,9 +25,18 @@ path = "src/main.rs"
 [dependencies]
 nestrs-core = { path = "../nestrs-core", version = "0.5.2" }
 nestrs = { path = "../nestrs", version = "0.5.2", optional = true }
+# Pulled in only for the `authz` feature so the `McpDataContext` and the
+# `call_tool` override can name `sqlx::AnyPool` directly. The main
+# `nestrs` crate re-uses the same `sqlx` dep under its `database-sqlx`
+# feature — duplicating it here keeps the cycle one-way
+# (`nestrs-mcp -> nestrs`).
+sqlx = { version = "0.8", optional = true }
 
 # MCP SDK — stdio transport is the default (Claude Code, Cursor, VS Code).
 # Streamable HTTP transport is gated behind the `http` feature for hosted use.
+# The `elicitation` rmcp feature is also gated behind our own `elicitation`
+# feature so users who don't need server→client questions don't pay for
+# the `url` crate.
 rmcp = { version = "3.1", default-features = false, features = [
     "server",
     "macros",
@@ -78,9 +87,32 @@ nestrs-macros = { path = "../nestrs-macros", version = "0.5.2" }
 # `RouteRegistry::clear_for_tests` and friends — only used by the
 # admin-port smoke test to make the route-registry state deterministic.
 nestrs-core = { path = "../nestrs-core", version = "0.5.2", features = ["test-hooks"] }
+# Multi-transport-scope integration tests build a `NestrsMcpServer` with
+# `McpDataContext` and need the typed `Ability` + `mask_value` + sqlx
+# helpers. Gated on the same `authz` feature the tests themselves
+# require; without it the dev-dep is unused and clippy complains.
+nestrs = { path = "../nestrs", version = "0.5.2", features = ["authz", "database-sqlx"] }
 
 [features]
 default = ["stdio"]
 stdio = []
 http = ["rmcp/transport-streamable-http-server"]
 admin = ["dep:nestrs", "nestrs/admin"]
+## Per-tool-call ambient ability + transaction + outbound masking on top of
+## `NestrsMcpServer`. Mirrors the `ws-authz` and `graphql-authz` features in
+## the main `nestrs` crate: opting in wires `McpDataContext`,
+## `current_mcp_ability`, and `current_mcp_transaction` into the server and
+## overrides `ServerHandler::call_tool` so every tool call runs inside the
+## same task-local scopes that HTTP/WS/GraphQL use.
+authz = ["dep:nestrs", "dep:sqlx", "nestrs/authz", "nestrs/database-sqlx"]
+## Row-level authorization enforcement on top of `authz`: the pre-built
+## predicates and the mandatory `CrudService` application. Mirrors the
+## `authz-row-level` feature of the main crate so multi-transport tests can
+## exercise the same seam the HTTP/WS/GraphQL transports use.
+authz-row-level = ["authz", "nestrs/authz-row-level"]
+## Server→client elicitation (SEP-1034). Enables the `McpSurfaces`
+## `register_elicitation` builder, the `NestrsMcpServer::elicit`
+## helper, and the rmcp `elicitation` feature (which adds the `url`
+## crate for `ElicitRequestParams::Url*`). Tools that need to ask
+## the user a question mid-flight opt in here.
+elicitation = ["rmcp/elicitation"]

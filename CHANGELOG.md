@@ -7,6 +7,187 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wave 3F: validator 0.21 + `#[dto]` schemars reflection
+
+- **Validator 0.20 → 0.21** across `nestrs`, `examples/hello-app`, and
+  `examples/lab`. One breaking change surfaced in our usage: validator
+  0.21 dropped the `uuid` built-in, so `#[dto]`'s `IsUUID` marker is now a
+  type-level no-op (like `IsString`) — express UUID-ness via the
+  `uuid::Uuid` type. All other emitted `#[validate(...)]` attrs (email,
+  length, range, url, nested, contains, regex) compile unchanged.
+- **`#[dto]` derives `schemars::JsonSchema`** (Yoann `#[input]` parity):
+  the generated struct now carries serde + validator + JSON Schema in one
+  decorator. `nestrs` re-exports `schemars` (`nestrs::schemars`) for
+  `schema_for!` use; the derive expansion references the `schemars` path,
+  so crates using `#[dto]` need `schemars = "1"` as a direct dependency
+  (same as `validator`). Field-level `#[serde(rename)]` is reflected in
+  the schema; nested `#[dto]` types come through as `$ref` + `$defs`
+  chains.
+- **`nestrs-openapi` consumes the schemas**: `OpenApiOptions::schemas`
+  (merged into `components.schemas`) + the `schema_entry::<T>()` helper
+  and `OpenApiOptions::with_schemas` builder. OpenAPI 3.1
+  `components.schemas` values are JSON Schema documents, so
+  `schema_for!` output drops in unchanged. 6 tests in
+  `nestrs/tests/dto_schemars.rs` (schema round-trip, serde rename,
+  nested `$ref` chain, `allow_unknown_fields` variant, validator 0.21
+  smoke, `components.schemas` integration).
+
+### Added — Wave 3B: OAuth2 (`nestrs-oauth2`) + Object Storage (`nestrs-storage`)
+
+- **`nestrs-oauth2`**: new workspace member implementing the four OAuth2
+  surfaces Yoann ships as separate crates, as one feature-gated crate:
+  - `client` — `OAuth2Client` with authorization_code (+ PKCE S256),
+    client_credentials, and refresh_token grants; state-parameter CSRF
+    protection and token caching.
+  - `resource-server` — `JwtVerifier` + `JwksCache` with JWKS rotation
+    re-fetch, audience/issuer pinning, and clock leeway.
+  - `social` — thin provider wrappers for Google / GitHub / Microsoft /
+    Apple over the client.
+  - `guard` — `OAuth2Guard` + `OAuth2Module` + the
+    `install_oauth2_middleware` bridge, so a validated bearer populates
+    the ambient `Principal` and downstream `Ability` checks proceed
+    unchanged.
+  Feature flags (all default off): `client`, `resource-server`, `social`,
+  `guard`; the main crate opts in via `nestrs/oauth2` and
+  `nestrs/authn-oauth2` (pre-wires the middleware). 40+ tests in-crate and
+  in `nestrs/tests/oauth2_integration.rs`.
+- **`nestrs-storage`**: new workspace member with a single `Storage` trait
+  over Local filesystem / S3 / GCS / Azure Blob backends (thin newtypes
+  around `object_store` adapters, hand-rolled filesystem backend). Includes
+  `presign_get` / `presign_put` helpers and the `upload_to` helper consumed
+  by the `#[upload_to("bucket", "prefix/{id}")]` decorator, which resolves
+  the key template and stuffs the resulting key into the request context.
+  Feature flags: `local` (default), `s3`, `gcs`, `azure`, `all`. 27 tests.
+
+### Added — Wave 3C: full MCP protocol surface (`nestrs-mcp`)
+
+- **Prompts / resources / resource templates**: `McpSurfaces` builder adds
+  `register_prompt`, `register_resource`, `register_resource_template`
+  (URI-templated resources with parameter binding), and
+  `register_complete` for argument completion, alongside the existing
+  tool registry.
+- **Subscriptions**: `register_subscribable_resource` wires
+  `resources/subscribe` + `list_changed` notifications.
+- **Elicitation (SEP-1034)**: `NestrsMcpServer::elicit` +
+  `register_elicitation` let a tool ask the user a question mid-flight;
+  gated behind the new `elicitation` feature (pulls rmcp's `elicitation`
+  feature).
+- **MRTR (SEP-2322)**: multi-round tool refinement helpers so a tool can
+  return an intermediate result and carry server-side state across rounds.
+- **Tasks (SEP-2663)**: opt-in `tasks/get` / `tasks/update` / `tasks/cancel`
+  extension advertised in `get_info`; in-flight task registry with
+  client polling.
+- **Cache hints + structuredContent**: `with_cache_hints` attaches TTL /
+  cache-scope metadata to listings, and tool responses carrying
+  `structured_content` are now included in the outbound masking walk
+  (`mcp_data_context` masks both the text block and the structured
+  payload). 140 tests under `--features "authz,authz-row-level,elicitation"`.
+
+### Added — Wave 3E: production ops polish
+
+- **`#[throttle(n, "second"|"minute"|"hour")]` / `#[skip_throttle]`**
+  decorators + `ThrottlerModule` / `use_throttler` /
+  `ThrottlerGuard` (Nest `@nestjs/throttler` parity): per-route specs
+  override the global limit, `skip_throttle` exempts a route entirely, 429s
+  carry `Retry-After` + `X-RateLimit-Limit` + `X-RateLimit-Remaining`.
+  Backends: sharded poison-tolerant `InMemoryThrottler` (default) and
+  cross-process `RedisThrottler` behind `cache-redis` (atomic INCR+EXPIRE
+  Lua with TTL heal, fail-open on backend unavailability). Decorator
+  metadata is enforced by the `use_throttler` middleware; the global spec
+  is optional (`global: None` ⇒ only decorated routes throttle).
+- **`#[liveness]` / `#[readiness]` / `#[startup]` probe decorators** +
+  standard indicator set (NestJS terminus parity): stamping a route handler
+  with `#[liveness]` / `#[readiness]` / `#[startup]` records probe metadata
+  in the standard route pipeline, and `build_router` mounts three fixed
+  server-root endpoints — `GET /__nestrs/health/live`, `/ready`,
+  `/startup` — that mirror the stamped handler's status (2xx ⇒ up, any
+  failure ⇒ 503; endpoints default to up with no stamp). `/ready` falls
+  back to aggregating the `enable_readiness_check` indicators when no
+  handler is stamped; `/startup` evaluates once per process and serves the
+  cached result thereafter. Mirroring is an internal self-request through
+  the completed router, so stamped handlers run with their real
+  extractors, guards, and middleware. The indicator trio implement the
+  existing `HealthIndicator` trait: `DatabaseIndicator` (over the shared
+  `DatabasePing` capability, no feature gate), `HttpIndicator`
+  (feature `http-client`), and `DiskSpaceIndicator` (new `health-disk`
+  feature, unix, `statvfs`-backed).
+- **W3C trace context ambient accessors** (`nestrs-core/src/trace.rs` +
+  `nestrs::trace_context`): `traceparent` / `tracestate` parsed once and
+  installed as an ambient task-local, visible from HTTP, WS, GraphQL, and
+  MCP handlers (`nestrs::with_trace_context` / current accessors), not
+  just the OTel SDK propagator.
+- **Namespaced config** (`NESTRS_<NS>__<KEY>`): `#[config(namespace =
+  "db")]` attribute derives `Deserialize` + `Validate` + the
+  `ConfigNamespace` marker; `ConfigModule::for_root(vec![
+  Config::register::<T>(), ...])` parses each namespace from the env
+  overlay with per-namespace isolation, validates at boot (invalid env
+  fails startup), honors `NESTRS_ENV_PREFIX`, and exports a typed
+  `ConfigService::get::<T>()`. The overlay cascade is
+  `.env` → `.env.{env}` → `.env.{env}.local` → process env (highest
+  precedence) and never mutates the process environment, keeping config
+  loading deterministic under parallel tests.
+- **WS RFC 6455 close codes + runtime per-message guard chain**
+  (`nestrs-ws`): `CloseCode` enum (1000/1001/1003/1008/1011/1012/1013 +
+  4000–4999 application range, with `as_u16` / `from_u16`) and
+  `WsClient::close(code, reason)`. `serve_socket` now maps failures to
+  coded closes after the usual `error` frame: malformed wire payload →
+  **1003** UnsupportedData, runtime guard rejection → **1008**
+  PolicyViolation (status ≥ 500 → **1011** InternalError), handler panic
+  → **1011** (caught via `catch_unwind`). New object-safe
+  `WsMessageGuard` trait + `WsGuardChain` run per-message in the shared
+  runtime via the new `WsGateway::message_guards()` hook (default empty —
+  opt-in defense in depth on top of `#[use_ws_guards(...)]`; blanket-impl'd
+  over `WsCanActivate`). Upgrade-time authorization via
+  `ws_route_with_guards(gateway, Vec<Arc<dyn WsUpgradeGuard>>)` —
+  rejections accept the upgrade then immediately close with 1008, and any
+  `WsCanActivate` guard doubles as an upgrade guard (empty event, null
+  payload). 9 end-to-end tests over a real loopback axum server +
+  tokio-tungstenite client.
+
+### Added — Wave 3D: row-level authorization (`authz-row-level` feature)
+
+- **Closure row predicates**: `AbilityBuilder::can_with_predicate(action,
+  subject_type, fields, predicate)` accepts any closure
+  `Fn(&serde_json::Value, &Principal) -> bool` (via the new `RowPredicate`
+  trait, blanket-impl'd over `Fn`). Predicates evaluate in `Ability::can`
+  for `Subject::Instance` checks against the ambient principal, and in the
+  repository post-load. `Rule` gains a `predicate` field (breaking for
+  exhaustive `Rule` literals — pre-1.0); `Rule`/`Ability` render
+  `predicate: true|false` in `Debug` instead of serializing the closure.
+- **`Repository::find_many_authorized(action, FindManyParams)`** under
+  `authz-row-level`: limit/offset pagination, caller-supplied
+  `extra_where`/`extra_binds` that interleave with policy binds, and
+  per-request SQL pushdown of declarative conditions + prebuilt predicate
+  conditions. `find_one_authorized`/`find_all_authorized` are retrofitted
+  to also post-filter rows through the rule's predicate (leak prevention).
+- **10 pre-built predicates** (`nestrs::predicates`, root re-exported):
+  `AuthorIsCurrentUser`, `BelongsToUser`, `WithinTenant`, `OwnerOrAdmin`,
+  `TenantOrAdmin`, `SelfOrAdmin`, `PublishedOnly`, `NotDeleted`,
+  `PublicOrOwner`, `HasRole`. Identity-shaped prebuilts push down a
+  `json_extract` WHERE clause per request; OR-shaped ones push down only
+  for non-admin principals; post-filter-only ones document it.
+- **Mandatory CrudService enforcement** (no opt-out, no `skip_auth`): every
+  `create`/`read`/`update`/`delete`/`list` call requires an `Ability` in
+  request scope (deny-closed `Protocol` error otherwise), applies the rule
+  predicate on create-candidate / current / replacement rows, and fetches
+  through the mutation's own action (invisible rows read as `Ok(None)` /
+  `Ok(false)`, denied writes as `Err(Protocol("policy denied: …"))`.
+  `repo_crud_create` is now an ability-free direct INSERT seeding primitive.
+- **Ambient principal plumbing**: `PRINCIPAL_SLOT` task-local in
+  `nestrs-core` (mirror of the ability slot), `nestrs::with_principal` /
+  `nestrs::policies::current_principal` (module-qualified — `nestrs::Principal`
+  stays the authn extractor), `From<PrincipalIdentity>` under `authn`, and
+  principal installation in `install_authn_middleware` plus the WS /
+  GraphQL / MCP data contexts (`current_ws_principal`,
+  `current_gql_principal`, `current_mcp_principal`).
+- **`nestrs-mcp` mirror feature** `authz-row-level` for multi-transport
+  tests. 40+ new tests across `predicates_module`, `row_level_repository`,
+  `crud_service_row_level`, `row_level_http` (full JWT → middleware →
+  CrudService stack), and GQL/WS/MCP scope-survival suites. Known
+  limitation: `json_extract` pushdown is SQLite-flavored under `AnyPool`
+  (inherited from `conditions_to_sql`); dialect-aware rendering is a
+  follow-up.
+
 ## [0.5.2] - 2026-09-04
 
 ### Changed

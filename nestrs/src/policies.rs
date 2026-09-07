@@ -91,14 +91,94 @@ impl Subject {
 /// never have to remember the import.
 pub type Conditions = serde_json::Map<String, serde_json::Value>;
 
+/// The caller identity row-level predicates are evaluated against. Deliberately
+/// decoupled from the `authn` feature: when `authn` is enabled,
+/// `From<PrincipalIdentity>` moves the verified JWT identity in; when not,
+/// callers (tests, custom auth) construct one directly.
+///
+/// Note the naming: `nestrs::Principal` (authn module) is the *axum extractor*
+/// newtype; this is the value predicates receive. Module-qualified on purpose —
+/// only one of the two can live at the crate root.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Principal {
+    /// Verified JWT `sub` (or equivalent stable user id).
+    pub subject: String,
+    /// Union of top-level `roles` and realm roles.
+    pub roles: Vec<String>,
+    /// Full raw claims.
+    pub claims: serde_json::Value,
+}
+
+#[cfg(feature = "authn")]
+impl From<PrincipalIdentity> for Principal {
+    fn from(p: PrincipalIdentity) -> Self {
+        Self {
+            subject: p.subject,
+            roles: p.roles,
+            claims: p.claims,
+        }
+    }
+}
+
+/// A row-level authorization predicate: "does this *row* belong to this
+/// *principal*?" Custom predicates are plain closures via the blanket impl;
+/// pre-built predicates (see `nestrs::predicates`, `authz-row-level` feature)
+/// also override [`RowPredicate::sql_conditions`] so the repository can push
+/// the check down into a `WHERE` clause instead of filtering rows after load.
+///
+/// The closure signature `(&Value, &Principal) -> bool` is the leak-prevention
+/// guarantee: it cannot reach headers, environment, or ambient state — only the
+/// row it judges and the principal it judges against.
+pub trait RowPredicate: Send + Sync {
+    /// Evaluate the predicate against a row (the entity's JSON blob) and the
+    /// current principal.
+    fn check(&self, row: &serde_json::Value, principal: &Principal) -> bool;
+
+    /// Per-request SQL pushdown hint. Returns `Some(conditions)` to compile
+    /// into the repository's `WHERE` clause (evaluated with the *current*
+    /// principal, so e.g. `AuthorIsCurrentUser` yields
+    /// `{"author": principal.subject}`). `None` (the default) means the
+    /// predicate is applied post-load only.
+    fn sql_conditions(&self, principal: &Principal) -> Option<Conditions> {
+        let _ = principal;
+        None
+    }
+}
+
+impl<F> RowPredicate for F
+where
+    F: Fn(&serde_json::Value, &Principal) -> bool + Send + Sync,
+{
+    fn check(&self, row: &serde_json::Value, principal: &Principal) -> bool {
+        self(row, principal)
+    }
+}
+
 /// A single grant. `fields = None` means "all fields"; `conditions = None` means
-/// "any instance of the subject type".
-#[derive(Clone, Debug)]
+/// "any instance of the subject type"; `predicate = None` means no row-level
+/// closure check.
+#[derive(Clone)]
 pub struct Rule {
     pub action: Action,
     pub subject_type: &'static str,
     pub fields: Option<Vec<String>>,
     pub conditions: Option<Conditions>,
+    pub predicate: Option<Arc<dyn RowPredicate>>,
+}
+
+// Manual `Debug`: `Arc<dyn RowPredicate>` isn't Debug. `McpDataContext` (and
+// others) derive `Debug` while holding an `Option<Arc<Ability>>`, so `Ability`
+// must stay Debug — render the predicate as a boolean instead.
+impl std::fmt::Debug for Rule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Rule")
+            .field("action", &self.action)
+            .field("subject_type", &self.subject_type)
+            .field("fields", &self.fields)
+            .field("conditions", &self.conditions)
+            .field("predicate", &self.predicate.is_some())
+            .finish()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -106,9 +186,17 @@ pub struct Rule {
 // ---------------------------------------------------------------------------
 
 /// Resolved set of grants. Construct via [`Ability::builder`] / [`AbilityBuilder`].
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Ability {
     rules: Vec<Rule>,
+}
+
+impl std::fmt::Debug for Ability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ability")
+            .field("rules", &self.rules)
+            .finish()
+    }
 }
 
 impl Ability {
@@ -144,6 +232,16 @@ impl Ability {
             .and_then(|r| r.conditions.clone())
     }
 
+    /// Returns the row-level predicate for `(action, subject)`, if any rule
+    /// declares one. Used by `Repository::find_*_authorized` (post-load
+    /// filtering) and by the `authz-row-level` CrudService enforcement.
+    pub fn predicate(&self, action: &Action, subject: &Subject) -> Option<Arc<dyn RowPredicate>> {
+        self.rules
+            .iter()
+            .find(|r| rule_matches(r, action, subject))
+            .and_then(|r| r.predicate.clone())
+    }
+
     /// Number of registered rules. Useful in tests + diagnostics.
     pub fn rule_count(&self) -> usize {
         self.rules.len()
@@ -160,6 +258,24 @@ fn rule_matches(rule: &Rule, action: &Action, subject: &Subject) -> bool {
     }
     if let (Some(conds), Subject::Instance(instance)) = (&rule.conditions, subject) {
         if !conditions_satisfied(conds, instance) {
+            return false;
+        }
+    }
+    // Row-level predicate rules are evaluated against `Subject::Instance`
+    // (a concrete row) using the *ambient principal* — deny conservatively
+    // when none is installed (same convention as `PoliciesGuard` with
+    // conditions but no principal). `Subject::Type` checks never evaluate
+    // predicates: at guard/route level there is no row context — the rule
+    // matches on type alone and rows are filtered at the data layer.
+    if let (Some(pred), Subject::Instance(instance)) = (&rule.predicate, subject) {
+        // Predicates see the same view of the row that `conditions_satisfied`
+        // uses: the `attributes` payload when the instance is CASL-shaped,
+        // the value itself when it's a bare row (e.g. a repository JSON blob).
+        let attrs = instance.get("attributes").unwrap_or(instance);
+        let Some(principal) = current_principal() else {
+            return false;
+        };
+        if !pred.check(attrs, &principal) {
             return false;
         }
     }
@@ -208,6 +324,7 @@ impl AbilityBuilder {
             subject_type,
             fields: None,
             conditions: None,
+            predicate: None,
         });
         self
     }
@@ -225,6 +342,7 @@ impl AbilityBuilder {
             subject_type,
             fields: None,
             conditions: Some(conditions),
+            predicate: None,
         });
         self
     }
@@ -242,6 +360,44 @@ impl AbilityBuilder {
             subject_type,
             fields: Some(fields),
             conditions: None,
+            predicate: None,
+        });
+        self
+    }
+
+    /// Grant `action` on `subject_type` with a row-level predicate closure and
+    /// (CASL-style) a field restriction. The closure receives the row's JSON
+    /// and the current [`Principal`] and returns `true` to allow the row.
+    ///
+    /// ```ignore
+    /// Ability::builder().can_with_predicate(
+    ///     Action::Read, "Post", vec!["id".into()],
+    ///     |row: &serde_json::Value, p: &Principal| row["author"] == p.subject,
+    /// )
+    /// ```
+    ///
+    /// Custom closures are applied post-load by the repository (they cannot be
+    /// compiled to SQL); the pre-built predicates in `nestrs::predicates` push
+    /// their check into the `WHERE` clause. An empty `fields` vec means no
+    /// field restriction. When `can` is consulted with a `Subject::Instance`
+    /// and no principal is installed, the predicate denies conservatively.
+    pub fn can_with_predicate(
+        mut self,
+        action: Action,
+        subject_type: &'static str,
+        fields: Vec<String>,
+        predicate: impl RowPredicate + 'static,
+    ) -> Self {
+        self.rules.push(Rule {
+            action,
+            subject_type,
+            fields: if fields.is_empty() {
+                None
+            } else {
+                Some(fields)
+            },
+            conditions: None,
+            predicate: Some(Arc::new(predicate)),
         });
         self
     }
@@ -459,14 +615,21 @@ impl PoliciesModule {
 // and read by `Repository::find_*_authorized`. We use a dedicated `task_local!`
 // rather than `REQUEST_SCOPE_CACHE` because the latter stores `Arc<dyn Any>`
 // (no downcast helper), and we need a concrete `Arc<Ability>` back.
-tokio::task_local! {
-    static ABILITY_SLOT: std::cell::RefCell<Option<Arc<Ability>>>;
+//
+// The slot itself is type-erased in `nestrs-core` so transport crates
+// (GraphQL, MCP, workers) can install / read the same per-task ability
+// without depending on `nestrs` (which would create a Cargo cycle).
+pub(crate) fn current_ability_typed() -> Option<Arc<Ability>> {
+    crate::core::current_ability_erased()
+        .and_then(|a| a.downcast::<Ability>().ok())
+        .map(|arc| arc as Arc<Ability>)
 }
 
 /// Pull the current request's [`Ability`] from the task-local. Returns
-/// `None` when `install_policies_middleware` did not run.
+/// `None` when no scope installer ran (e.g. `install_policies_middleware`,
+/// `run_in_ws_scope`, or a `graphql_router_with_context` handler).
 pub fn current_ability() -> Option<Arc<Ability>> {
-    ABILITY_SLOT.try_with(|c| c.borrow().clone()).ok().flatten()
+    current_ability_typed()
 }
 
 /// Run `future` with `ability` stashed in the per-task ability slot. Test
@@ -475,8 +638,30 @@ pub async fn with_ability<F, T>(ability: Arc<Ability>, future: F) -> T
 where
     F: std::future::Future<Output = T>,
 {
-    ABILITY_SLOT
-        .scope(std::cell::RefCell::new(Some(ability)), future)
+    crate::core::with_ability_erased(ability as Arc<dyn std::any::Any + Send + Sync>, future).await
+}
+
+// Per-task stash for the active `Principal`, mirroring the ability slot above.
+// Installed by `install_authn_middleware` (HTTP), the transport scopes
+// (`run_in_ws_scope`, `graphql_router_with_context`, `run_with_mcp_scopes`),
+// and `policies::with_principal` (tests). Read by row-level predicates via
+// `rule_matches` and by the repository's post-load filtering.
+
+/// Pull the current request's [`Principal`] from the task-local. Returns
+/// `None` when no scope installer ran.
+pub fn current_principal() -> Option<Arc<Principal>> {
+    crate::core::current_principal_erased()
+        .and_then(|p| p.downcast::<Principal>().ok())
+        .map(|arc| arc as Arc<Principal>)
+}
+
+/// Run `future` with `principal` stashed in the per-task principal slot. Test
+/// helper — production code should rely on `install_authn_middleware`.
+pub async fn with_principal<F, T>(principal: Arc<Principal>, future: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    crate::core::with_principal_erased(principal as Arc<dyn std::any::Any + Send + Sync>, future)
         .await
 }
 
@@ -495,9 +680,11 @@ pub async fn install_policies_middleware(
     let (mut parts, body) = req.into_parts();
     parts.extensions.insert(ability.clone());
     let req = axum::extract::Request::from_parts(parts, body);
-    ABILITY_SLOT
-        .scope(std::cell::RefCell::new(Some(ability)), next.run(req))
-        .await
+    crate::core::with_ability_erased(
+        ability as Arc<dyn std::any::Any + Send + Sync>,
+        next.run(req),
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -683,5 +870,163 @@ mod tests {
         assert_eq!(entries[1].subject_type, "User");
         assert_eq!(entries[2].action, Action::Manage);
         assert_eq!(entries[2].subject_type, "Org");
+    }
+
+    // -- Row-level predicate rules ------------------------------------------
+
+    #[test]
+    fn predicate_rule_denies_instance_without_principal() {
+        // No principal installed => the predicate denies conservatively.
+        let ab = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                vec![],
+                |_row: &serde_json::Value, _p: &Principal| true,
+            )
+            .build();
+        let row = Subject::Instance(json!({ "type": "Post", "author": "alice" }));
+        assert!(!ab.can(&Action::Read, &row));
+    }
+
+    #[tokio::test]
+    async fn predicate_rule_matches_instance_with_principal() {
+        let ab = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                vec![],
+                |row: &serde_json::Value, p: &Principal| row["author"] == p.subject,
+            )
+            .build();
+        let mine = Subject::Instance(json!({ "type": "Post", "author": "alice" }));
+        let theirs = Subject::Instance(json!({ "type": "Post", "author": "bob" }));
+        let principal = Arc::new(Principal {
+            subject: "alice".into(),
+            roles: vec![],
+            claims: json!({}),
+        });
+        with_principal(principal, async {
+            assert!(ab.can(&Action::Read, &mine));
+            assert!(!ab.can(&Action::Read, &theirs));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn predicate_rule_sees_attributes_shaped_instances() {
+        // CASL-shaped instances nest the payload under `attributes`; the
+        // predicate sees the same view `conditions_satisfied` uses.
+        let ab = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                vec![],
+                |row: &serde_json::Value, p: &Principal| row["author"] == p.subject,
+            )
+            .build();
+        let row = Subject::Instance(json!({
+            "type": "Post",
+            "attributes": { "author": "alice" }
+        }));
+        let principal = Arc::new(Principal {
+            subject: "alice".into(),
+            roles: vec![],
+            claims: json!({}),
+        });
+        with_principal(principal, async {
+            assert!(ab.can(&Action::Read, &row));
+        })
+        .await;
+    }
+
+    #[test]
+    fn predicate_rule_type_check_passes_without_row_context() {
+        // `Subject::Type` checks never evaluate predicates — the guard level
+        // has no row; row filtering happens at the data layer.
+        let ab = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                vec![],
+                |_row: &serde_json::Value, _p: &Principal| false,
+            )
+            .build();
+        assert!(ab.can(&Action::Read, &Subject::Type("Post")));
+    }
+
+    #[tokio::test]
+    async fn can_with_predicate_field_restriction_flows_to_allowed_fields() {
+        let ab = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                vec!["id".into()],
+                |_row: &serde_json::Value, _p: &Principal| true,
+            )
+            .build();
+        let fields = ab
+            .allowed_fields(&Action::Read, &Subject::Type("Post"))
+            .expect("Some");
+        assert_eq!(fields, vec!["id"]);
+        // Empty vec => no field restriction.
+        let unrestricted = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                vec![],
+                |_row: &serde_json::Value, _p: &Principal| true,
+            )
+            .build();
+        assert!(
+            unrestricted
+                .allowed_fields(&Action::Read, &Subject::Type("Post"))
+                .is_none(),
+            "empty fields vec => all fields"
+        );
+    }
+
+    #[tokio::test]
+    async fn ability_predicate_accessor_returns_rule_predicate() {
+        let ab = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                vec![],
+                |row: &serde_json::Value, p: &Principal| row["author"] == p.subject,
+            )
+            .can(Action::Update, "Post")
+            .build();
+        let got = ab
+            .predicate(&Action::Read, &Subject::Type("Post"))
+            .expect("Some");
+        assert!(got.check(&json!({ "author": "a" }), &Principal::default()) == false);
+        let principal = Arc::new(Principal {
+            subject: "a".into(),
+            roles: vec![],
+            claims: json!({}),
+        });
+        assert!(got.check(&json!({ "author": "a" }), &principal));
+        assert!(
+            ab.predicate(&Action::Update, &Subject::Type("Post"))
+                .is_none(),
+            "plain can() rule has no predicate"
+        );
+    }
+
+    #[test]
+    fn ability_and_rule_debug_render_without_predicate_debug() {
+        let ab = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                vec![],
+                |_row: &serde_json::Value, _p: &Principal| true,
+            )
+            .can(Action::Update, "Post")
+            .build();
+        let rendered = format!("{ab:?}");
+        assert!(rendered.contains("predicate: true"));
+        assert!(rendered.contains("predicate: false"));
     }
 }

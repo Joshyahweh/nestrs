@@ -10,6 +10,8 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 static X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+static TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
+static TRACESTATE: HeaderName = HeaderName::from_static("tracestate");
 
 /// Snapshot of the inbound request for use inside handlers (clone is cheap: three small fields).
 #[derive(Clone, Debug)]
@@ -19,6 +21,11 @@ pub struct RequestContext {
     pub path_and_query: String,
     /// Value of `x-request-id` after tower-http request-id layers, if any.
     pub request_id: Option<String>,
+    /// Raw W3C `traceparent` header value, when present (pair with
+    /// [`crate::NestApplication::use_trace_context`] for the parsed ambient form).
+    pub traceparent: Option<String>,
+    /// Raw `tracestate` header value, when present.
+    pub tracestate: Option<String>,
 }
 
 /// Returned when [`RequestContext`] is used but [`crate::NestApplication::use_request_context`] was not enabled.
@@ -58,6 +65,16 @@ pub(crate) async fn install_request_context_middleware(req: Request, next: Next)
         .get(&X_REQUEST_ID)
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
+    let traceparent = parts
+        .headers
+        .get(&TRACEPARENT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let tracestate = parts
+        .headers
+        .get(&TRACESTATE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
     let path_and_query = parts
         .uri
         .path_and_query()
@@ -67,6 +84,8 @@ pub(crate) async fn install_request_context_middleware(req: Request, next: Next)
         method: parts.method.clone(),
         path_and_query,
         request_id,
+        traceparent,
+        tracestate,
     });
     let req = Request::from_parts(parts, body);
     next.run(req).await

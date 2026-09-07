@@ -12,6 +12,8 @@ members = [
   "nestrs-openapi",
   "nestrs-cli",
   "nestrs-mcp",
+  "nestrs-oauth2",
+  "nestrs-storage",
   "examples/hello-app",
   "examples/lab",
 ]

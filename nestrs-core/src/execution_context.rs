@@ -36,6 +36,22 @@ impl ExecutionContext {
         self.host_type
     }
 
+    /// 32-hex W3C trace id from the ambient trace context, when one was
+    /// installed (see `nestrs::core::with_trace_context`).
+    pub fn trace_id(&self) -> Option<String> {
+        crate::current_trace_context().map(|t| t.trace_id_hex())
+    }
+
+    /// 16-hex W3C span id from the ambient trace context.
+    pub fn span_id(&self) -> Option<String> {
+        crate::current_trace_context().map(|t| t.span_id_hex())
+    }
+
+    /// 2-hex W3C trace flags from the ambient trace context.
+    pub fn trace_flags(&self) -> Option<String> {
+        crate::current_trace_context().map(|t| t.trace_flags_hex())
+    }
+
     pub fn switch_to_http(&self) -> HttpExecutionArguments<'_> {
         HttpExecutionArguments { ctx: self }
     }

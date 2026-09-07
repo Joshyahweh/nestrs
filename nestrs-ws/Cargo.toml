@@ -14,7 +14,11 @@ categories = ["network-programming", "web-programming", "asynchronous"]
 [dependencies]
 async-trait = "0.1"
 axum = { workspace = true, features = ["ws"] }
-tokio.workspace = true
+nestrs-core = { version = "0.5.2", path = "../nestrs-core" }
+tokio = { workspace = true, features = ["sync", "time"] }
 futures-util = { version = "0.3", features = ["sink"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+tokio-tungstenite = "0.24"

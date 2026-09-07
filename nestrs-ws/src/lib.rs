@@ -25,7 +25,9 @@
 //! - **Pipes** ([`WsPipeError`]): same top-level keys as guards for pipe failures (`statusCode` 400).
 //! - **Unknown event** (generated `#[ws_routes]` default arm): `event`, `message` (`"unknown event"`).
 //! - **Invalid typed payload** (deserialize into handler DTO): `event`, `message`, `details` (string).
-//! - **Wire parse errors** in [`serve_socket`] (malformed `{event,data}`): `message` only.
+//! - **Wire parse errors** in [`serve_socket`] (malformed `{event,data}`): `message` only,
+//!   **followed by a Close frame with code 1003** (`CloseCode::UnsupportedData`) — a client
+//!   that cannot speak the agreed wire format is closed instead of being left connected.
 //!
 //! Treat these as the WebSocket analogue of Nest’s gateway exception filters: **centralize** by
 //! wrapping [`WsGateway::on_message`] or using shared guard/pipe types; there is no separate
@@ -38,7 +40,7 @@ pub mod adapters;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -54,6 +56,81 @@ pub struct WsEvent<T> {
 pub enum WsSendError {
     Serialize(String),
     Closed,
+}
+
+/// RFC 6455 §7.4.1 close codes used by the runtime (plus the 4000–4999
+/// application range). WebSocket layers in NestJS land close on
+/// `close(code, reason)`; here a [`CloseCode`] + reason becomes an
+/// axum [`Message::Close`] frame via [`WsClient::close`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseCode {
+    /// 1000 — normal, intentional closure.
+    Normal,
+    /// 1001 — endpoint going away (server shutdown, redeploy).
+    GoingAway,
+    /// 1003 — peer sent data the endpoint cannot accept (bad wire format).
+    UnsupportedData,
+    /// 1008 — policy violation (auth failure, rejected message).
+    PolicyViolation,
+    /// 1011 — endpoint hit an unexpected condition (handler panic, 5xx guard).
+    InternalError,
+    /// 1012 — service restarting.
+    ServiceRestart,
+    /// 1013 — temporary condition (overload); retry later.
+    TryAgainLater,
+    /// 4000–4999 — private / application-defined use.
+    Application(u16),
+}
+
+impl CloseCode {
+    pub fn as_u16(self) -> u16 {
+        match self {
+            Self::Normal => 1000,
+            Self::GoingAway => 1001,
+            Self::UnsupportedData => 1003,
+            Self::PolicyViolation => 1008,
+            Self::InternalError => 1011,
+            Self::ServiceRestart => 1012,
+            Self::TryAgainLater => 1013,
+            Self::Application(code) => code,
+        }
+    }
+
+    /// Inverse of [`CloseCode::as_u16`]. Only the known codes and the
+    /// 4000–4999 range round-trip; anything else (including reserved
+    /// 1004/1005/1006/1015 and the 2000–2999 gap) is `None`.
+    pub fn from_u16(code: u16) -> Option<Self> {
+        match code {
+            1000 => Some(Self::Normal),
+            1001 => Some(Self::GoingAway),
+            1003 => Some(Self::UnsupportedData),
+            1008 => Some(Self::PolicyViolation),
+            1011 => Some(Self::InternalError),
+            1012 => Some(Self::ServiceRestart),
+            1013 => Some(Self::TryAgainLater),
+            4000..=4999 => Some(Self::Application(code)),
+            _ => None,
+        }
+    }
+
+    /// Build the axum Close frame for this code.
+    pub(crate) fn close_frame(self, reason: &str) -> Message {
+        Message::Close(Some(axum::extract::ws::CloseFrame {
+            code: self.as_u16(),
+            reason: reason.to_owned().into(),
+        }))
+    }
+}
+
+/// Map a guard rejection to its close code: server-side failures (5xx) are
+/// internal errors (1011); everything else — 401/403 and other 4xx policy
+/// rejections — is a policy violation (1008).
+fn close_code_for_guard(err: &WsGuardError) -> CloseCode {
+    if err.status_code >= 500 {
+        CloseCode::InternalError
+    } else {
+        CloseCode::PolicyViolation
+    }
 }
 
 /// Headers (and related data) from the HTTP upgrade request, available on each [`WsClient`].
@@ -135,6 +212,100 @@ pub trait WsCanActivate: Default + Send + Sync + 'static {
     ) -> Result<(), WsGuardError>;
 }
 
+/// Object-safe, per-message guard for the **runtime** chain
+/// ([`WsGateway::message_guards`]). [`WsCanActivate`] requires `Default`,
+/// which makes it non-object-safe; runtime guards are supplied as
+/// `Arc<dyn WsMessageGuard>` and run inside [`serve_socket`] on every
+/// inbound message — opt-in defense in depth on top of the
+/// `#[use_ws_guards(...)]` checks compiled into the macro dispatch.
+///
+/// Any [`WsCanActivate`] type automatically implements this trait.
+#[async_trait::async_trait]
+pub trait WsMessageGuard: Send + Sync + 'static {
+    async fn can_activate_message(
+        &self,
+        handshake: &WsHandshake,
+        event: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), WsGuardError>;
+}
+
+#[async_trait::async_trait]
+impl<T: WsCanActivate> WsMessageGuard for T {
+    async fn can_activate_message(
+        &self,
+        handshake: &WsHandshake,
+        event: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), WsGuardError> {
+        self.can_activate_ws(handshake, event, payload).await
+    }
+}
+
+/// Ordered per-message guard chain run by [`serve_socket`] before each
+/// message reaches the gateway. Empty by default; populate via
+/// [`WsGateway::message_guards`]. The first rejection short-circuits.
+#[derive(Clone, Default)]
+pub struct WsGuardChain {
+    guards: Vec<Arc<dyn WsMessageGuard>>,
+}
+
+impl WsGuardChain {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Builder-style push.
+    pub fn with_guard(mut self, guard: Arc<dyn WsMessageGuard>) -> Self {
+        self.guards.push(guard);
+        self
+    }
+
+    pub fn push(&mut self, guard: Arc<dyn WsMessageGuard>) {
+        self.guards.push(guard);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.guards.is_empty()
+    }
+
+    /// Run the chain in order against one inbound message.
+    pub async fn run(
+        &self,
+        handshake: &WsHandshake,
+        event: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), WsGuardError> {
+        for guard in &self.guards {
+            guard
+                .can_activate_message(handshake, event, payload)
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+/// Guard evaluated **once** on the HTTP upgrade request, before any
+/// message flows ([`ws_route_with_guards`]). A rejection does not bounce
+/// the HTTP request — the upgrade is accepted and the socket immediately
+/// closed with **1008 Policy Violation**, so WS clients observe an
+/// in-protocol rejection instead of an HTTP error they may not surface.
+///
+/// Any [`WsCanActivate`] type automatically implements this trait: it is
+/// invoked with an empty event name and a `null` payload.
+#[async_trait::async_trait]
+pub trait WsUpgradeGuard: Send + Sync + 'static {
+    async fn can_upgrade(&self, handshake: &WsHandshake) -> Result<(), WsGuardError>;
+}
+
+#[async_trait::async_trait]
+impl<T: WsCanActivate> WsUpgradeGuard for T {
+    async fn can_upgrade(&self, handshake: &WsHandshake) -> Result<(), WsGuardError> {
+        self.can_activate_ws(handshake, "", &serde_json::Value::Null)
+            .await
+    }
+}
+
 /// Transform inbound JSON after guards (Nest `Pipe` analogue for payloads).
 #[async_trait::async_trait]
 pub trait WsPipeTransform: Default + Send + Sync + 'static {
@@ -185,6 +356,14 @@ pub struct WsClient {
 }
 
 impl WsClient {
+    /// Test-only constructor: lets a test build a `WsClient` from a raw
+    /// `mpsc::UnboundedSender` so it can drive `emit_json` / `emit` and
+    /// assert on the emitted frames. Not part of the public surface.
+    #[doc(hidden)]
+    pub fn from_tx_for_test(tx: mpsc::UnboundedSender<Message>, handshake: WsHandshake) -> Self {
+        Self { tx, handshake }
+    }
+
     pub fn handshake(&self) -> &WsHandshake {
         &self.handshake
     }
@@ -206,11 +385,33 @@ impl WsClient {
             .send(Message::Text(text))
             .map_err(|_| WsSendError::Closed)
     }
+
+    /// Queue a Close frame with the given RFC 6455 code and reason. The
+    /// frame is sent through the same channel as emitted events, so it
+    /// lands after anything already queued. Gateway handlers call this to
+    /// close the connection deliberately (shutdown → [`CloseCode::GoingAway`],
+    /// rate limiting → [`CloseCode::TryAgainLater`], etc.); the runtime
+    /// itself uses 1003/1008/1011 for decode, guard, and internal errors.
+    pub fn close(&self, code: CloseCode, reason: &str) -> Result<(), WsSendError> {
+        self.tx
+            .send(code.close_frame(reason))
+            .map_err(|_| WsSendError::Closed)
+    }
 }
 
 #[async_trait::async_trait]
 pub trait WsGateway: Send + Sync + 'static {
     async fn on_message(&self, client: WsClient, event: &str, payload: serde_json::Value);
+
+    /// Opt-in per-message guard chain run by the shared runtime
+    /// ([`serve_socket`]) before every `on_message`, on top of any
+    /// `#[use_ws_guards(...)]` checks compiled into the dispatch.
+    /// Default: empty chain. Return the guards as
+    /// `Arc<dyn WsMessageGuard>`; rejections close the socket (guard
+    /// status ≥ 500 → 1011, otherwise → 1008).
+    fn message_guards(&self) -> WsGuardChain {
+        WsGuardChain::new()
+    }
 }
 
 pub fn ws_route<G>(gateway: Arc<G>) -> axum::routing::MethodRouter
@@ -224,7 +425,77 @@ where
     })
 }
 
+/// [`ws_route`] with an **upgrade-time guard chain**: each guard runs
+/// against the handshake before the socket is served; the first rejection
+/// accepts the upgrade and immediately closes the socket with
+/// [`CloseCode::PolicyViolation`] (1008) and the guard's message.
+pub fn ws_route_with_guards<G>(
+    gateway: Arc<G>,
+    guards: Vec<Arc<dyn WsUpgradeGuard>>,
+) -> axum::routing::MethodRouter
+where
+    G: WsGateway,
+{
+    axum::routing::get(move |ws: WebSocketUpgrade, headers: HeaderMap| {
+        let gw = gateway.clone();
+        let guards = guards.clone();
+        let handshake = WsHandshake::new(headers);
+        async move {
+            for guard in &guards {
+                if let Err(err) = guard.can_upgrade(&handshake).await {
+                    return ws.on_upgrade(move |socket| reject_upgrade(socket, err));
+                }
+            }
+            ws.on_upgrade(move |socket| serve_socket(socket, gw, handshake))
+        }
+    })
+}
+
+/// Accept an upgrade, immediately Close with 1008 + the guard's message,
+/// then (bounded) drain the peer's close echo before dropping.
+async fn reject_upgrade(socket: WebSocket, err: WsGuardError) {
+    let mut socket = socket;
+    let close =
+        CloseCode::PolicyViolation.close_frame(&format!("upgrade rejected: {}", err.message));
+    if socket.send(close).await.is_ok() {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while let Some(Ok(msg)) = socket.next().await {
+                if matches!(msg, Message::Close(_)) {
+                    break;
+                }
+            }
+        })
+        .await;
+    }
+}
+
 pub async fn serve_socket<G>(socket: WebSocket, gateway: Arc<G>, handshake: WsHandshake)
+where
+    G: WsGateway,
+{
+    // Install the W3C trace context from the handshake headers when present,
+    // so gateway handlers (and anything running inside the connection task)
+    // can read the caller's trace via `nestrs::core::current_trace_context()`.
+    let headers = handshake.headers();
+    let ctx = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .and_then(nestrs_core::parse_traceparent);
+    if let Some(mut ctx) = ctx {
+        ctx.tracestate = headers
+            .get("tracestate")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        return nestrs_core::with_trace_context(
+            ctx,
+            serve_socket_inner(socket, gateway, handshake),
+        )
+        .await;
+    }
+    serve_socket_inner(socket, gateway, handshake).await;
+}
+
+async fn serve_socket_inner<G>(socket: WebSocket, gateway: Arc<G>, handshake: WsHandshake)
 where
     G: WsGateway,
 {
@@ -233,6 +504,7 @@ where
         tx,
         handshake: handshake.clone(),
     };
+    let chain = gateway.message_guards();
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -244,47 +516,104 @@ where
         }
     });
 
+    // A throwaway client sharing the outbound channel, for error/close
+    // frames after the per-message client was consumed by `on_message`.
+    fn error_client(client: &WsClient) -> WsClient {
+        WsClient {
+            tx: client.tx.clone(),
+            handshake: client.handshake.clone(),
+        }
+    }
+
     while let Some(Ok(msg)) = ws_rx.next().await {
         match msg {
             Message::Text(text) => {
-                if let Ok(ev) = serde_json::from_str::<WsEvent<serde_json::Value>>(&text) {
-                    let c = WsClient {
-                        tx: client.tx.clone(),
-                        handshake: client.handshake.clone(),
-                    };
-                    gateway.on_message(c, ev.event.as_str(), ev.data).await;
-                } else {
-                    let c = WsClient {
-                        tx: client.tx.clone(),
-                        handshake: client.handshake.clone(),
-                    };
-                    let _ = c.emit(
-                        WS_ERROR_EVENT,
-                        serde_json::json!({
-                            "message": "invalid websocket payload (expected {event,data})"
-                        }),
-                    );
-                }
-            }
-            Message::Binary(bin) => {
-                if let Ok(text) = std::str::from_utf8(&bin) {
-                    if let Ok(ev) = serde_json::from_str::<WsEvent<serde_json::Value>>(text) {
-                        let c = WsClient {
-                            tx: client.tx.clone(),
-                            handshake: client.handshake.clone(),
-                        };
-                        gateway.on_message(c, ev.event.as_str(), ev.data).await;
-                    } else {
-                        let c = WsClient {
-                            tx: client.tx.clone(),
-                            handshake: client.handshake.clone(),
-                        };
+                match serde_json::from_str::<WsEvent<serde_json::Value>>(&text) {
+                    Ok(ev) => match chain.run(&client.handshake, &ev.event, &ev.data).await {
+                        Err(err) => {
+                            let c = error_client(&client);
+                            let _ = c.emit(WS_ERROR_EVENT, err.to_json());
+                            let code = close_code_for_guard(&err);
+                            let _ = c.close(code, &err.message);
+                            break;
+                        }
+                        Ok(()) => {
+                            let c = error_client(&client);
+                            let fut = gateway.on_message(c, ev.event.as_str(), ev.data);
+                            if std::panic::AssertUnwindSafe(fut)
+                                .catch_unwind()
+                                .await
+                                .is_err()
+                            {
+                                let c = error_client(&client);
+                                let _ = c.emit(
+                                    WS_ERROR_EVENT,
+                                    serde_json::json!({ "message": "internal error" }),
+                                );
+                                let _ = c.close(CloseCode::InternalError, "internal error");
+                                break;
+                            }
+                        }
+                    },
+                    Err(_) => {
+                        let c = error_client(&client);
                         let _ = c.emit(
                             WS_ERROR_EVENT,
                             serde_json::json!({
                                 "message": "invalid websocket payload (expected {event,data})"
                             }),
                         );
+                        let _ = c.close(
+                            CloseCode::UnsupportedData,
+                            "invalid websocket payload (expected {event,data})",
+                        );
+                        break;
+                    }
+                }
+            }
+            Message::Binary(bin) => {
+                if let Ok(text) = std::str::from_utf8(&bin) {
+                    match serde_json::from_str::<WsEvent<serde_json::Value>>(text) {
+                        Ok(ev) => match chain.run(&client.handshake, &ev.event, &ev.data).await {
+                            Err(err) => {
+                                let c = error_client(&client);
+                                let _ = c.emit(WS_ERROR_EVENT, err.to_json());
+                                let code = close_code_for_guard(&err);
+                                let _ = c.close(code, &err.message);
+                                break;
+                            }
+                            Ok(()) => {
+                                let c = error_client(&client);
+                                let fut = gateway.on_message(c, ev.event.as_str(), ev.data);
+                                if std::panic::AssertUnwindSafe(fut)
+                                    .catch_unwind()
+                                    .await
+                                    .is_err()
+                                {
+                                    let c = error_client(&client);
+                                    let _ = c.emit(
+                                        WS_ERROR_EVENT,
+                                        serde_json::json!({ "message": "internal error" }),
+                                    );
+                                    let _ = c.close(CloseCode::InternalError, "internal error");
+                                    break;
+                                }
+                            }
+                        },
+                        Err(_) => {
+                            let c = error_client(&client);
+                            let _ = c.emit(
+                                WS_ERROR_EVENT,
+                                serde_json::json!({
+                                    "message": "invalid websocket payload (expected {event,data})"
+                                }),
+                            );
+                            let _ = c.close(
+                                CloseCode::UnsupportedData,
+                                "invalid websocket payload (expected {event,data})",
+                            );
+                            break;
+                        }
                     }
                 }
             }

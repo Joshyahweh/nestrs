@@ -6,14 +6,17 @@ pub use axum;
 use axum::body::{to_bytes, Body};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 pub use nestrs_macros::{
-    all, check_policies, controller, cron, delete, dto, event_pattern, event_routes, get, head,
-    http_code, injectable, interval, message_pattern, micro_routes, module, on_event, openapi,
-    options, patch, post, put, queue_processor, raw_body, redirect, response_header, roles, routes,
-    schedule_routes, serialize, set_metadata, sse, subscribe_message, use_filters, use_guards,
-    use_interceptors, use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes,
-    use_ws_guards, use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes,
-    NestConfig, NestDto,
+    all, check_policies, config, controller, cron, dataloader, delete, dto, event_pattern,
+    event_routes, get, head, http_code, injectable, interval, liveness, message_pattern,
+    micro_routes, module, on_event, openapi, options, patch, post, put, queue_processor, raw_body,
+    readiness, redirect, response_header, roles, routes, schedule_routes, serialize, set_metadata,
+    skip_throttle, sse,
+    startup, subscribe_message, throttle, upload_to, use_filters, use_guards, use_interceptors,
+    use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards,
+    use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
 };
+#[doc(hidden)]
+pub use schemars;
 #[doc(hidden)]
 pub use serde_json;
 use std::sync::{Arc, OnceLock};
@@ -68,6 +71,8 @@ pub use microservice_health::BrokerHealthStub;
 pub use microservice_health::NatsBrokerHealth;
 #[cfg(all(feature = "microservices", feature = "microservices-redis"))]
 pub use microservice_health::RedisBrokerHealth;
+#[cfg(feature = "oauth2")]
+pub use nestrs_oauth2 as oauth2;
 #[cfg(feature = "openapi")]
 pub use nestrs_openapi;
 #[cfg(feature = "ws")]
@@ -85,23 +90,33 @@ mod database_sqlx;
 mod exception_filter;
 #[cfg(feature = "files")]
 mod files;
+#[cfg(feature = "graphql-authz")]
+mod gql_authz;
+pub mod health_probes;
 #[cfg(feature = "http-client")]
 mod http_client;
 mod http_execution_context;
 mod i18n;
 mod interceptor;
-#[cfg(all(feature = "authz", feature = "authn"))]
+#[cfg(feature = "authz")]
 mod masking;
 #[cfg(feature = "mongo")]
 mod mongo;
 mod multipart;
 #[cfg(feature = "mvc")]
 mod mvc;
+#[cfg(feature = "oauth2")]
+mod oauth2_bridge;
 #[cfg(feature = "otel")]
 pub mod otel;
 mod pipes;
 #[cfg(feature = "authz")]
-mod policies;
+// Public so transport crates and tests can reach `policies::Principal`
+// module-qualified (the root name `nestrs::Principal` belongs to the authn
+// extractor newtype).
+pub mod policies;
+#[cfg(feature = "authz-row-level")]
+pub mod predicates;
 pub mod problem;
 #[cfg(feature = "queues")]
 pub mod queues;
@@ -117,9 +132,13 @@ mod serialization;
 mod server_timing;
 pub mod sse;
 mod testing;
+mod throttler;
+mod trace_context;
 #[cfg(feature = "database-sqlx")]
 mod transactional;
 mod versioning;
+#[cfg(feature = "ws-authz")]
+mod ws_authz;
 
 #[cfg(feature = "authn")]
 pub use authn::{
@@ -131,23 +150,43 @@ pub use authn::{
 pub use cache::RedisCacheOptions;
 pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
 pub use client_ip::{ClientIp, ClientIpMissing};
-pub use config::{load_config, ConfigError, ConfigModule};
+pub use config::{
+    build_overlay, load_config, parse_namespaced, resolve_env_overlay, Config, ConfigError,
+    ConfigModule, ConfigNamespace, ConfigService, NamespacedConfig, TypedConfigModule,
+    DEFAULT_CONFIG_PREFIX,
+};
 #[cfg(feature = "database-sqlx")]
 pub use database_sqlx::{install_default_drivers, SqlxDatabaseModule, SqlxDatabaseService};
 pub use exception_filter::ExceptionFilter;
 #[cfg(feature = "files")]
 pub use files::{stream_file_octet_stream, stream_file_or_response, stream_file_with_content_type};
+#[cfg(feature = "graphql-authz")]
+pub use gql_authz::{
+    current_gql_ability, current_gql_principal, current_gql_transaction,
+    graphql_router_with_context, GqlDataContext,
+};
+#[cfg(all(unix, feature = "health-disk"))]
+pub use health_probes::DiskSpaceIndicator;
+#[cfg(feature = "http-client")]
+pub use health_probes::HttpIndicator;
+pub use health_probes::{DatabaseIndicator, ProbeKind, ProbeOutcome};
 #[cfg(feature = "http-client")]
 pub use http_client::{HttpModule, HttpService};
 pub use http_execution_context::{ExecutionContextMissing, HttpExecutionContext};
 pub use i18n::{I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale};
 pub use interceptor::{Interceptor, LoggingInterceptor};
-#[cfg(all(feature = "authz", feature = "authn"))]
-pub use masking::{json_response, mask_response, MaskingConfig, PolicyMaskingInterceptor};
+#[cfg(feature = "authz")]
+pub use masking::{
+    json_response, mask_response, mask_value, MaskingConfig, PolicyMaskingInterceptor,
+};
 #[cfg(feature = "mongo")]
 pub use mongo::{MongoModule, MongoService};
 #[cfg(feature = "mvc")]
 pub use mvc::{MvcModule, MvcService};
+#[cfg(feature = "oauth2")]
+pub use oauth2_bridge::{
+    install_oauth2_middleware, OAuth2Identity, OAuth2Principal, OAuth2PrincipalMissing,
+};
 #[cfg(feature = "otel")]
 pub use otel::{OpenTelemetryConfig, OtlpProtocol};
 pub use pipes::ParseIntPipe;
@@ -156,8 +195,17 @@ pub use pipes::ValidationPipe;
 pub use policies::current_ability;
 #[cfg(feature = "authz")]
 pub use policies::{
-    install_policies_middleware, parse_policy_entries, with_ability, Ability, AbilityBuilder,
-    Action, Conditions, PoliciesGuard, PoliciesModule, PoliciesOptions, PolicyEntry, Rule, Subject,
+    current_principal, install_policies_middleware, parse_policy_entries, with_ability,
+    with_principal, Ability, AbilityBuilder, Action, Conditions, PoliciesGuard, PoliciesModule,
+    PoliciesOptions, PolicyEntry, RowPredicate, Rule, Subject,
+};
+// NOTE: `policies::Principal` is deliberately NOT root-exported — the authn
+// extractor newtype `nestrs::Principal` owns that name. Use the
+// module-qualified path `nestrs::policies::Principal`.
+#[cfg(feature = "authz-row-level")]
+pub use predicates::{
+    AuthorIsCurrentUser, BelongsToUser, HasRole, NotDeleted, OwnerOrAdmin, PublicOrOwner,
+    PublishedOnly, SelfOrAdmin, TenantOrAdmin, WithinTenant,
 };
 pub use problem::ProblemDetails;
 #[cfg(feature = "queues")]
@@ -166,6 +214,8 @@ pub use queues::{
     QueuesRuntime, QueuesService,
 };
 pub use raw_body::RawBody;
+#[cfg(feature = "authz-row-level")]
+pub use repository::FindManyParams;
 #[cfg(all(feature = "database-sqlx", feature = "authz"))]
 pub use repository::{CrudService, Entity, Repository};
 pub use request_context::{RequestContext, RequestContextMissing};
@@ -181,6 +231,13 @@ pub use security::{
 pub use serialization::strip_null_json_value;
 pub use server_timing::{ServerTiming, ServerTimingConfig};
 pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
+#[cfg(feature = "cache-redis")]
+pub use throttler::RedisThrottler;
+pub use throttler::{
+    InMemoryThrottler, ThrottleOutcome, ThrottleSpec, ThrottlerBackend, ThrottlerBackendKind,
+    ThrottlerGuard, ThrottlerModule, ThrottlerOptions, ThrottlerService, ThrottlerState,
+};
+pub use trace_context::{current_trace, install_trace_context_middleware};
 #[cfg(feature = "database-sqlx")]
 pub use transactional::{
     current_transaction, install_transactional_middleware, TransactionSlot,
@@ -188,6 +245,11 @@ pub use transactional::{
 };
 pub use versioning::{
     host_restriction_middleware, ApiVersioningPolicy, NestApiVersion, VersioningType,
+};
+#[cfg(feature = "ws-authz")]
+pub use ws_authz::{
+    current_ws_ability, current_ws_principal, current_ws_transaction, emit_masked, run_in_ws_scope,
+    WsScope,
 };
 
 /// Axum middleware from an [`Interceptor`](Interceptor) type (uses `I::default()` per request).
@@ -213,6 +275,11 @@ pub mod prelude {
     };
     #[cfg(feature = "graphql")]
     pub use crate::graphql;
+    #[cfg(all(unix, feature = "health-disk"))]
+    pub use crate::health_probes::DiskSpaceIndicator;
+    #[cfg(feature = "http-client")]
+    pub use crate::health_probes::HttpIndicator;
+    pub use crate::health_probes::{DatabaseIndicator, ProbeKind, ProbeOutcome};
     pub use crate::interceptor_layer;
     #[cfg(feature = "microservices")]
     pub use crate::microservices;
@@ -256,26 +323,27 @@ pub mod prelude {
     pub use crate::RedisBrokerHealth;
     pub use crate::{
         all, async_trait, controller, cron, delete, dto, event_pattern, event_routes, get, head,
-        http_code, impl_routes, injectable, interval, load_config, message_pattern, micro_routes,
-        module, nestrs_default_not_found_handler, on_event, openapi, options, patch, post, put,
-        queue_processor, raw_body, redirect, response_header, roles, routes, runtime_is_production,
-        schedule_routes, serialize, set_metadata, sse, subscribe_message, try_init_tracing,
-        use_filters, use_guards, use_interceptors, use_micro_guards, use_micro_interceptors,
-        use_micro_pipes, use_pipes, use_ws_guards, use_ws_interceptors, use_ws_pipes, ver, version,
-        ws_gateway, ws_routes, ApiVersioningPolicy, BadGatewayException, BadRequestException,
-        CacheError, CacheModule, CacheOptions, CacheService, ClientIp, ClientIpMissing,
-        ConfigError, ConfigModule, ConflictException, CorsOptions, ExceptionFilter,
-        ExecutionContextMissing, ForbiddenException, GatewayTimeoutException, GoneException,
-        HealthIndicator, HealthStatus, HttpException, HttpExecutionContext, I18n, I18nMissing,
-        I18nModule, I18nOptions, I18nService, Interceptor, InternalServerErrorException, Locale,
-        LoggingInterceptor, MethodNotAllowedException, NestApiVersion, NestApplication, NestConfig,
-        NestDto, NestFactory, NotAcceptableException, NotFoundException, NotImplementedException,
+        http_code, impl_routes, injectable, interval, liveness, load_config, message_pattern,
+        micro_routes, module, nestrs_default_not_found_handler, on_event, openapi, options, patch,
+        post, put, queue_processor, raw_body, readiness, redirect, response_header, roles, routes,
+        runtime_is_production, schedule_routes, serialize, set_metadata, sse, startup,
+        subscribe_message, try_init_tracing, use_filters, use_guards, use_interceptors,
+        use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards,
+        use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes,
+        ApiVersioningPolicy, BadGatewayException, BadRequestException, CacheError, CacheModule,
+        CacheOptions, CacheService, ClientIp, ClientIpMissing, ConfigError, ConfigModule,
+        ConfigService, ConflictException, CorsOptions, ExceptionFilter, ExecutionContextMissing,
+        ForbiddenException, GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus,
+        HttpException, HttpExecutionContext, I18n, I18nMissing, I18nModule, I18nOptions,
+        I18nService, Interceptor, InternalServerErrorException, Locale, LoggingInterceptor,
+        MethodNotAllowedException, NestApiVersion, NestApplication, NestConfig, NestDto,
+        NestFactory, NotAcceptableException, NotFoundException, NotImplementedException,
         ParseIntPipe, PathNormalization, PayloadTooLargeException, PaymentRequiredException,
         ProblemDetails, RateLimitOptions, RawBody, ReadinessContext, RequestContext,
         RequestContextMissing, RequestScoped, RequestScopedMissing, RequestTimeoutException,
         RequestTracingOptions, SecurityHeaders, ServiceUnavailableException, TestClient,
         TestRequest, TestingModule, TestingModuleBuilder, TooManyRequestsException, TracingConfig,
-        TracingFormat, UnauthorizedException, UnprocessableEntityException,
+        TracingFormat, TypedConfigModule, UnauthorizedException, UnprocessableEntityException,
         UnsupportedMediaTypeException, ValidatedBody, ValidatedPath, ValidatedQuery,
         ValidationPipe, VersioningType,
     };
@@ -872,6 +940,9 @@ pub struct NestApplication {
     cors_options: Option<CorsOptions>,
     security_headers: Option<SecurityHeaders>,
     rate_limit_options: Option<RateLimitOptions>,
+    throttler_options: Option<ThrottlerOptions>,
+    #[cfg(feature = "oauth2")]
+    oauth2_verifier: Option<Arc<nestrs_oauth2::resource_server::JwtVerifier>>,
     request_timeout: Option<std::time::Duration>,
     /// Max in-flight requests for the full app service (Tower `ConcurrencyLimitLayer`).
     concurrency_limit: Option<usize>,
@@ -884,6 +955,9 @@ pub struct NestApplication {
     request_context: bool,
     /// Injects [`ExecutionContext`] (Nest-style `ArgumentsHost` for HTTP) when enabled.
     execution_context: bool,
+    /// Installs the ambient W3C trace context (`traceparent` header → task-local
+    /// [`crate::core::TraceContext`]) when enabled (see [`Self::use_trace_context`]).
+    trace_context: bool,
     /// Enables request-scoped providers (`ProviderScope::Request`) via task-local cache + per-request registry injection.
     request_scope: bool,
     /// Trusted reverse-proxy hop count for client-IP resolution
@@ -950,6 +1024,9 @@ impl NestApplication {
             cors_options: None,
             security_headers: None,
             rate_limit_options: None,
+            throttler_options: None,
+            #[cfg(feature = "oauth2")]
+            oauth2_verifier: None,
             request_timeout: None,
             concurrency_limit: None,
             load_shed: false,
@@ -960,6 +1037,7 @@ impl NestApplication {
             request_id: false,
             request_context: false,
             execution_context: false,
+            trace_context: false,
             request_scope: false,
             trusted_proxy_hops: None,
             shutdown_hook_timeout: None,
@@ -1409,6 +1487,30 @@ impl NestApplication {
         self
     }
 
+    /// Enable route throttling (global spec + backend; per-route
+    /// `#[throttle(n, "per")]` overrides). Adds a 429 layer
+    /// with `Retry-After` + `X-RateLimit-Remaining` headers.
+    /// The chosen [`ThrottlerService`] is registered for `ThrottlerGuard`.
+    pub fn use_throttler(mut self, options: ThrottlerOptions) -> Self {
+        self.throttler_options = Some(options);
+        self
+    }
+
+    /// Wire OAuth2 verification into the application. The verifier
+    /// is consulted on every request; verified identities are
+    /// stashed into `parts.extensions` so the `OAuth2Principal`
+    /// extractor (and `OAuth2Guard` in the `nestrs-oauth2` crate)
+    /// can read them. The actual JWT validation happens in the
+    /// middleware; this method just installs the layer.
+    #[cfg(feature = "oauth2")]
+    pub fn use_oauth2(
+        mut self,
+        verifier: Arc<nestrs_oauth2::resource_server::JwtVerifier>,
+    ) -> Self {
+        self.oauth2_verifier = Some(verifier);
+        self
+    }
+
     pub fn use_request_timeout(mut self, duration: std::time::Duration) -> Self {
         self.request_timeout = Some(duration);
         self
@@ -1509,6 +1611,20 @@ impl NestApplication {
     /// Handlers read it with the [`HttpExecutionContext`] extractor (from the crate root or [`crate::prelude`]).
     pub fn use_execution_context(mut self) -> Self {
         self.execution_context = true;
+        self
+    }
+
+    /// Parses the W3C [`traceparent`](https://www.w3.org/TR/trace-context/) header per
+    /// request and installs an ambient `nestrs::core::TraceContext` task-local for the
+    /// handler (and resolvers running inside the request task).
+    ///
+    /// Handlers read it via [`ExecutionContext::trace_id`](crate::core::ExecutionContext::trace_id)
+    /// / `span_id` / `trace_flags`, or directly with
+    /// [`current_trace_context`](crate::core::current_trace_context). Requests without a
+    /// valid `traceparent` header run without a trace context (accessors return `None`).
+    /// Non-HTTP transports install it with [`with_trace_context`](crate::core::with_trace_context).
+    pub fn use_trace_context(mut self) -> Self {
+        self.trace_context = true;
         self
     }
 
@@ -1785,12 +1901,19 @@ impl NestApplication {
         let production_errors = self.production_errors;
         let request_context = self.request_context;
         let execution_context = self.execution_context;
+        let trace_context = self.trace_context;
         let request_scope = self.request_scope;
         let i18n = self.i18n;
         let request_id = self.request_id;
         let static_mounts = self.static_mounts;
         let liveness_path = self.liveness_path;
         let readiness = self.readiness;
+        // Cloned before `readiness` is moved below; feeds the fixed
+        // `/__nestrs/health/ready` aggregation endpoint.
+        let readiness_indicators = readiness
+            .as_ref()
+            .map(|(_, ind)| ind.clone())
+            .unwrap_or_default();
         let metrics_path = self.metrics_path.clone();
         let server_timing = self.server_timing;
         let request_tracing = self.request_tracing;
@@ -1806,7 +1929,8 @@ impl NestApplication {
         let session_memory = self.session_memory;
         #[cfg(feature = "csrf")]
         let csrf = self.csrf.clone();
-        let registry = self.registry;
+        let mut registry = self.registry;
+        let throttler_options = self.throttler_options;
         let uri_version = self.uri_version;
         let api_versioning = self.api_versioning.clone();
         let global_prefix = self.global_prefix;
@@ -1943,6 +2067,35 @@ impl NestApplication {
             ));
         }
 
+        if let Some(options) = throttler_options {
+            // Register the service for guards (`ThrottlerGuard::resolve`).
+            // We hold the registry in `Arc<ProviderRegistry>`; the only
+            // strong ref at this point in `build_router` is the local one,
+            // so `Arc::get_mut` succeeds. If a future refactor shares the
+            // Arc earlier, switch this to `register_use_value` against a
+            // freshly-constructed registry that replaces `self.registry`.
+            if registry.try_get::<ThrottlerService>().is_none() {
+                if let Some(reg) = std::sync::Arc::get_mut(&mut registry) {
+                    reg.override_provider::<ThrottlerService>(std::sync::Arc::new(
+                        ThrottlerService::from_options(&options),
+                    ));
+                }
+            }
+            let state = std::sync::Arc::new(crate::throttler::ThrottlerState::new(&options));
+            router = router.layer(axum::middleware::from_fn_with_state(
+                state,
+                crate::throttler::throttler_middleware,
+            ));
+        }
+
+        #[cfg(feature = "oauth2")]
+        if let Some(verifier) = self.oauth2_verifier {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                verifier,
+                oauth2_bridge::install_oauth2_middleware,
+            ));
+        }
+
         if let Some(duration) = self.request_timeout {
             router = router.layer(axum::middleware::from_fn_with_state(
                 duration,
@@ -1994,6 +2147,12 @@ impl NestApplication {
         if execution_context {
             router = router.layer(axum::middleware::from_fn(
                 http_execution_context::install_execution_context_middleware,
+            ));
+        }
+
+        if trace_context {
+            router = router.layer(axum::middleware::from_fn(
+                trace_context::install_trace_context_middleware,
             ));
         }
 
@@ -2105,7 +2264,11 @@ impl NestApplication {
             },
         ));
 
-        router
+        // Probe endpoints mount outermost (server-root merge, like the
+        // liveness/readiness routes above) so they are reachable regardless
+        // of global prefix / versioning; dispatch captures the completed
+        // main router for the internal self-requests.
+        health_probes::install_probes(router, readiness_indicators)
     }
 
     /// Emits `tracing` warnings for common security footguns (cookies/sessions without CSRF, etc.).
@@ -3227,6 +3390,10 @@ impl From<core::GuardError> for HttpException {
         match value {
             core::GuardError::Unauthorized(m) => UnauthorizedException::new(m),
             core::GuardError::Forbidden(m) => ForbiddenException::new(m),
+            core::GuardError::TooManyRequests {
+                message,
+                retry_after_secs: _,
+            } => TooManyRequestsException::new(message),
         }
     }
 }
@@ -3430,6 +3597,17 @@ pub fn __nestrs_guard_error_response(e: crate::core::GuardError) -> axum::respon
         crate::core::GuardError::Forbidden(m) => {
             HttpException::new(axum::http::StatusCode::FORBIDDEN, m.clone(), "Forbidden")
         }
+        // Note: `Retry-After`/`X-RateLimit-Remaining` survive in the response
+        // produced by `GuardError::into_response` below; the exception-filter
+        // view carries only the status/message.
+        crate::core::GuardError::TooManyRequests {
+            message,
+            retry_after_secs: _,
+        } => HttpException::new(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            message.clone(),
+            "Too Many Requests",
+        ),
     };
     let mut res = <crate::core::GuardError as axum::response::IntoResponse>::into_response(e);
     res.extensions_mut().insert(ex);

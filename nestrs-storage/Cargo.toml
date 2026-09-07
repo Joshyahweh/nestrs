@@ -1,0 +1,54 @@
+[package]
+name = "nestrs-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+description = "Multi-cloud object storage (S3 / GCS / Azure / Local) for nestrs, built on object_store."
+keywords = ["storage", "s3", "gcs", "azure", "nest"]
+categories = ["api-bindings", "filesystem", "web-programming"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "0.5.2" }
+async-trait = "0.1"
+axum.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+bytes = "1"
+futures = "0.3"
+url = "2"
+parking_lot = "0.12"
+tempfile = "3"
+
+[dev-dependencies]
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["localstack", "minio", "google_cloud_sdk_emulators"] }
+tempfile = "3"
+wiremock = "0.6"
+tokio = { workspace = true, features = ["full"] }
+
+[features]
+default = []
+## Local filesystem backend (always-on, no external service)
+local = []
+## S3 / S3-compatible (AWS, MinIO, LocalStack)
+s3 = ["dep:object_store"]
+## Google Cloud Storage
+gcs = ["dep:object_store"]
+## Azure Blob Storage
+azure = ["dep:object_store"]
+## All four backends. Note: S3/GCS/Azure pull in `object_store` (a
+## non-trivial dep tree with native-tls / rustls variants).
+all = ["local", "s3", "gcs", "azure"]
+
+[dependencies.object_store]
+version = "0.12"
+optional = true
+default-features = false
+features = ["aws", "gcp", "azure", "http"]

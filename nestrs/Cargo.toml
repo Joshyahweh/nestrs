@@ -23,6 +23,16 @@ microservices-rabbitmq = ["microservices", "nestrs-microservices/rabbitmq"]
 microservices-metrics = ["microservices", "nestrs-microservices/microservice-metrics"]
 ws = ["dep:nestrs-ws"]
 graphql = ["dep:nestrs-graphql"]
+## Multi-transport extension: per-resolver ability resolution, ambient sqlx
+## `TransactionSlot` lifetime, and CASL-style outbound masking on GraphQL
+## responses. Pairs with `authz` (provides `Ability`) and `database-sqlx`
+## (provides the `AnyPool` driver).
+graphql-authz = ["graphql", "authz", "database-sqlx", "nestrs-graphql/graphql-authz"]
+## Per-request batching loaders on the GraphQL transport: `GqlDataContext`
+## gains a `DataLoaderRegistry` (installed into each request's data map by
+## the hook path), and `nestrs::graphql` re-exports `DataLoader` / `Loader`.
+## Pair with the `#[dataloader]` proc macro to define loaders.
+graphql-dataloader = ["graphql-authz", "nestrs-graphql/dataloader"]
 openapi = ["dep:nestrs-openapi"]
 cache-redis = ["dep:redis"]
 schedule = ["dep:tokio-cron-scheduler", "dep:linkme"]
@@ -33,6 +43,9 @@ mongo = ["dep:mongodb"]
 # Enables DNS/SRV resolution (`mongodb+srv://`, Atlas-style seed lists). Pulls **`hickory-*`** (see upstream MongoDB driver advisories).
 mongo-dns = ["mongo", "mongodb/dns-resolver"]
 http-client = ["dep:reqwest"]
+# Disk-space readiness indicator (`nestrs::DiskSpaceIndicator`, unix only —
+# backed by `statvfs`).
+health-disk = ["dep:libc"]
 cookies = ["dep:tower-cookies"]
 csrf = ["cookies", "dep:subtle"]
 session = ["cookies", "dep:tower-sessions"]
@@ -52,6 +65,31 @@ authn = ["dep:jsonwebtoken", "dep:argon2", "dep:getrandom"]
 ## `#[check_policies(...)]` route metadata, and `PoliciesModule::register(PoliciesOptions)`.
 ## Pairs with `authn` so guards can read the verified `PrincipalIdentity`.
 authz = []
+## Row-level authorization enforcement: the pre-built predicates
+## (`nestrs::predicates`), `Repository::find_many_authorized(FindManyParams)`,
+## and mandatory application of the `Ability`'s row-level predicate by every
+## `CrudService` method (create/read/update/delete/list — deny-closed when no
+## `Ability` is in request scope). Custom predicate closures themselves only
+## need `authz`; this flag gates the enforcement seam.
+authz-row-level = ["authz", "database-sqlx"]
+## Multi-transport extension: per-connection `Ability` resolution, ambient
+## `TransactionSlot` lifetime, and CASL-style outbound masking on WebSocket
+## frames. The new helpers live in the main `nestrs` crate
+## (`nestrs::ws::{WsScope, current_ws_ability, current_ws_transaction,
+## emit_masked}`) so `nestrs-ws` does not need to depend on `nestrs`
+## (Cargo would reject the cycle). Users opt into masking by calling
+## `nestrs::ws::emit_masked(&client, event, data, &ability)` instead of
+## `client.emit(...)`.
+ws-authz = ["ws", "authz", "database-sqlx"]
+## First-class OAuth2: 4 grant types (incl. PKCE) via `OAuth2Client`, JWKS-
+## backed `JwtVerifier` (resource server), social providers (Google/GitHub/
+## Microsoft/Apple), `OAuth2Guard`, and `install_oauth2_middleware`. The
+## underlying crate is `nestrs-oauth2`; the main crate re-exports its
+## public types and provides `NestApplication::use_oauth2(OAuth2Options)`.
+oauth2 = ["dep:nestrs-oauth2"]
+## Compound: OAuth2 + the `authn` `Principal` extractor so a route can
+## use `Principal` to read either a JWT or an OAuth2 token identity.
+authn-oauth2 = ["authn", "oauth2"]
 ## Enables a localhost-only HTTP admin port with `/__nestrs/{health,routes,providers,openapi.json}` endpoints. Consumed by `nestrs-mcp`'s live-runtime tools.
 admin = []
 ## Clears `nestrs-core` global registries in tests (`RouteRegistry`, `MetadataRegistry`). See `STABILITY.md`.
@@ -69,7 +107,8 @@ nestrs-graphql = { version = "0.5.2", path = "../nestrs-graphql", optional = tru
 nestrs-openapi = { version = "0.5.2", path = "../nestrs-openapi", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-validator = { version = "0.20", features = ["derive"] }
+schemars = "1"
+validator = { version = "0.21", features = ["derive"] }
 tower = { version = "0.5", features = ["limit", "load-shed"] }
 tower-http = { version = "0.6", features = ["cors", "catch-panic", "set-header", "limit", "request-id", "compression-gzip", "decompression-gzip", "normalize-path", "fs"] }
 async-trait = "0.1"
@@ -91,6 +130,7 @@ tracing-opentelemetry = { version = "0.32.1", default-features = false, optional
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "macros", "postgres", "sqlite"], optional = true }
 mongodb = { version = "3", optional = true, default-features = false, features = ["compat-3-0-0", "rustls-tls"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+libc = { version = "0.2", optional = true }
 tower-cookies = { version = "0.10", optional = true }
 subtle = { version = "2.6", optional = true }
 tower-sessions = { version = "0.10", default-features = false, features = ["memory-store"], optional = true }
@@ -99,6 +139,7 @@ tokio-util = { version = "0.7", features = ["io"], optional = true }
 jsonwebtoken = { workspace = true, optional = true }
 argon2 = { workspace = true, optional = true, features = ["rand"] }
 getrandom = { version = "0.2", optional = true }
+nestrs-oauth2 = { version = "0.5.2", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
 
 [dev-dependencies]
 async-graphql = "=7.0.17"
@@ -111,6 +152,12 @@ ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "std", "rand_core"]
 ed25519 = { version = "2", features = ["pkcs8", "pem"] }
 rand = "0.8"
 pkcs8 = { version = "0.10", features = ["pem"] }
+chrono = "0.4"
+http-body-util = "0.1"
+josekit = "0.10"
+jsonwebtoken = { workspace = true }
+url = "2"
+wiremock = "0.6"
 
 [[bench]]
 name = "router_hot_path"

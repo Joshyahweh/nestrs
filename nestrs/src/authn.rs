@@ -232,6 +232,7 @@ impl JwtService {
 
 /// Helper: time-since-epoch in seconds. Exposed so tests can mint exp/nbf values
 /// without depending on a clock-injection library.
+#[allow(dead_code)] // Public API; used by downstream tests.
 pub fn now_epoch_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -246,6 +247,7 @@ pub fn now_epoch_secs() -> u64 {
 /// Stateless `AuthStrategy` that uses a [`JwtService`] resolved from the registry.
 /// Implements `Default` because [`AuthStrategyGuard`] requires it; in practice
 /// [`AuthnGuard`] is preferred (it pulls the configured service from DI).
+#[allow(dead_code)] // Public API; paired with the `AuthStrategy` trait impl below.
 #[derive(Debug, Default)]
 pub struct JwtStrategy;
 
@@ -416,6 +418,26 @@ pub async fn install_authn_middleware(
         parts.extensions.insert(identity);
     }
     let req = axum::extract::Request::from_parts(parts, body);
+    // Under `authz`, also install the verified principal into the per-task
+    // slot so row-level predicates (Repository authorized paths, CrudService
+    // under `authz-row-level`) can read it — mirrors the extensions entry.
+    #[cfg(feature = "authz")]
+    match req
+        .extensions()
+        .get::<PrincipalIdentity>()
+        .cloned()
+        .map(crate::policies::Principal::from)
+    {
+        Some(p) => {
+            return crate::core::with_principal_erased(
+                std::sync::Arc::new(p) as std::sync::Arc<dyn std::any::Any + Send + Sync>,
+                next.run(req),
+            )
+            .await
+        }
+        None => return next.run(req).await,
+    }
+    #[cfg(not(feature = "authz"))]
     next.run(req).await
 }
 

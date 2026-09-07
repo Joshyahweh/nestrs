@@ -209,26 +209,32 @@ async fn repository_find_where_filters_rows() {
 async fn crud_service_create_read_update_delete_list() {
     let pool = fresh_pool().await;
     let svc = CrudService::<Post>::new(pool);
-    let created = svc
-        .create(json!({ "title": "S1", "body": "b1", "tenant_id": 2 }))
-        .await
-        .expect("create");
-    let id = created.id.expect("id");
-    let read = svc.read(id).await.expect("read").expect("Some");
-    assert_eq!(read.title, "S1");
-    let updated = svc
-        .update(
-            id,
-            json!({ "title": "S1-new", "body": "b1", "tenant_id": 2 }),
-        )
-        .await
-        .expect("update")
-        .expect("Some");
-    assert_eq!(updated.title, "S1-new");
-    let listed = svc.list().await.expect("list");
-    assert!(listed.iter().any(|p| p.id == Some(id)));
-    let removed = svc.delete(id).await.expect("delete");
-    assert!(removed);
+    // Under authz-row-level the CrudService is deny-closed: install an
+    // unrestricted ability (Manage implies create/read/update/delete).
+    let ability = Arc::new(Ability::builder().can(Action::Manage, "posts").build());
+    with_ability(ability, async {
+        let created = svc
+            .create(json!({ "title": "S1", "body": "b1", "tenant_id": 2 }))
+            .await
+            .expect("create");
+        let id = created.id.expect("id");
+        let read = svc.read(id).await.expect("read").expect("Some");
+        assert_eq!(read.title, "S1");
+        let updated = svc
+            .update(
+                id,
+                json!({ "title": "S1-new", "body": "b1", "tenant_id": 2 }),
+            )
+            .await
+            .expect("update")
+            .expect("Some");
+        assert_eq!(updated.title, "S1-new");
+        let listed = svc.list().await.expect("list");
+        assert!(listed.iter().any(|p| p.id == Some(id)));
+        let removed = svc.delete(id).await.expect("delete");
+        assert!(removed);
+    })
+    .await;
 }
 
 // -- Feature D: RLS predicate → SQL WHERE -------------------------------------

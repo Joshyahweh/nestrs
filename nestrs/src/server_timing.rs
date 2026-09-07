@@ -99,19 +99,11 @@ impl ServerTimingTimers {
 }
 
 /// Configuration for the `Server-Timing` middleware.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ServerTimingConfig {
     /// Drop entries whose `dur` (in integer milliseconds) is below this threshold.
     /// Default: `0` (emit every entry, including sub-millisecond ones).
     pub min_ms_to_report: u32,
-}
-
-impl Default for ServerTimingConfig {
-    fn default() -> Self {
-        Self {
-            min_ms_to_report: 0,
-        }
-    }
 }
 
 /// Extractor: gives handlers a handle to record named timers. Returns

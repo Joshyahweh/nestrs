@@ -435,6 +435,8 @@ Keep **`PrismaModule::for_root_with_options`** in **`main`** (or a tiny `bootstr
 
 **POST JSON body + validation** (same shapes as [First steps](first-steps.md)):
 
+`#[dto]` derives `serde` + `validator::Validate` + `schemars::JsonSchema` in one decorator, so the type also drops straight into `nestrs_openapi::schema_entry` / `OpenApiOptions::with_schemas` for `components.schemas`. The derive expansion references `schemars` and `validator` paths, so your crate needs both as direct dependencies (`schemars = "1"` — `nestrs` re-exports it as `nestrs::schemars` for `schema_for!` use).
+
 ```rust
 #[dto]
 pub struct CreateUserBody {

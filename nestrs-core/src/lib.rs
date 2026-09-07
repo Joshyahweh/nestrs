@@ -20,6 +20,7 @@ mod pipe;
 mod platform;
 mod route_registry;
 mod strategy;
+mod trace;
 
 pub use admin_snapshot::AdminSnapshot;
 pub use database::DatabasePing;
@@ -32,6 +33,7 @@ pub use pipe::PipeTransform;
 pub use platform::{AxumHttpEngine, HttpServerEngine};
 pub use route_registry::{OpenApiResponseDesc, OpenApiRouteSpec, RouteInfo, RouteRegistry};
 pub use strategy::{AuthError, AuthStrategy};
+pub use trace::{current_trace_context, parse_traceparent, with_trace_context, TraceContext};
 
 type CustomFactoryFn =
     std::sync::Arc<dyn Fn(&ProviderRegistry) -> Arc<dyn Any + Send + Sync> + Send + Sync>;
@@ -922,6 +924,84 @@ pub fn request_scope_insert(type_id: TypeId, value: Arc<dyn Any + Send + Sync>) 
     let _ = REQUEST_SCOPE_CACHE.try_with(|c| {
         c.borrow_mut().insert(type_id, value);
     });
+}
+
+// ---------------------------------------------------------------------------
+// Per-task ability slot (type-erased)
+//
+// `Ability` itself is defined in `nestrs::policies`. To let transport crates
+// (GraphQL, MCP, workers) install / read the same per-task ability without
+// forcing a `nestrs` dependency on them, the slot lives here as a type-erased
+// `Arc<dyn Any + Send + Sync>`. `nestrs::policies::current_ability()` does
+// the downcast; transport crates that need a typed read do the same via
+// their own thin accessor in `nestrs`.
+// ---------------------------------------------------------------------------
+
+tokio::task_local! {
+    static ABILITY_SLOT: std::cell::RefCell<Option<Arc<dyn Any + Send + Sync>>>;
+}
+
+/// Run `future` with the given type-erased ability installed in the per-task
+/// ability slot. The caller is responsible for passing an `Arc<Ability>` (or
+/// any other type they want to read back via `current_ability_erased`).
+///
+/// `nestrs::policies::with_ability` is the typed convenience wrapper that
+/// takes an `Arc<Ability>` directly.
+pub async fn with_ability_erased<F, T>(ability: Arc<dyn Any + Send + Sync>, future: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    ABILITY_SLOT
+        .scope(std::cell::RefCell::new(Some(ability)), future)
+        .await
+}
+
+/// Read the type-erased ability for the current task, if one was installed
+/// via `with_ability_erased` (or via `nestrs::policies::with_ability`, which
+/// writes to the same slot). Returns `None` outside of a scope.
+pub fn current_ability_erased() -> Option<Arc<dyn Any + Send + Sync>> {
+    ABILITY_SLOT.try_with(|c| c.borrow().clone()).ok().flatten()
+}
+
+// ---------------------------------------------------------------------------
+// Per-task principal slot (type-erased)
+//
+// Row-level authorization predicates receive the current `Principal`. Like
+// the ability slot above, the slot lives here type-erased so transport
+// crates (HTTP authn middleware, WS, GraphQL, MCP) can install / read the
+// per-task principal without a `nestrs` dependency cycle. The value is a
+// `nestrs::policies::Principal`; `nestrs::policies::current_principal()`
+// does the downcast.
+// ---------------------------------------------------------------------------
+
+tokio::task_local! {
+    static PRINCIPAL_SLOT: std::cell::RefCell<Option<Arc<dyn Any + Send + Sync>>>;
+}
+
+/// Run `future` with the given type-erased principal installed in the
+/// per-task principal slot. The caller is responsible for passing an
+/// `Arc<policies::Principal>` (or any other type they want to read back via
+/// `current_principal_erased`).
+///
+/// `nestrs::policies::with_principal` is the typed convenience wrapper that
+/// takes an `Arc<Principal>` directly.
+pub async fn with_principal_erased<F, T>(principal: Arc<dyn Any + Send + Sync>, future: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    PRINCIPAL_SLOT
+        .scope(std::cell::RefCell::new(Some(principal)), future)
+        .await
+}
+
+/// Read the type-erased principal for the current task, if one was installed
+/// via `with_principal_erased` (or via `nestrs::policies::with_principal`,
+/// which writes to the same slot). Returns `None` outside of a scope.
+pub fn current_principal_erased() -> Option<Arc<dyn Any + Send + Sync>> {
+    PRINCIPAL_SLOT
+        .try_with(|c| c.borrow().clone())
+        .ok()
+        .flatten()
 }
 
 thread_local! {

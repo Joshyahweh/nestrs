@@ -14,4 +14,5 @@ categories = ["web-programming", "api-bindings"]
 [dependencies]
 axum.workspace = true
 nestrs-core = { version = "0.5.2", path = "../nestrs-core" }
+schemars = "1"
 serde_json = "1"

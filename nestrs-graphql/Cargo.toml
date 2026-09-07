@@ -17,3 +17,19 @@ async-graphql-derive = "=7.0.17"
 async-graphql-parser = "=7.0.17"
 async-graphql-value = "=7.0.17"
 axum.workspace = true
+nestrs-core = { version = "0.5.2", path = "../nestrs-core" }
+tokio.workspace = true
+
+[features]
+## Multi-transport extension: per-request ability + transaction lifetime +
+## CASL-style outbound masking on GraphQL responses. The hook trait
+## (`GqlHandlerHook`) lives in this crate and is implemented by
+## `nestrs::graphql_authz::GqlDataContext` in the main `nestrs` crate.
+## `nestrs-graphql` stays independent of `nestrs` (Cargo would reject
+## the cycle) — the main crate provides the typed context that wires
+## the hook up.
+graphql-authz = []
+## Batching loaders (`DataLoader` / `Loader` + the per-request
+## `DataLoaderRegistry`). Enables async-graphql's own `dataloader` module;
+## batch tasks spawn on tokio, so the runtime dep is pulled here.
+dataloader = ["async-graphql/dataloader"]

@@ -132,7 +132,11 @@ pub async fn mask_response(response: Response, ability: &Ability, cfg: MaskingCo
 
 /// Recursive masker. Top-level value: detect `type`; recurse on objects and
 /// arrays. For each detected subject, drop fields not in the allow-list.
-fn mask_value(value: &mut Value, ability: &Ability) {
+///
+/// `pub` so transport crates (WS, GraphQL, MCP) can re-use the same walker
+/// on `serde_json::Value` payloads they produce directly, without going
+/// through the HTTP [`mask_response`] path.
+pub fn mask_value(value: &mut Value, ability: &Ability) {
     match value {
         Value::Object(map) => {
             if let Some(Value::String(type_name)) = map.get("type") {

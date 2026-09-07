@@ -22,9 +22,12 @@
 pub mod docs;
 pub mod error;
 pub mod introspection;
+#[cfg(feature = "authz")]
+pub mod mcp_data_context;
 pub mod runtime;
 pub mod scaffold;
 pub mod server;
+pub mod surfaces;
 pub mod tools;
 pub mod wizard;
 
@@ -32,3 +35,13 @@ pub use error::{Error, Result};
 
 #[cfg(feature = "admin")]
 pub use nestrs::admin::{AdminHandle, AdminOptions};
+
+#[cfg(feature = "authz")]
+pub use mcp_data_context::{current_mcp_ability, current_mcp_transaction, McpDataContext};
+
+#[cfg(feature = "elicitation")]
+pub use surfaces::ElicitationHandler;
+pub use surfaces::{
+    assistant_text, elicit_input, input_responses, text_contents, user_text, CacheHints,
+    McpSurfaces,
+};

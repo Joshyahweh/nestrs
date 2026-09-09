@@ -7,26 +7,6 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added — Wave 4.6: 49-crate split study (proposal only, no code change)
-
-- **`docs/drafts/49-crate-split-proposal.md`** — analysis of
-  Yoann's `nest-rs` workspace (48 crates per the upstream `crates/`
-  tree, not the 49 the plan said; close enough that the conclusion
-  is unchanged) versus our 14 published crates.
-- **Recommendation: do not adopt parity on crate count.**
-  Yoann's splits include 42 crates we'd fold into existing
-  modules (request-pipeline primitives, OAuth2 sub-features,
-  per-protocol proc-macros) and 2 we'd skip as gaps (their
-  `nest-rs-database` / `nest-rs-seaorm` — our `nestrs-prisma`
-  covers the same surface with a different abstraction).
-- **Future split gates documented:** track `nestrs-microservices`
-  redis-dep compile time and `nestrs-macros` proc-macro count;
-  split when either crosses the gate. Estimated end-state: ~19
-  published crates, deliberately not 48.
-- **Read it, push back, decide.** This is a writeup, not a code
-  change. Crate count remains an explicit decision per the
-  v6.1.0 audit.
-
 ### Added — Wave 4.5: public-API snapshot test (CI gate for breaking changes)
 
 - **Public-API snapshot test** for the five published crates
@@ -161,7 +141,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
   type-level no-op (like `IsString`) — express UUID-ness via the
   `uuid::Uuid` type. All other emitted `#[validate(...)]` attrs (email,
   length, range, url, nested, contains, regex) compile unchanged.
-- **`#[dto]` derives `schemars::JsonSchema`** (Yoann `#[input]` parity):
+- **`#[dto]` derives `schemars::JsonSchema`** (upstream `#[input]` parity):
   the generated struct now carries serde + validator + JSON Schema in one
   decorator. `nestrs` re-exports `schemars` (`nestrs::schemars`) for
   `schema_for!` use; the derive expansion references the `schemars` path,
@@ -181,7 +161,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ### Added — Wave 3B: OAuth2 (`nestrs-oauth2`) + Object Storage (`nestrs-storage`)
 
 - **`nestrs-oauth2`**: new workspace member implementing the four OAuth2
-  surfaces Yoann ships as separate crates, as one feature-gated crate:
+  surfaces upstream ships as separate crates, as one feature-gated crate:
   - `client` — `OAuth2Client` with authorization_code (+ PKCE S256),
     client_credentials, and refresh_token grants; state-parameter CSRF
     protection and token caching.

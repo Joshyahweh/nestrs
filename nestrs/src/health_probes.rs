@@ -1,6 +1,5 @@
 //! Health probe decorators (`#[liveness]` / `#[readiness]` / `#[startup]`)
-//! plus the standard indicator set (NestJS terminus / Yoann `#[liveness]`
-//! parity).
+//! plus the standard indicator set (NestJS terminus).
 //!
 //! # Decorators
 //!

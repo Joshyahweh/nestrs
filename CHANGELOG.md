@@ -7,6 +7,32 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wave 4.5: public-API snapshot test (CI gate for breaking changes)
+
+- **Public-API snapshot test** for the five published crates
+  (`nestrs`, `nestrs-core`, `nestrs-graphql`, `nestrs-ws`,
+  `nestrs-mcp`). `STABILITY.md` documented the policy; this wave
+  enforces it.
+- **`scripts/ci/public_api_snapshot.py`** — generates one snapshot
+  per crate by reading `rustdoc --output-format json` (nightly-only)
+  and emitting a sorted list of fully-qualified public item paths to
+  `tests/api-snapshots/<crate>.txt`. Filters out `#[doc(hidden)]`
+  items and `__nestrs_*` macro-internal helpers (per
+  `STABILITY.md`'s "not stable" policy).
+- **`--check` mode** — regenerates and diffs against committed
+  snapshots, prints added/removed lines on drift, exits 1.
+- **CI gate** — new `public-api-snapshot` job in
+  `.github/workflows/ci.yml` running on the nightly toolchain
+  (rustdoc JSON output is nightly-only; the existing
+  `1.88.0`/`stable`/`beta` rows continue to enforce the
+  build/test matrix).
+- **Why hand-rolled vs `cargo-public-api`** — `cargo-public-api`
+  reads the same rustdoc JSON, but pulling it from crates.io
+  required an install the local auto-mode classifier couldn't
+  grant. Reading the JSON directly with stdlib `json` keeps the
+  gate running without external tooling. Same fields, same output
+  format.
+
 ### Added — Wave 4.3: DB migrations + seeding CLI (`nestrs-cli db` subcommands)
 
 - **`nestrs-cli db` subcommand family** behind a default-OFF `db`

@@ -7,6 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security — CSWSH defence (WebSocket Origin allowlist)
+
+- **CSWSH (Cross-Site WebSocket Hijacking) defence for `nestrs-ws`** —
+  `ws_route` and `ws_route_with_guards` previously accepted WebSocket
+  upgrades from any `Origin`. New `ws_route_with_security` /
+  `ws_route_with_guards_and_security` entry points take an explicit
+  `WsSecurityConfig` allowlist and reject mismatched origins (with
+  `null` always rejected when an allowlist is configured). Origin
+  rejection on the new entry points is a hard HTTP 403; on the
+  guards-and-security entry point it short-circuits before the
+  guard chain. Legacy `ws_route` / `ws_route_with_guards` are
+  retained for callers behind a trusted reverse proxy that enforces
+  its own allowlist; they call through with `WsSecurityConfig::allow_off()`.
+- **8 new tests** in `nestrs-ws/tests/cswsh.rs` cover allow_off,
+  allowlist acceptance, disallowed-origin 403, `null` rejection,
+  `require_origin`, and security-before-guard ordering. All 18
+  `nestrs-ws` tests pass.
+
 ### Added — Wave 4.5: public-API snapshot test (CI gate for breaking changes)
 
 - **Public-API snapshot test** for the five published crates

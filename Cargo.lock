@@ -565,6 +565,7 @@ checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
 dependencies = [
  "async-trait",
  "axum-core 0.4.5",
+ "axum-macros",
  "base64 0.22.1",
  "bytes",
  "futures-util",
@@ -657,6 +658,17 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57d123550fa8d071b7255cb0cc04dc302baa6c8c4a79f55701552684d8399bce"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -2219,7 +2231,7 @@ dependencies = [
  "serde",
  "sqlx",
  "tokio",
- "validator",
+ "validator 0.21.0",
 ]
 
 [[package]]
@@ -2814,7 +2826,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower-cookies",
- "validator",
+ "validator 0.21.0",
 ]
 
 [[package]]
@@ -3339,6 +3351,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "serde_qs",
  "serial_test",
  "sqlx",
  "subtle",
@@ -3353,7 +3366,8 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "url",
- "validator",
+ "validator 0.20.0",
+ "validator_derive",
  "wiremock",
 ]
 
@@ -5424,6 +5438,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_qs"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd34f36fe4c5ba9654417139a9b3a20d2e1de6012ee678ad14d240c22c78d8d6"
+dependencies = [
+ "percent-encoding",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "serde_repr"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6897,6 +6922,22 @@ dependencies = [
  "js-sys",
  "serde_core",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "validator"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43fb22e1a008ece370ce08a3e9e4447a910e92621bb49b85d6e48a45397e7cfa"
+dependencies = [
+ "idna",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "url",
+ "validator_derive",
 ]
 
 [[package]]

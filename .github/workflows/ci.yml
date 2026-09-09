@@ -108,6 +108,24 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --workspace --all-features --no-deps
 
+  public-api-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11b0c390a56381ad16ebd13914f8d5 # v4
+
+      # rustdoc --output-format json is a nightly-only feature, so the
+      # snapshot gate runs on the nightly toolchain. The 1.88.0 / stable
+      # / beta rows in test-matrix continue to enforce the build/test
+      # matrix; the snapshot gate is additive.
+      - name: Install nightly Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: nightly
+
+      - name: Verify public-API snapshot
+        run: python3 scripts/ci/public_api_snapshot.py --check
+
   audit:
     runs-on: ubuntu-latest
     steps:

@@ -7,6 +7,26 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wave 4.6: 49-crate split study (proposal only, no code change)
+
+- **`docs/drafts/49-crate-split-proposal.md`** — analysis of
+  Yoann's `nest-rs` workspace (48 crates per the upstream `crates/`
+  tree, not the 49 the plan said; close enough that the conclusion
+  is unchanged) versus our 14 published crates.
+- **Recommendation: do not adopt parity on crate count.**
+  Yoann's splits include 42 crates we'd fold into existing
+  modules (request-pipeline primitives, OAuth2 sub-features,
+  per-protocol proc-macros) and 2 we'd skip as gaps (their
+  `nest-rs-database` / `nest-rs-seaorm` — our `nestrs-prisma`
+  covers the same surface with a different abstraction).
+- **Future split gates documented:** track `nestrs-microservices`
+  redis-dep compile time and `nestrs-macros` proc-macro count;
+  split when either crosses the gate. Estimated end-state: ~19
+  published crates, deliberately not 48.
+- **Read it, push back, decide.** This is a writeup, not a code
+  change. Crate count remains an explicit decision per the
+  v6.1.0 audit.
+
 ### Added — Wave 4.5: public-API snapshot test (CI gate for breaking changes)
 
 - **Public-API snapshot test** for the five published crates

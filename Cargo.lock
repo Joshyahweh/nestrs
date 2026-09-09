@@ -3411,6 +3411,7 @@ dependencies = [
  "async-graphql-value",
  "axum 0.7.9",
  "nestrs-core",
+ "serde_json",
  "tokio",
 ]
 

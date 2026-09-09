@@ -11,6 +11,7 @@
 //!
 //! All symbols are gated behind the `database-sqlx` Cargo feature.
 
+#[cfg(feature = "authz-row-level")]
 use crate::policies::{
     conditions_to_sql, current_ability, current_principal, Action, RowPredicate, Subject,
 };
@@ -129,7 +130,9 @@ impl<T: Entity> Repository<T> {
     }
 
     // ----- Feature D: policy-driven variants ---------------------------------
+    // All methods in this section require `authz-row-level` feature.
 
+    #[cfg(feature = "authz-row-level")]
     /// Same as [`Self::find_one`] but consults the request-scoped [`Ability`]
     /// and appends the resolved constraint as a `WHERE` clause. Returns
     /// `Ok(None)` when the principal lacks the action OR the constraint
@@ -195,6 +198,7 @@ impl<T: Entity> Repository<T> {
         }
     }
 
+    #[cfg(feature = "authz-row-level")]
     /// Same as [`Self::find_all`] but appends the policy constraint as a
     /// `WHERE` clause.
     pub async fn find_all_authorized(&self, action: Action) -> Result<Vec<T>, sqlx::Error> {
@@ -237,6 +241,7 @@ impl<T: Entity> Repository<T> {
 // Row-level predicate helpers (Feature D + authz-row-level)
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "authz-row-level")]
 /// Parse a row's JSON blob (`Entity::JSON_COLUMN`) — the value predicates
 /// receive.
 fn row_json(row: &sqlx::any::AnyRow, json_column: &str) -> Result<serde_json::Value, sqlx::Error> {
@@ -244,6 +249,7 @@ fn row_json(row: &sqlx::any::AnyRow, json_column: &str) -> Result<serde_json::Va
     serde_json::from_str(&blob).map_err(|e| sqlx::Error::Decode(Box::new(e)))
 }
 
+#[cfg(feature = "authz-row-level")]
 /// Evaluate a row-level predicate against one row. A predicate with no
 /// [`Principal`] in request scope is a misconfiguration — fail loud
 /// (deny-closed) rather than silently filtering everything.
@@ -264,6 +270,7 @@ fn predicate_allows(
     }
 }
 
+#[cfg(feature = "authz-row-level")]
 /// Post-load filter shared by the authorized find paths: evaluate the
 /// predicate on each row's JSON blob *before* decoding the entity, so
 /// predicate-rejected rows never reach the caller.

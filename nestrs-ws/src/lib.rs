@@ -32,6 +32,17 @@
 //! Treat these as the WebSocket analogue of Nest’s gateway exception filters: **centralize** by
 //! wrapping [`WsGateway::on_message`] or using shared guard/pipe types; there is no separate
 //! `WsExceptionFilter` trait in-core today.
+//!
+//! ## Origin allowlist (CSWSH)
+//!
+//! [`ws_route`] and [`ws_route_with_guards`] do **not** validate the `Origin`
+//! header on the HTTP upgrade — they accept browsers from any origin. This is
+//! the textbook **Cross-Site WebSocket Hijacking (CSWSH)** footgun: an
+//! attacker page can open a WebSocket to your gateway and call protected
+//! handlers as the victim. New code should mount via [`ws_route_with_security`]
+//! or [`ws_route_with_guards_and_security`] with an explicit [`WsSecurityConfig`]
+//! that names every allowed origin. The legacy entry points are retained for
+//! callers behind a trusted reverse proxy that already validates Origin.
 
 /// Event name used for server→client error frames (guards, pipes, unknown event, bad payloads).
 pub const WS_ERROR_EVENT: &str = "error";
@@ -414,14 +425,135 @@ pub trait WsGateway: Send + Sync + 'static {
     }
 }
 
+/// Origin-policy for [`ws_route_with_security`] and
+/// [`ws_route_with_guards_and_security`]. Defends against **Cross-Site
+/// WebSocket Hijacking (CSWSH)**: a malicious page that opens a
+/// WebSocket from the victim's browser to your gateway and issues calls
+/// as the victim.
+///
+/// `allow_off()` (used by the legacy [`ws_route`] / [`ws_route_with_guards`]
+/// entry points) accepts every Origin — match what browsers expect when
+/// the gateway sits behind a trusted reverse proxy that already enforces
+/// an allowlist. New browser-facing code should construct an explicit
+/// allowlist via [`WsSecurityConfig::allow_origins`].
+///
+/// **Match semantics:** allowlist entries are compared against the
+/// `Origin` header verbatim. A `null` Origin (sandboxed iframes,
+/// `file://`, certain privacy contexts) is **always rejected** when any
+/// allowlist entry is configured. When the upgrade carries no Origin
+/// header (CLI tools, server-to-server clients), the request is
+/// **accepted by default**; set [`WsSecurityConfig::require_origin`]
+/// to reject bare-origin upgrades.
+#[derive(Debug, Clone)]
+pub struct WsSecurityConfig {
+    allowed_origins: Vec<String>,
+    require_origin: bool,
+}
+
+impl WsSecurityConfig {
+    /// Disable Origin enforcement. Every browser/Origin is accepted.
+    /// Use only when the gateway is fronted by a trusted reverse proxy
+    /// that enforces its own allowlist.
+    pub fn allow_off() -> Self {
+        Self {
+            allowed_origins: Vec::new(),
+            require_origin: false,
+        }
+    }
+
+    /// Build a config that accepts the listed `Origin` values verbatim.
+    /// Pass full origins including scheme, e.g. `https://app.example.com`.
+    /// A `null` Origin is always rejected.
+    pub fn allow_origins<I, S>(origins: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            allowed_origins: origins.into_iter().map(Into::into).collect(),
+            require_origin: false,
+        }
+    }
+
+    /// When `true`, upgrades with no `Origin` header are rejected
+    /// (HTTP 403). Useful for browser-only gateways that should never
+    /// accept raw server-to-server connections.
+    pub fn require_origin(mut self, require: bool) -> Self {
+        self.require_origin = require;
+        self
+    }
+
+    /// Evaluate the policy against an upgrade request's `Origin` header.
+    /// Returns `Ok(())` when the upgrade should proceed.
+    fn check(&self, headers: &HeaderMap) -> Result<(), WsOriginError> {
+        let origin = headers.get("origin").and_then(|v| v.to_str().ok());
+        match (self.allowed_origins.as_slice(), origin) {
+            // No allowlist configured — accept everything (proxy mode).
+            ([], _) => Ok(()),
+            // Allowlist configured, no Origin header — accept unless
+            // the user explicitly required one.
+            (_, None) if !self.require_origin => Ok(()),
+            (_, None) => Err(WsOriginError::NoOrigin),
+            // Allowlist configured, Origin is `null` — always reject.
+            (_, Some("null")) => Err(WsOriginError::Denied("null".into())),
+            // Allowlist configured, Origin must match verbatim.
+            (_, Some(o)) if self.allowed_origins.iter().any(|a| a == o) => Ok(()),
+            (_, Some(o)) => Err(WsOriginError::Denied(o.to_owned())),
+        }
+    }
+}
+
+/// Reason an upgrade was rejected by [`WsSecurityConfig`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WsOriginError {
+    /// Upgrade carried no Origin header and the config required one.
+    NoOrigin,
+    /// Origin was present but not on the allowlist (the original
+    /// value is preserved for logging).
+    Denied(String),
+}
+
+impl WsOriginError {
+    pub fn message(&self) -> String {
+        match self {
+            Self::NoOrigin => "Origin header required".into(),
+            Self::Denied(o) => format!("Origin `{o}` not allowed"),
+        }
+    }
+}
+
 pub fn ws_route<G>(gateway: Arc<G>) -> axum::routing::MethodRouter
+where
+    G: WsGateway,
+{
+    ws_route_with_security(gateway, WsSecurityConfig::allow_off())
+}
+
+/// [`ws_route`] with an **Origin allowlist** that runs before the upgrade
+/// is accepted. The CSWSH-safe replacement for [`ws_route`] — every
+/// gateway exposed to browsers should mount via this entry point with a
+/// non-empty [`WsSecurityConfig::allow_origins`] list.
+pub fn ws_route_with_security<G>(
+    gateway: Arc<G>,
+    security: WsSecurityConfig,
+) -> axum::routing::MethodRouter
 where
     G: WsGateway,
 {
     axum::routing::get(move |ws: WebSocketUpgrade, headers: HeaderMap| {
         let gw = gateway.clone();
-        let handshake = WsHandshake::new(headers);
-        async move { ws.on_upgrade(move |socket| serve_socket(socket, gw, handshake)) }
+        let security = security.clone();
+        async move {
+            if let Err(err) = security.check(&headers) {
+                tracing::warn!(target: "nestrs::ws", "rejecting upgrade: {}", err.message());
+                return axum::http::Response::builder()
+                    .status(axum::http::StatusCode::FORBIDDEN)
+                    .body(axum::body::Body::from(err.message()))
+                    .expect("static response");
+            }
+            let handshake = WsHandshake::new(headers);
+            ws.on_upgrade(move |socket| serve_socket(socket, gw, handshake))
+        }
     })
 }
 
@@ -436,11 +568,36 @@ pub fn ws_route_with_guards<G>(
 where
     G: WsGateway,
 {
+    ws_route_with_guards_and_security(gateway, guards, WsSecurityConfig::allow_off())
+}
+
+/// [`ws_route_with_guards`] with an **Origin allowlist**: the security
+/// check runs first, then each upgrade guard runs against the handshake.
+/// Security rejection is a hard 403 (no upgrade); guard rejection accepts
+/// the upgrade and immediately closes the socket with
+/// [`CloseCode::PolicyViolation`] so WS clients observe an in-protocol
+/// rejection.
+pub fn ws_route_with_guards_and_security<G>(
+    gateway: Arc<G>,
+    guards: Vec<Arc<dyn WsUpgradeGuard>>,
+    security: WsSecurityConfig,
+) -> axum::routing::MethodRouter
+where
+    G: WsGateway,
+{
     axum::routing::get(move |ws: WebSocketUpgrade, headers: HeaderMap| {
         let gw = gateway.clone();
         let guards = guards.clone();
-        let handshake = WsHandshake::new(headers);
+        let security = security.clone();
         async move {
+            if let Err(err) = security.check(&headers) {
+                tracing::warn!(target: "nestrs::ws", "rejecting upgrade: {}", err.message());
+                return axum::http::Response::builder()
+                    .status(axum::http::StatusCode::FORBIDDEN)
+                    .body(axum::body::Body::from(err.message()))
+                    .expect("static response");
+            }
+            let handshake = WsHandshake::new(headers);
             for guard in &guards {
                 if let Err(err) = guard.can_upgrade(&handshake).await {
                     return ws.on_upgrade(move |socket| reject_upgrade(socket, err));

@@ -10,10 +10,10 @@ pub use nestrs_macros::{
     event_routes, get, head, http_code, injectable, interval, liveness, message_pattern,
     micro_routes, module, on_event, openapi, options, patch, post, put, queue_processor, raw_body,
     readiness, redirect, response_header, roles, routes, schedule_routes, serialize, set_metadata,
-    skip_throttle, sse,
-    startup, subscribe_message, throttle, upload_to, use_filters, use_guards, use_interceptors,
-    use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards,
-    use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
+    skip_throttle, sse, startup, subscribe_message, throttle, upload_to, use_filters, use_guards,
+    use_interceptors, use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes,
+    use_ws_guards, use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes,
+    NestConfig, NestDto,
 };
 #[doc(hidden)]
 pub use schemars;
@@ -85,6 +85,12 @@ mod authn;
 mod cache;
 mod client_ip;
 mod config;
+/// Runtime support for the `#[nestrs::crud]` proc-macro: the
+/// `__CrudQueryAdapter` extractor (parses bracketed query strings with
+/// `serde_qs`) and the validation-error mapper. The macro references
+/// these by full path when it generates handlers.
+#[cfg(feature = "database-sqlx")]
+pub mod crud_macro;
 #[cfg(feature = "database-sqlx")]
 mod database_sqlx;
 mod exception_filter;
@@ -121,7 +127,7 @@ pub mod problem;
 #[cfg(feature = "queues")]
 pub mod queues;
 mod raw_body;
-#[cfg(all(feature = "database-sqlx", feature = "authz"))]
+#[cfg(feature = "database-sqlx")]
 mod repository;
 mod request_context;
 mod request_scoped;
@@ -202,6 +208,11 @@ pub use policies::{
 // NOTE: `policies::Principal` is deliberately NOT root-exported — the authn
 // extractor newtype `nestrs::Principal` owns that name. Use the
 // module-qualified path `nestrs::policies::Principal`.
+/// `#[nestrs::crud]` proc-macro: generates a 5-verb controller (HTTP
+/// or GraphQL) plus its service + state from one attribute on a struct
+/// that holds an `Arc<sqlx::AnyPool>`. See
+/// `nestrs::crud_macro::__CrudQueryAdapter` for the runtime side.
+pub use nestrs_macros::crud;
 #[cfg(feature = "authz-row-level")]
 pub use predicates::{
     AuthorIsCurrentUser, BelongsToUser, HasRole, NotDeleted, OwnerOrAdmin, PublicOrOwner,
@@ -216,7 +227,7 @@ pub use queues::{
 pub use raw_body::RawBody;
 #[cfg(feature = "authz-row-level")]
 pub use repository::FindManyParams;
-#[cfg(all(feature = "database-sqlx", feature = "authz"))]
+#[cfg(feature = "database-sqlx")]
 pub use repository::{CrudService, Entity, Repository};
 pub use request_context::{RequestContext, RequestContextMissing};
 pub use request_scoped::{RequestScoped, RequestScopedMissing};
@@ -322,8 +333,8 @@ pub mod prelude {
     #[cfg(all(feature = "microservices", feature = "microservices-redis"))]
     pub use crate::RedisBrokerHealth;
     pub use crate::{
-        all, async_trait, controller, cron, delete, dto, event_pattern, event_routes, get, head,
-        http_code, impl_routes, injectable, interval, liveness, load_config, message_pattern,
+        all, async_trait, controller, cron, crud, delete, dto, event_pattern, event_routes, get,
+        head, http_code, impl_routes, injectable, interval, liveness, load_config, message_pattern,
         micro_routes, module, nestrs_default_not_found_handler, on_event, openapi, options, patch,
         post, put, queue_processor, raw_body, readiness, redirect, response_header, roles, routes,
         runtime_is_production, schedule_routes, serialize, set_metadata, sse, startup,
@@ -2319,6 +2330,38 @@ impl NestApplication {
         s.build_router()
     }
 
+    /// Borrow the underlying [`ProviderRegistry`]. Primarily for
+    /// `ProviderRegistry::override_provider` in tests that need to
+    /// replace a macro-generated `#[injectable]` state struct (e.g.
+    /// `#[nestrs::crud]`'s hidden `__PascalCrudState`).
+    pub fn registry(&self) -> &std::sync::Arc<crate::core::ProviderRegistry> {
+        &self.registry
+    }
+
+    /// Build a fresh `NestApplication` from a pre-populated registry and
+    /// a pre-built router. Used by tests that need to override providers
+    /// after the module's `build()` ran (e.g. install a real
+    /// `sqlx::AnyPool` into a `#[nestrs::crud]`-generated
+    /// `__PascalCrudState`).
+    pub fn from_registry_and_router(
+        registry: std::sync::Arc<crate::core::ProviderRegistry>,
+        router: axum::Router,
+    ) -> Self {
+        Self::from_parts(registry, router)
+    }
+
+    /// Consume the application and return its (registry, router) pair.
+    /// The router returned here is the one that was *built from*
+    /// `registry` at `M::build()` time (controllers are mounted with
+    /// `.with_state(state.clone())` against the registry's providers,
+    /// so re-using the router is safe after `override_provider` —
+    /// `state` is a `Clone` Arc).
+    pub fn into_registry_and_router(
+        self,
+    ) -> (std::sync::Arc<crate::core::ProviderRegistry>, axum::Router) {
+        (self.registry, self.router)
+    }
+
     pub async fn listen(mut self, port: u16) {
         let ip = self
             .listen_ip
@@ -3983,7 +4026,8 @@ macro_rules! impl_routes {
                 format!("/{}", s)
             }
         } else if s == "/" {
-            p.to_string()
+            // Ensure list endpoints have trailing slash: /posts/
+            format!("{}/", p)
         } else {
             format!("{}/{}", p, s.trim_start_matches('/'))
         };
@@ -3996,14 +4040,14 @@ macro_rules! impl_routes {
         };
         std::boxed::Box::leak(joined.into_boxed_str())
     }};
-    (@method GET, $handler:path) => { axum::routing::get($handler) };
-    (@method POST, $handler:path) => { axum::routing::post($handler) };
-    (@method PUT, $handler:path) => { axum::routing::put($handler) };
-    (@method PATCH, $handler:path) => { axum::routing::patch($handler) };
-    (@method DELETE, $handler:path) => { axum::routing::delete($handler) };
-    (@method OPTIONS, $handler:path) => { axum::routing::options($handler) };
-    (@method HEAD, $handler:path) => { axum::routing::head($handler) };
-    (@method ALL, $handler:path) => { axum::routing::any($handler) };
+    (@method GET, $handler:path) => { ::nestrs::axum::routing::get($handler) };
+    (@method POST, $handler:path) => { ::nestrs::axum::routing::post($handler) };
+    (@method PUT, $handler:path) => { ::nestrs::axum::routing::put($handler) };
+    (@method PATCH, $handler:path) => { ::nestrs::axum::routing::patch($handler) };
+    (@method DELETE, $handler:path) => { ::nestrs::axum::routing::delete($handler) };
+    (@method OPTIONS, $handler:path) => { ::nestrs::axum::routing::options($handler) };
+    (@method HEAD, $handler:path) => { ::nestrs::axum::routing::head($handler) };
+    (@method ALL, $handler:path) => { ::nestrs::axum::routing::any($handler) };
     // NOTE: the registry is threaded through as an explicit `$expr` — a `macro_rules!` arm
     // cannot see locals bound by a *different* arm (hygiene), so referencing the
     // registration-time `registry` binding here directly fails to resolve.

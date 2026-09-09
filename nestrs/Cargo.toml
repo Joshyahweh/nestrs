@@ -38,7 +38,7 @@ cache-redis = ["dep:redis"]
 schedule = ["dep:tokio-cron-scheduler", "dep:linkme"]
 queues = ["dep:linkme"]
 queues-redis = ["queues", "dep:redis"]
-database-sqlx = ["dep:sqlx"]
+database-sqlx = ["dep:sqlx", "dep:serde_qs"]
 mongo = ["dep:mongodb"]
 # Enables DNS/SRV resolution (`mongodb+srv://`, Atlas-style seed lists). Pulls **`hickory-*`** (see upstream MongoDB driver advisories).
 mongo-dns = ["mongo", "mongodb/dns-resolver"]
@@ -96,7 +96,7 @@ admin = []
 test-hooks = ["nestrs-core/test-hooks"]
 
 [dependencies]
-axum = { workspace = true, features = ["multipart"] }
+axum = { workspace = true, features = ["multipart", "macros"] }
 tokio.workspace = true
 nestrs-core = { version = "0.5.2", path = "../nestrs-core" }
 nestrs-macros = { version = "0.5.2", path = "../nestrs-macros" }
@@ -108,7 +108,12 @@ nestrs-openapi = { version = "0.5.2", path = "../nestrs-openapi", optional = tru
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1"
-validator = { version = "0.21", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
+# Explicitly pin validator_derive to 0.20 to match validator.
+# Without this, transitive deps (e.g. async-graphql) may pull
+# a different validator_derive version causing "JsonValue is not
+# an iterator" from the blanket impl on &BTreeMap<K, V>.
+validator_derive = "0.20"
 tower = { version = "0.5", features = ["limit", "load-shed"] }
 tower-http = { version = "0.6", features = ["cors", "catch-panic", "set-header", "limit", "request-id", "compression-gzip", "decompression-gzip", "normalize-path", "fs"] }
 async-trait = "0.1"
@@ -128,6 +133,13 @@ opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"], optional = tr
 opentelemetry-otlp = { version = "0.31.1", default-features = false, features = ["trace", "grpc-tonic"], optional = true }
 tracing-opentelemetry = { version = "0.32.1", default-features = false, optional = true }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "macros", "postgres", "sqlite"], optional = true }
+## Query-string parsing for the `#[nestrs::crud]` proc-macro's list endpoint
+## (`?filter[field]=x&sort=field:DIR&page=2&per_page=10`). Bracketed-key syntax
+## is the standard convention from `@nestjsx/crud`; `axum::extract::Query`
+## only handles flat `?key=value&key2=value2`. The `__CrudQueryAdapter` in
+## `nestrs::crud_macro` wraps it behind the same `BadRequestException` /
+## `UnprocessableEntityException` contract as `ValidatedQuery`.
+serde_qs = { version = "0.13", optional = true }
 mongodb = { version = "3", optional = true, default-features = false, features = ["compat-3-0-0", "rustls-tls"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 libc = { version = "0.2", optional = true }

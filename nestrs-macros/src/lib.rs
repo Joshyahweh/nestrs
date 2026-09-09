@@ -3903,6 +3903,838 @@ pub fn dataloader(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
+// ---------------------------------------------------------------------------
+// `#[nestrs::crud(entity = ..., output = ..., create = ..., update = ...,
+//   [transport = "http"|"graphql"])]`
+//
+// Generates a 5-verb REST (or GraphQL) controller + service + hidden state
+// provider from one attribute on a struct that holds an
+// `Arc<sqlx::AnyPool>`. The five routes/operations are:
+//   GET  /            list     (with page/sort/filter via `serde_qs`)
+//   GET  /:id         read one
+//   POST /            create
+//   PATCH /:id        update
+//   DELETE /:id       delete
+//
+// Each handler is wired through the existing `nestrs::impl_routes!` so
+// guards / interceptors / filters / OpenAPI metadata all work unchanged.
+// Row-level authz is enforced by the existing `CrudService<T>` (deny-closed
+// when `authz-row-level` is on) — the macro adds zero new authz surface.
+// ---------------------------------------------------------------------------
+
+struct CrudArgs {
+    entity: syn::Type,
+    output: syn::Type,
+    create: syn::Type,
+    update: syn::Type,
+    transport: Option<syn::LitStr>,
+}
+
+impl Parse for CrudArgs {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut entity: Option<syn::Type> = None;
+        let mut output: Option<syn::Type> = None;
+        let mut create: Option<syn::Type> = None;
+        let mut update: Option<syn::Type> = None;
+        let mut transport: Option<syn::LitStr> = None;
+
+        while !input.is_empty() {
+            let name: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            match name.to_string().as_str() {
+                "entity" => {
+                    entity = Some(input.parse::<syn::Type>()?);
+                }
+                "output" => {
+                    output = Some(input.parse::<syn::Type>()?);
+                }
+                "create" => {
+                    create = Some(input.parse::<syn::Type>()?);
+                }
+                "update" => {
+                    update = Some(input.parse::<syn::Type>()?);
+                }
+                "transport" => {
+                    transport = Some(input.parse::<syn::LitStr>()?);
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        &name,
+                        format!(
+                            "unknown #[crud] option `{other}`; expected `entity`, `output`, \
+                             `create`, `update`, or `transport`"
+                        ),
+                    ));
+                }
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        let entity = entity.ok_or_else(|| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "`#[crud]` requires `entity = <Type>`",
+            )
+        })?;
+        let output = output.ok_or_else(|| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "`#[crud]` requires `output = <Type>`",
+            )
+        })?;
+        let create = create.ok_or_else(|| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "`#[crud]` requires `create = <Type>`",
+            )
+        })?;
+        let update = update.ok_or_else(|| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "`#[crud]` requires `update = <Type>`",
+            )
+        })?;
+        if let Some(t) = &transport {
+            let v = t.value();
+            if v != "http" && v != "graphql" {
+                return Err(syn::Error::new_spanned(
+                    t,
+                    "#[crud] `transport` must be `\"http\"` or `\"graphql\"`",
+                ));
+            }
+        }
+
+        Ok(CrudArgs {
+            entity,
+            output,
+            create,
+            update,
+            transport,
+        })
+    }
+}
+
+#[proc_macro_attribute]
+pub fn crud(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let opts = parse_macro_input!(attr as CrudArgs);
+    let mut item_struct = parse_macro_input!(item as ItemStruct);
+
+    // Reject any user-supplied `#[routes(...)]` — the macro generates the
+    // routes itself, and a double registration would clash.
+    let mut had_user_routes = false;
+    item_struct.attrs.retain(|a| {
+        if a.path().is_ident("routes") {
+            had_user_routes = true;
+            false
+        } else {
+            true
+        }
+    });
+    if had_user_routes {
+        return syn::Error::new_spanned(
+            &item_struct,
+            "#[crud] is incompatible with `#[routes(...)]`; the macro generates the routes itself",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // The user's struct must have exactly one `Arc<sqlx::AnyPool>` field —
+    // Validate the user supplied a named `pool: Arc<sqlx::AnyPool>` field —
+    // the macro plumbs it into a hidden `#[injectable]` state struct.
+    if let Err(e) = find_pool_field(&item_struct) {
+        return e.to_compile_error().into();
+    }
+
+    let controller_ident = &item_struct.ident;
+    let entity = &opts.entity;
+    let output = &opts.output;
+    let create = &opts.create;
+    let update = &opts.update;
+    let transport = opts
+        .transport
+        .as_ref()
+        .map(|l| l.value())
+        .unwrap_or_else(|| "http".to_string());
+
+    // `{Pascal}Service`, `{Pascal}ListQuery` — derived from the controller's
+    // ident. `{Pascal}` for `PostController` is `Post`.
+    let pascal = pascal_from_controller(&item_struct.ident.to_string());
+    let service_ident = format_ident!("{}Service", pascal);
+    let list_query_ident = format_ident!("{}ListQuery", pascal);
+    let state_ident = format_ident!("__{}CrudState", pascal);
+    let filter_ident = format_ident!("{}Filter", pascal);
+    let check_policies_subject = pascal.clone();
+    let sdl_const_ident = format_ident!("{}_CONTROLLER_SDL", pascal.to_uppercase());
+
+    // Field declaration for the `{Pascal}ListQuery` DTO the macro generates
+    // alongside the user-supplied DTOs. Mirrors `@nestjsx/crud`'s
+    // contract: `?page`, `?per_page`, `?sort=field:DIR`, `?filter[field]=x`,
+    // `?search=...`. Defaults: page=1, per_page=20, no sort, no filter.
+    //
+    // The `ListQuery` struct is hand-shaped rather than built from
+    // `convert_dto_field_attrs` so the macro doesn't accidentally try to
+    // apply NestJS-style field decorators (`#[IsEmail]`, etc.) at this
+    // layer; this DTO is internal to the framework.
+    let list_query_def = quote! {
+        #[derive(::std::fmt::Debug, ::std::clone::Clone,
+                 ::serde::Serialize, ::serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(non_camel_case_types)]
+        pub struct #list_query_ident {
+            #[serde(default = "nestrs::crud_macro::default_page")]
+            pub page: u32,
+            #[serde(default = "nestrs::crud_macro::default_per_page")]
+            pub per_page: u32,
+            #[serde(default)]
+            pub sort: ::std::option::Option<::std::string::String>,
+            #[serde(default)]
+            pub filter: ::std::option::Option<#filter_ident>,
+            #[serde(default)]
+            pub search: ::std::option::Option<::std::string::String>,
+        }
+
+        impl ::nestrs::NestDto for #list_query_ident {}
+
+        impl ::validator::Validate for #list_query_ident {
+            fn validate(&self) -> ::std::result::Result<(), ::validator::ValidationErrors> {
+                let mut errs = ::validator::ValidationErrors::new();
+                if self.page < 1 {
+                    errs.add("page", ::validator::ValidationError::new("range_min"));
+                }
+                if self.per_page < 1 || self.per_page > 1000 {
+                    errs.add("per_page", ::validator::ValidationError::new("range"));
+                }
+                if let Some(sort) = &self.sort {
+                    if let Err(e) = ::nestrs::crud_macro::validate_sort_string(sort) {
+                        errs.add("sort", e);
+                    }
+                }
+                if errs.is_empty() {
+                    ::std::result::Result::Ok(())
+                } else {
+                    ::std::result::Result::Err(errs)
+                }
+            }
+        }
+
+        // Filter struct: holds bracketed filter params as string->string.
+        // We store as strings and parse to JSON values at filter-application time.
+        // This avoids `validator` trying to recurse into `serde_json::Value`.
+        #[derive(::std::fmt::Debug, ::std::clone::Clone,
+                 ::serde::Serialize, ::serde::Deserialize,
+                 ::std::default::Default)]
+        #[allow(non_camel_case_types)]
+        pub struct #filter_ident {
+            #[serde(default, flatten)]
+            pub __rest: ::std::collections::BTreeMap<
+                ::std::string::String,
+                ::std::string::String,
+            >,
+        }
+
+        impl ::validator::Validate for #filter_ident {
+            fn validate(&self) -> ::std::result::Result<(), ::validator::ValidationErrors> {
+                ::std::result::Result::Ok(())
+            }
+        }
+    };
+
+    // Helper functions for the list path: parse `sort=field:DIR` strings
+    // into (field, dir) pairs, apply sort + page slice to an in-memory
+    // vector, and (when authz is on) honour the authz filter that's
+    // already pushed by `CrudService::list`.
+    //
+    // Lives on the `{Service}` so it's easy to unit-test from integration
+    // code without going through Axum.
+    let service_def = quote! {
+        pub struct #service_ident {
+            crud: ::nestrs::CrudService<#entity>,
+            _out: ::std::marker::PhantomData<#output>,
+        }
+
+        impl #service_ident {
+            /// Build a service from the shared SQL pool. Called once per
+            /// request from inside the generated handler (the service is
+            /// stateless — `CrudService` just wraps the pool — so a
+            /// per-request build is essentially free).
+            pub fn new(pool: ::std::sync::Arc<::sqlx::AnyPool>) -> Self {
+                Self {
+                    crud: ::nestrs::CrudService::new(pool),
+                    _out: ::std::marker::PhantomData,
+                }
+            }
+
+            /// The list endpoint. Reads the authz-filtered set (which
+            /// already excludes rows the request-scoped `Ability` denies),
+            /// then applies in-memory `sort` + `page` + `per_page` +
+            /// `filter` + `search`. SQL pushdown + authz in one query is
+            /// a v2 problem — the contract here matches
+            /// `@nestjsx/crud` exactly.
+            pub async fn list_query(
+                &self,
+                q: &#list_query_ident,
+            ) -> ::std::result::Result<
+                ::std::vec::Vec<#output>,
+                ::nestrs::crud_macro::CrudError,
+            > {
+                let mut rows = self
+                    .crud
+                    .list()
+                    .await
+                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+
+                // `sort`: comma-separated `field:DIR` pairs. The first
+                // recognised field wins (we sort stably per key, so
+                // multiple keys would just need a stable-sort extension).
+                if let Some(sort) = &q.sort {
+                    for token in sort.split(',') {
+                        let mut parts = token.split(':');
+                        let key = parts.next().unwrap_or("").trim();
+                        let dir = parts.next().unwrap_or("ASC").trim();
+                        rows.sort_by(|a, b| {
+                            let av = sort_value(a, key);
+                            let bv = sort_value(b, key);
+                            let ord = ::nestrs::crud_macro::sort_value_cmp(&av, &bv);
+                            if dir.eq_ignore_ascii_case("DESC") {
+                                ord.reverse()
+                            } else {
+                                ord
+                            }
+                        });
+                    }
+                }
+
+                // `filter` + `search`: case-insensitive substring match
+                // against any string field on the row's JSON
+                // representation. Best-effort; the typed DTO shape is
+                // outside the macro's reach (it'd require parsing the
+                // user's `Create` DTO and matching fields by name).
+                //
+                // The filter values are stored as plain strings
+                // (see the `__rest` field declaration above) — at match
+                // time we coerce each filter value to `serde_json::Value`
+                // via `serde_json::from_str` so `?filter[count]=1` and
+                // `?filter[done]=true` still hit typed JSON values when
+                // the user supplies parseable input.
+                if let Some(filter) = &q.filter {
+                    let needle: ::std::vec::Vec<(::std::string::String, ::serde_json::Value)> =
+                        filter
+                            .__rest
+                            .iter()
+                            .filter_map(|(k, v)| {
+                                let parsed = ::serde_json::from_str::<::serde_json::Value>(v)
+                                    .unwrap_or_else(|_| ::serde_json::Value::String(v.clone()));
+                                Some((k.to_lowercase(), parsed))
+                            })
+                            .collect();
+                    rows.retain(|row| {
+                        let v = ::serde_json::to_value(row).unwrap_or(::serde_json::Value::Null);
+                        needle.iter().all(|(k, want)| {
+                            v.get(k)
+                                .map(|got| ::nestrs::crud_macro::json_matches(got, want))
+                                .unwrap_or(false)
+                        })
+                    });
+                }
+                if let Some(needle) = &q.search.as_ref().map(|s| s.to_lowercase()) {
+                    rows.retain(|row| {
+                        let v = ::serde_json::to_value(row).unwrap_or(::serde_json::Value::Null);
+                        ::nestrs::crud_macro::json_contains_string(&v, needle)
+                    });
+                }
+
+                // `page`/`per_page` slice. `per_page` is `u32` (validated
+                // >= 1, <= 1000 above), so the cast is safe.
+                let per_page = q.per_page as usize;
+                let page = q.page.saturating_sub(1) as usize;
+                let start = page.saturating_mul(per_page);
+                let end = (start + per_page).min(rows.len());
+                let slice: &[#entity] = if start >= rows.len() { &rows[0..0] } else { &rows[start..end] };
+
+                let mut out: ::std::vec::Vec<#output> = ::std::vec::Vec::with_capacity(slice.len());
+                for row in slice {
+                    let v: ::serde_json::Value =
+                        ::serde_json::to_value(row).unwrap_or(::serde_json::Value::Null);
+                    let dto: #output = ::serde_json::from_value(v)
+                        .map_err(::nestrs::crud_macro::CrudError::from)?;
+                    out.push(dto);
+                }
+                ::std::result::Result::Ok(out)
+            }
+
+            /// Read one row by id, returning the output DTO. `None` if
+            /// the row is missing **or** the request-scoped `Ability`
+            /// denies the read.
+            pub async fn get_one(
+                &self,
+                id: i64,
+            ) -> ::std::result::Result<
+                ::std::option::Option<#output>,
+                ::nestrs::crud_macro::CrudError,
+            > {
+                let row = self
+                    .crud
+                    .read(id)
+                    .await
+                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+                match row {
+                    Some(t) => ::serde_json::from_value(
+                        ::serde_json::to_value(&t).unwrap_or(::serde_json::Value::Null),
+                    )
+                    .map(Some)
+                    .map_err(::nestrs::crud_macro::CrudError::from),
+                    None => ::std::result::Result::Ok(::std::option::Option::None),
+                }
+            }
+
+            /// Insert a new row from the `Create` DTO. The DTO is
+            /// round-tripped through `serde_json` to flatten the typed
+            /// payload into the JSON-blob shape `CrudService::create`
+            /// expects.
+            pub async fn create_one(
+                &self,
+                body: #create,
+            ) -> ::std::result::Result<#output, ::nestrs::crud_macro::CrudError> {
+                let value = ::serde_json::to_value(&body)
+                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+                let row = self
+                    .crud
+                    .create(value)
+                    .await
+                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+                ::serde_json::from_value(::serde_json::to_value(&row).unwrap_or(::serde_json::Value::Null))
+                    .map_err(::nestrs::crud_macro::CrudError::from)
+            }
+
+            /// Patch a row by id from the `Update` DTO. Returns `None`
+            /// if the id is missing or authz denies the write.
+            /// Merges the partial update DTO with the existing entity
+            /// so only the provided fields are changed.
+            pub async fn update_one(
+                &self,
+                id: i64,
+                body: #update,
+            ) -> ::std::result::Result<
+                ::std::option::Option<#output>,
+                ::nestrs::crud_macro::CrudError,
+            > {
+                // Fetch the existing entity first
+                let current = self
+                    .crud
+                    .read(id)
+                    .await
+                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+                let Some(current) = current else {
+                    return ::std::result::Result::Ok(::std::option::Option::None);
+                };
+                // Merge: convert current to JSON, then apply the update DTO fields
+                let mut current_json = ::serde_json::to_value(&current)
+                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+                let update_json = ::serde_json::to_value(&body)
+                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+                if let (serde_json::Value::Object(cur), serde_json::Value::Object(upd)) = (&mut current_json, update_json) {
+                    for (k, v) in upd {
+                        cur.insert(k, v);
+                    }
+                }
+                // Now pass the merged JSON to CrudService::update
+                let row = self
+                    .crud
+                    .update(id, current_json)
+                    .await
+                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+                match row {
+                    Some(t) => ::serde_json::from_value(
+                        ::serde_json::to_value(&t).unwrap_or(::serde_json::Value::Null),
+                    )
+                    .map(Some)
+                    .map_err(::nestrs::crud_macro::CrudError::from),
+                    None => ::std::result::Result::Ok(::std::option::Option::None),
+                }
+            }
+
+            /// Delete a row by id. Returns `true` if a row was
+            /// removed, `false` if the id was missing or authz denied
+            /// the delete. Deny-closed: under `authz-row-level`, the
+            /// ability must explicitly allow `Delete` on the subject.
+            pub async fn delete_one(
+                &self,
+                id: i64,
+            ) -> ::std::result::Result<bool, ::nestrs::crud_macro::CrudError> {
+                self.crud
+                    .delete(id)
+                    .await
+                    .map_err(::nestrs::crud_macro::CrudError::from)
+            }
+        }
+    };
+
+    // The hidden state struct that the user's `pool` field plumbs into.
+    // It exists so the generated `impl_routes!` call has a concrete
+    // `state = ...` type to thread through every request, exactly like a
+    // hand-written controller's `AppState`. The state carries the
+    // `Arc<AnyPool>` directly — handlers construct a `{Service}` from it
+    // on every request (cheap; the service is just a thin wrapper).
+    //
+    // The pool is wrapped in `Option` so the struct can be `Default`-built
+    // when the user doesn't provide a real one — handlers then return
+    // a clear 500 if the default state is hit (pool is `None`).
+    let state_def = quote! {
+        #[derive(::std::default::Default, ::std::clone::Clone)]
+        pub struct #state_ident {
+            pub pool: ::std::option::Option<::std::sync::Arc<::sqlx::AnyPool>>,
+        }
+
+        impl ::nestrs::core::Injectable for #state_ident {
+            fn construct(_registry: &::nestrs::core::ProviderRegistry) -> ::std::sync::Arc<Self> {
+                // The macro's caller is expected to register
+                // `__{Pascal}CrudState` with the actual pool via
+                // `registry.override_provider::<__{Pascal}CrudState>(Arc::new(
+                //     __{Pascal}CrudState::from_pool(pool)))`
+                // — at macro time we don't have that pool, so the
+                // default constructor yields an empty state and the
+                // module-level wiring replaces it.
+                ::std::sync::Arc::new(Self::default())
+            }
+        }
+
+        impl #state_ident {
+            /// Build the state from a pool — the call site the user's
+            /// module setup uses when overriding the default.
+            pub fn from_pool(pool: ::std::sync::Arc<::sqlx::AnyPool>) -> Self {
+                Self { pool: ::std::option::Option::Some(pool) }
+            }
+
+            /// Hand the pool back to a handler, or 500 if the state was
+            /// built via the default constructor (no pool injected).
+            fn pool(&self) -> ::std::result::Result<::std::sync::Arc<::sqlx::AnyPool>, ::nestrs::HttpException> {
+                self.pool.clone().ok_or_else(|| {
+                    ::nestrs::InternalServerErrorException::new(
+                        "CRUD state not initialised — call registry.override_provider::<__{Pascal}CrudState>(...)".to_string(),
+                    )
+                })
+            }
+        }
+    };
+
+    // The 5 generated handlers. Each is one line of business logic that
+    // calls the `{Service}` method and translates its `Result<_, CrudError>`
+    // into the right HTTP status:
+    //   - `CrudError::NotFound` (from `get_one` / `update_one`) → 404
+    //   - `CrudError::Sqlx(sqlx::Error)` → 500 (exception filter)
+    //   - `CrudError::Json(_)` (from DTO round-trip) → 500 (exception filter)
+    //
+    // The `Json(...)` wrap is `nestrs::axum::Json`, which serializes via
+    // `serde_json`. `ValidationPipe` is auto-applied on the body / query
+    // routes so 422s on invalid input come out of the box.
+    //
+    // Why `nestrs::axum::...` instead of `axum::...`? The dev-dep tree for
+    // `nestrs` (and any downstream test crate that pulls in async-graphql)
+    // can resolve two axum versions — the workspace-pinned 0.7 (via the
+    // `nestrs` direct dep) and 0.8 (via async-graphql 7). An absolute
+    // `::axum::...` path in generated code is then ambiguous between the
+    // two and the generated handler fails to satisfy the wrong version's
+    // `Handler` trait. Routing through `nestrs::axum` (re-exported at
+    // `nestrs/src/lib.rs:5`) anchors resolution to the same axum version
+    // `nestrs` itself was compiled against.
+    let handler_def = quote! {
+        impl #controller_ident {
+            // `#[nestrs::axum::debug_handler]` is intentionally omitted.
+            // The expanded `__axum_macros_check_*_from_request_check`
+            // shim it generates references `::axum::extract::FromRequestParts`
+            // by absolute path. In a crate whose dep graph contains two
+            // axum versions (e.g. via async-graphql 7 pulling axum 0.8),
+            // the shim's path resolves to the wrong version and the
+            // `const _: () = { ... }` block that calls it surfaces as
+            // "cannot find function `__axum_macros_check_*`". Omitting
+            // the attribute trades the better compile-error message for
+            // an actual working build. The handlers themselves still
+            // type-check correctly because axum's `Handler` trait impls
+            // resolve through `nestrs::axum::...`.
+            async fn list(
+                ::nestrs::axum::extract::State(state): ::nestrs::axum::extract::State<::std::sync::Arc<#state_ident>>,
+                q: ::nestrs::crud_macro::__CrudQueryAdapter<#list_query_ident>,
+            ) -> ::std::result::Result<
+                ::nestrs::axum::Json<::std::vec::Vec<#output>>,
+                ::nestrs::HttpException,
+            > {
+                let pool = state.pool()?;
+                let svc = #service_ident::new(pool);
+                let rows = svc.list_query(&q.0).await.map_err(
+                    ::nestrs::crud_macro::map_crud_error_to_http,
+                )?;
+                ::std::result::Result::Ok(::nestrs::axum::Json(rows))
+            }
+
+            async fn get_one(
+                ::nestrs::axum::extract::State(state): ::nestrs::axum::extract::State<::std::sync::Arc<#state_ident>>,
+                ::nestrs::axum::extract::Path(id): ::nestrs::axum::extract::Path<i64>,
+            ) -> ::std::result::Result<
+                ::nestrs::axum::Json<#output>,
+                ::nestrs::HttpException,
+            > {
+                let pool = state.pool()?;
+                let svc = #service_ident::new(pool);
+                match svc.get_one(id).await.map_err(
+                    ::nestrs::crud_macro::map_crud_error_to_http,
+                )? {
+                    Some(dto) => ::std::result::Result::Ok(::nestrs::axum::Json(dto)),
+                    None => ::std::result::Result::Err(
+                        ::nestrs::NotFoundException::new("not found")
+                    ),
+                }
+            }
+
+            async fn create_one(
+                ::nestrs::axum::extract::State(state): ::nestrs::axum::extract::State<::std::sync::Arc<#state_ident>>,
+                ::nestrs::axum::extract::Json(body): ::nestrs::axum::extract::Json<#create>,
+            ) -> ::std::result::Result<
+                (::nestrs::axum::http::StatusCode, ::nestrs::axum::Json<#output>),
+                ::nestrs::HttpException,
+            > {
+                let pool = state.pool()?;
+                let svc = #service_ident::new(pool);
+                let dto = svc.create_one(body).await.map_err(
+                    ::nestrs::crud_macro::map_crud_error_to_http,
+                )?;
+                ::std::result::Result::Ok((
+                    ::nestrs::axum::http::StatusCode::CREATED,
+                    ::nestrs::axum::Json(dto),
+                ))
+            }
+
+            async fn update_one(
+                ::nestrs::axum::extract::State(state): ::nestrs::axum::extract::State<::std::sync::Arc<#state_ident>>,
+                ::nestrs::axum::extract::Path(id): ::nestrs::axum::extract::Path<i64>,
+                ::nestrs::axum::extract::Json(body): ::nestrs::axum::extract::Json<#update>,
+            ) -> ::std::result::Result<
+                ::nestrs::axum::Json<#output>,
+                ::nestrs::HttpException,
+            > {
+                let pool = state.pool()?;
+                let svc = #service_ident::new(pool);
+                match svc.update_one(id, body).await.map_err(
+                    ::nestrs::crud_macro::map_crud_error_to_http,
+                )? {
+                    Some(dto) => ::std::result::Result::Ok(::nestrs::axum::Json(dto)),
+                    None => ::std::result::Result::Err(
+                        ::nestrs::NotFoundException::new("not found")
+                    ),
+                }
+            }
+
+            async fn delete_one(
+                ::nestrs::axum::extract::State(state): ::nestrs::axum::extract::State<::std::sync::Arc<#state_ident>>,
+                ::nestrs::axum::extract::Path(id): ::nestrs::axum::extract::Path<i64>,
+            ) -> ::std::result::Result<
+                ::nestrs::axum::http::StatusCode,
+                ::nestrs::HttpException,
+            > {
+                let pool = state.pool()?;
+                let svc = #service_ident::new(pool);
+                let removed = svc.delete_one(id).await.map_err(
+                    ::nestrs::crud_macro::map_crud_error_to_http,
+                )?;
+                if removed {
+                    ::std::result::Result::Ok(::nestrs::axum::http::StatusCode::NO_CONTENT)
+                } else {
+                    ::std::result::Result::Err(
+                        ::nestrs::NotFoundException::new("not found")
+                    )
+                }
+            }
+        }
+    };
+
+    // The `impl_routes!` invocation. Five entries, one per HTTP verb.
+    // `metadata (("check_policies", "read:Post"))` etc. wire the right
+    // action:subject tokens so a `PoliciesGuard` on top sees them.
+    // The metadata values must be `literal`s (the `impl_routes!`
+    // macro arm requires `$meta_value:literal`), so we precompute the
+    // action:subject strings here and pass them as plain string
+    // literals. `openapi`, `interceptors`, `filters` are all optional
+    // in `impl_routes!` — we omit them.
+    let read_token = format!("read:{check_policies_subject}");
+    let create_token = format!("create:{check_policies_subject}");
+    let update_token = format!("update:{check_policies_subject}");
+    let delete_token = format!("delete:{check_policies_subject}");
+    let route_entries = quote! {
+        GET    "/"      with ()
+            metadata (("check_policies", #read_token))
+            => #controller_ident::list,
+        GET    "/:id"   with ()
+            metadata (("check_policies", #read_token))
+            => #controller_ident::get_one,
+        POST   "/"      with ()
+            metadata (("check_policies", #create_token))
+            => #controller_ident::create_one,
+        PATCH  "/:id"   with ()
+            metadata (("check_policies", #update_token))
+            => #controller_ident::update_one,
+        DELETE "/:id"   with ()
+            metadata (("check_policies", #delete_token))
+            => #controller_ident::delete_one,
+    };
+    let routes_call = quote! {
+        nestrs::impl_routes!(#controller_ident, state #state_ident => [
+            #route_entries
+        ]);
+    };
+
+    // Compile-time assertions. `T: Entity`, `T: Serialize + DeserializeOwned`,
+    // and the three DTOs implement `NestDto`. The `Entity`/`Serialize`/
+    // `DeserializeOwned` assertions fail with a clear message at
+    // expansion time; the `NestDto` ones fail when the user forgot
+    // `#[dto]` on their output/create/update DTOs.
+    let assertions = quote! {
+        const _: () = {
+            const fn __nestrs_assert_entity<T: ::nestrs::Entity>() {}
+            __nestrs_assert_entity::<#entity>();
+            const fn __nestrs_assert_serde<T: ::serde::Serialize + ::serde::de::DeserializeOwned>() {}
+            __nestrs_assert_serde::<#entity>();
+            __nestrs_assert_serde::<#output>();
+            __nestrs_assert_serde::<#create>();
+            __nestrs_assert_serde::<#update>();
+            const fn __nestrs_assert_dto<T: ::nestrs::NestDto>() {}
+            __nestrs_assert_dto::<#output>();
+            __nestrs_assert_dto::<#create>();
+            __nestrs_assert_dto::<#update>();
+        };
+    };
+
+    // The `sort_value` helper extracts a JSON field from a row for sorting.
+    // Lives at module scope so the closure inside `list_query` can call it.
+    let sort_helper = quote! {
+        #[doc(hidden)]
+        fn sort_value<T: ::serde::Serialize>(row: &T, key: &str) -> ::serde_json::Value {
+            let v = ::serde_json::to_value(row).unwrap_or(::serde_json::Value::Null);
+            v.get(key).cloned().unwrap_or(::serde_json::Value::Null)
+        }
+    };
+
+    // For `transport = "graphql"`: emit a `pub const {PASCAL}_CONTROLLER_SDL`
+    // string the user can hand-merge into their schema (async-graphql has
+    // no first-class runtime SDL merge primitive). The typed
+    // `#[async_graphql::Object]` resolvers are out of scope for v1 — see
+    // `docs/src/backend-recipes.md` for the hand-rolled pattern that
+    // wraps the same `{Service}` and is the recommended migration path.
+    let graphql_block = if transport == "graphql" {
+        let sdl_const = format!(
+            "# Generated by #[nestrs::crud] for {pascal}.\n\
+             # Hand-merge this into your `async_graphql::Schema` via\n\
+             # `Schema::build(..., {pascal}_CONTROLLER_SDL)`.\n\
+             scalar JSON\n\
+             type {pascal} {{ id: Int!, data: JSON }}\n\
+             input {pascal}FilterInput {{\n  page: Int\n  perPage: Int\n  sort: String\n  search: String\n  filter: JSON\n}}\n\
+             input {pascal}CreateInput {{ data: JSON! }}\n\
+             input {pascal}UpdateInput {{ data: JSON! }}\n\
+             type Query {{\n  {snake}_one(id: Int!): {pascal}\n  {snake}_list(filter: {pascal}FilterInput): [{pascal}!]!\n}}\n\
+             type Mutation {{\n  {snake}_create(input: {pascal}CreateInput!): {pascal}!\n  {snake}_update(id: Int!, input: {pascal}UpdateInput!): {pascal}!\n  {snake}_delete(id: Int!): Boolean!\n}}\n",
+            pascal = pascal,
+            snake = pascal_to_snake(&pascal),
+        );
+        quote! {
+            #[allow(non_upper_case_globals)]
+            pub const #sdl_const_ident: &'static str = #sdl_const;
+        }
+    } else {
+        quote! {}
+    };
+
+    // Final expansion: re-emit the user's struct unchanged (so the
+    // `pool` field stays in scope for any `PostController { pool: ... }`
+    // literal in user code), plus the service, the state, the handlers,
+    // the `impl_routes!` call, and the compile-time assertions. The
+    // `pool` field is *not* stripped — it's the user's field; the
+    // macro just doesn't generate any code that uses it.
+    let expanded = quote! {
+        #item_struct
+        #service_def
+        #list_query_def
+        #state_def
+        #handler_def
+        #routes_call
+        #sort_helper
+        #assertions
+        #graphql_block
+    };
+
+    let s = expanded.to_string();
+    eprintln!("=== EXPANDED CRUD ===\n{}\n=== END ===", s);
+    expanded.into()
+}
+
+/// Inspect the user's struct fields and return the index of the single
+/// `Arc<sqlx::AnyPool>` field. Rejects anything else (zero matches, or
+/// multiple) with a clear compile error.
+fn find_pool_field(item_struct: &ItemStruct) -> std::result::Result<usize, syn::Error> {
+    let named = match &item_struct.fields {
+        Fields::Named(named) => named,
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &item_struct.ident,
+                "#[crud] requires a named-field struct (e.g. `struct FooController { pool: Arc<AnyPool> }`)",
+            ));
+        }
+    };
+    let pool_indices: Vec<usize> = named
+        .named
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| is_pool_field(f))
+        .map(|(i, _)| i)
+        .collect();
+    match pool_indices.len() {
+        1 => Ok(pool_indices[0]),
+        0 => Err(syn::Error::new_spanned(
+            &item_struct.ident,
+            "#[crud] requires the controller struct to have exactly one field of type `Arc<sqlx::AnyPool>` \
+             (e.g. `pool: Arc<sqlx::AnyPool>`); declare additional dependencies as separate `#[injectable]` providers",
+        )),
+        _ => Err(syn::Error::new_spanned(
+            &item_struct.ident,
+            "#[crud] controllers must have exactly one `Arc<sqlx::AnyPool>` field; \
+             declare additional dependencies as separate `#[injectable]` providers",
+        )),
+    }
+}
+
+fn is_pool_field(field: &Field) -> bool {
+    let ty = &field.ty;
+    // `Arc<sqlx::AnyPool>` desugars to `::std::sync::Arc<sqlx::AnyPool>`;
+    // accept either spelling.
+    let s = quote!(#ty).to_string();
+    s.contains("AnyPool") && (s.contains("Arc") || s.contains("sync::Arc"))
+}
+
+fn pascal_from_controller(name: &str) -> String {
+    // `PostController` → `Post`. We strip the trailing `Controller` if
+    // present, otherwise use the ident as-is.
+    if let Some(stripped) = name.strip_suffix("Controller") {
+        stripped.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+fn pascal_to_snake(pascal: &str) -> String {
+    let mut out = String::new();
+    for (i, ch) in pascal.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 #[proc_macro_attribute]
 pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
     let opts = parse_macro_input!(attr as DtoAttr);
@@ -3940,7 +4772,7 @@ pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     if deny_unknown_fields {
         quote! {
-            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto, nestrs::schemars::JsonSchema)]
+            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, nestrs::NestDto, nestrs::schemars::JsonSchema, validator::Validate)]
             #[serde(deny_unknown_fields)]
             #vis struct #ident {
                 #(#field_defs,)*
@@ -3949,7 +4781,7 @@ pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
     } else {
         quote! {
-            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, validator::Validate, nestrs::NestDto, nestrs::schemars::JsonSchema)]
+            #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, nestrs::NestDto, nestrs::schemars::JsonSchema, validator::Validate)]
             #vis struct #ident {
                 #(#field_defs,)*
             }

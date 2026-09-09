@@ -7,6 +7,61 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wave 4.3: DB migrations + seeding CLI (`nestrs-cli db` subcommands)
+
+- **`nestrs-cli db` subcommand family** behind a default-OFF `db`
+  Cargo feature on `nestrs-cli` (crate `nestrs-scaffold`). The `db`
+  arm of the dispatcher errors with a clear message when the feature
+  is off, so the binary stays minimal for users who don't need it.
+- **Migrations** (`nestrs-cli db [--backend sqlx|prisma] migrate ...`)
+  via `sqlx::migrate::Migrator` (pinned to `=0.8.6` to match the
+  workspace):
+  - `add <name> [--reversible]` — writes
+    `<NNN>_<name>.sql` (or `.up.sql` + `.down.sql` when
+    `--reversible`). Sequence is walked from the existing directory,
+    not timestamped (deterministic, greppable, sortable; sqlx-cli's
+    timestamped convention is replaced by a simpler counter).
+  - `run [--path <dir>] [--target-version V] [--database-url URL]` —
+    applies pending migrations; idempotent on already-applied sets.
+  - `revert [--target-version V]` — sqlx 0.8 requires an explicit
+    target; defaults to "max applied − 1" so a no-flag revert undoes
+    just the most recent.
+  - `info [--path <dir>]` — prints applied (from `_sqlx_migrations`)
+    and on-disk files with `applied` / `pending` / `[missing on
+    disk]` markers, plus a count line.
+  - `--backend prisma` pass-throughs to `npx prisma migrate dev
+    --create-only` (add), `npx prisma migrate deploy` (run), and
+    `npx prisma migrate status` (info). `revert` is not supported
+    on the Prisma backend (Prisma has no first-class revert; we
+    surface that as a clear error pointing at `npx prisma migrate
+    resolve --rolled-back`).
+- **Seeding** (`nestrs-cli db seed ...`):
+  - `--bin <name> [--manifest-path <path>]` — pass-through to
+    `cargo run --bin <name>`, forwards `DATABASE_URL` and
+    `NESTRS_DB__URL` env, propagates exit code. User owns the seed
+    binary; no compile-on-the-fly magic.
+  - `--seed-file <path>` — execute a SQL file via `sqlx::raw_sql`
+    inside an explicit transaction; rollback on error. TypeORM-style
+    escape hatch for `.sql` fixture dumps.
+- **URL resolution** — `--database-url` > `DATABASE_URL` >
+  `NESTRS_DB__URL`. Same precedence in every subcommand; documented
+  in `--help`.
+- **12 tests** in `nestrs-cli/tests/db_cli.rs`: 4 on `migrate add`
+  (filename shape, `--reversible`, sequence increment, invalid name
+  rejection), 4 on `migrate run/revert/info` against a SQLite
+  fixture, 2 on `seed --bin` (exit code propagation + env
+  forwarding), 2 on `seed --seed-file` (apply + transactional
+  rollback on bad SQL). All pass on MSRV 1.88.
+- **Postgres parity is documented as a follow-up.** SQLite-only CI
+  fixture; sqlx's `Migrator` uses the same `Any`-driver code path on
+  Postgres, but driver-specific quirks (e.g. `_sqlx_migrations`
+  quote escaping) aren't exercised here.
+- **Out of scope** (documented in module-level docs of
+  `nestrs-cli/src/db.rs`): typed `DatabaseConfig` on `nestrs`
+  (separate wave's work; CLI reads env directly), `synchronize`
+  full DDL diff (multi-month port), `nestrs-cli generate seed`
+  scaffolding, public-API snapshot test, crate-split study.
+
 ### Added — Wave 4.2: GraphQL federation gateway (`graphql-federation-gateway` feature)
 
 - **Lightweight Apollo Federation gateway** in `nestrs-graphql::federation`,

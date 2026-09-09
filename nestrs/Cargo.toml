@@ -33,6 +33,13 @@ graphql-authz = ["graphql", "authz", "database-sqlx", "nestrs-graphql/graphql-au
 ## the hook path), and `nestrs::graphql` re-exports `DataLoader` / `Loader`.
 ## Pair with the `#[dataloader]` proc macro to define loaders.
 graphql-dataloader = ["graphql-authz", "nestrs-graphql/dataloader"]
+## Lightweight Apollo Federation gateway: stitches subgraph SDLs behind
+## one Axum handler with `_service { sdl }` introspection and
+## `_entities` cross-subgraph dispatch. Pulls in `graphql-authz` because
+## the per-request `GqlHandlerHook` is the surface row-level predicates
+## (Wave 3D) ride through to entity resolvers — without authz the hook
+## is a no-op and entity resolvers see no ambient Ability.
+graphql-federation-gateway = ["graphql-authz", "nestrs-graphql/federation-gateway"]
 openapi = ["dep:nestrs-openapi"]
 cache-redis = ["dep:redis"]
 schedule = ["dep:tokio-cron-scheduler", "dep:linkme"]

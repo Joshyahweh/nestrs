@@ -18,6 +18,7 @@ async-graphql-parser = "=7.0.17"
 async-graphql-value = "=7.0.17"
 axum.workspace = true
 nestrs-core = { version = "0.5.2", path = "../nestrs-core" }
+serde_json = "1"
 tokio.workspace = true
 
 [features]
@@ -33,3 +34,13 @@ graphql-authz = []
 ## `DataLoaderRegistry`). Enables async-graphql's own `dataloader` module;
 ## batch tasks spawn on tokio, so the runtime dep is pulled here.
 dataloader = ["async-graphql/dataloader"]
+## Lightweight federation gateway: stitches subgraph SDLs behind a single
+## Axum handler, exposes `_service { sdl }` for introspection and `_entities`
+## for cross-subgraph entity resolution. async-graphql 7 ships federation
+## support natively (no Cargo feature needed); we gate the gateway behind
+## its own flag so users without federation don't pay the SDL-parser cost
+## or see `nestrs_graphql::federation::*` in their autocomplete. Pulls in
+## `graphql-authz` because the per-request `GqlHandlerHook` is the hook
+## surface for row-level predicates (Wave 3D) — entity resolvers need the
+## hook's task-local scope to see the ambient Ability.
+federation-gateway = ["graphql-authz"]

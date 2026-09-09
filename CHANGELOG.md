@@ -7,6 +7,51 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wave 4.2: GraphQL federation gateway (`graphql-federation-gateway` feature)
+
+- **Lightweight Apollo Federation gateway** in `nestrs-graphql::federation`,
+  behind a default-off `graphql-federation-gateway` feature on `nestrs`.
+  Stitches subgraph SDLs behind a single Axum endpoint and exposes the
+  federation introspection shape:
+  - `_service { sdl }` — the merged federation SDL (federation-v2 `@link`
+    directive + `_Entity` / `_Any` plumbing), so an Apollo Router / GraphOS
+    router in front of the gateway can introspect the stitched shape.
+  - `entities(representations: [_Any!]!) -> [_Any]` — dispatch by
+    `__typename` to a user-supplied resolver closure on each
+    `SubgraphSpec`. Grouped by `__typename` and dispatched as a batch
+    (Apollo Federation semantics — one call per typename per request,
+    not one per representation, so DataLoader-style batching in the
+    resolver actually works).
+  - SDL validated at construction time via
+    `async_graphql_parser::parse_schema`; refuses to start with
+    `FederationError::Parse { subgraph, .. }` on bad SDL,
+    `FederationError::NoSubgraphs` on empty config, or
+    `FederationError::Merge { typename }` on conflicting dispatch table
+    entries.
+- **Row-level authorization flows through the gateway hook.**
+  `federation_router_with_hook(cfg, "/graphql", Arc<dyn GqlHandlerHook>)`
+  mirrors `graphql_router_with_hook` — the hook wraps
+  `schema.execute_batch`, so entity resolvers run inside the hook's
+  scope and ambient `Ability` / `Principal` / `TransactionSlot` task-locals
+  (Wave 3A + 3D) are visible to user closures unchanged.
+- **Public API surface (re-exported under `nestrs::graphql::federation::`):**
+  `SubgraphSpec { name, sdl, entity_resolver }`,
+  `FederationConfig { subgraphs, options, hook }`,
+  `FederationError`, `EntityResolver`, and the trio of
+  `federation_router` / `federation_router_with_options` /
+  `federation_router_with_hook` entry points.
+- **13 tests** in `nestrs/tests/graphql_federation_gateway.rs`:
+  two-subgraph round-trip + routing; `_entities` dispatch with
+  null-on-unknown-typename + batched multi-rep resolution; federation
+  SDL export shape + directive stripping; construction-time refusal on
+  bad SDL / empty list / merge conflict; row-level predicate survival
+  through the hook; ability-scoped routing.
+- **Out of scope** (documented in module-level docs): no query planner,
+  no Apollo Router wire protocol, no automatic merging of overlapping
+  subgraph types — "stitch" here means validate + dispatch + expose.
+  Place this gateway behind Apollo Router / GraphOS for the externally
+  routed case.
+
 ### Added — Wave 3F: validator 0.21 + `#[dto]` schemars reflection
 
 - **Validator 0.20 → 0.21** across `nestrs`, `examples/hello-app`, and

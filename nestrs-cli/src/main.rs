@@ -1,4 +1,10 @@
 mod doctor;
+#[cfg(feature = "db")]
+mod db;
+#[cfg(feature = "db")]
+mod db_migrate;
+#[cfg(feature = "db")]
+mod db_seed;
 mod resource_templates;
 
 use std::env;
@@ -46,6 +52,18 @@ fn run() -> Result<(), String> {
         "g" | "generate" => generate(&args[1..]),
         "new" => create_new_project(&args[1..]),
         "doctor" => doctor::run(),
+        "db" => {
+            #[cfg(feature = "db")]
+            {
+                db::run(&args[1..])
+            }
+            #[cfg(not(feature = "db"))]
+            {
+                Err(
+                    "`nestrs-cli db` requires the `db` Cargo feature; rebuild with `--features db`".to_string(),
+                )
+            }
+        }
         "--help" | "-h" | "help" => print_help(),
         other => Err(format!("unknown command `{other}`")),
     }
@@ -64,6 +82,16 @@ fn print_help() -> Result<(), String> {
     println!("  nestrs-cli g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs-cli g <res|s|co|mo|dto|gu|pi|fi|in|st|r|ga|ms|tr> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs-cli g resource <name> [--transport rest|graphql|ws|grpc|microservice] [--style nest|rust] [--path <dir>] [--no-interactive] [--dry-run] [--force] [--quiet]");
+    #[cfg(feature = "db")]
+    {
+        println!("  nestrs-cli db [--backend sqlx|prisma] migrate add <name> [--reversible] [--path <dir>]");
+        println!("  nestrs-cli db [--backend sqlx|prisma] migrate run [--path <dir>] [--target-version V] [--database-url URL]");
+        println!("  nestrs-cli db [--backend sqlx|prisma] migrate revert [--path <dir>] [--target-version V] [--database-url URL]");
+        println!("  nestrs-cli db [--backend sqlx|prisma] migrate info [--path <dir>] [--database-url URL]");
+        println!("  nestrs-cli db seed --bin <name> [--manifest-path <path>] [--database-url URL]");
+        println!("  nestrs-cli db seed --seed-file <path> [--database-url URL]");
+        println!("    `--database-url`, `DATABASE_URL`, and `NESTRS_DB__URL` are checked in that order. The Prisma backend shells out to `npx prisma ...`.");
+    }
     Ok(())
 }
 

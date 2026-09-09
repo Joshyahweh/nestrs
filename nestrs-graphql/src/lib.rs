@@ -2,8 +2,11 @@
 //!
 //! ## Ecosystem (Nest chapter vs Rust)
 //!
-//! - **Federation**: use [`async_graphql`](https://docs.rs/async-graphql) federation / subgraph features, or place
-//!   [`export_schema_sdl`] output behind **Apollo Router** / **GraphOS** — there is no separate “nestrs federation” crate.
+//! - **Federation**: use the in-crate `federation` module
+//!   ([`federation_router`] / [`SubgraphSpec`]) when the
+//!   `federation-gateway` feature is enabled, or place
+//!   [`export_schema_sdl`] output behind **Apollo Router** / **GraphOS**
+//!   for the externally-routed case.
 //! - **Plugins**: implement [`async_graphql::extensions::Extension`] /
 //!   [`async_graphql::extensions::ExtensionFactory`] and register with
 //!   [`async_graphql::SchemaBuilder::extension`].
@@ -15,11 +18,18 @@
 //! The HTTP adapter here stays small: Axum router + optional Playground + batch execution.
 
 pub mod builder_help;
+#[cfg(feature = "federation-gateway")]
+pub mod federation;
 pub mod limits;
 pub mod router_options;
 pub mod sdl;
 
 pub use builder_help::with_production_graphql_limits;
+#[cfg(feature = "federation-gateway")]
+pub use federation::{
+    federation_router, federation_router_with_hook, federation_router_with_options,
+    EntityResolver, FederationConfig, FederationError, SubgraphSpec,
+};
 pub use limits::{with_default_limits, Analyzer, DEFAULT_MAX_COMPLEXITY, DEFAULT_MAX_DEPTH};
 pub use router_options::{graphql_router_with_options, GraphQlHttpOptions};
 pub use sdl::{export_schema_sdl, export_schema_sdl_with_options, SDLExportOptions};
@@ -31,9 +41,9 @@ pub use async_graphql::{
 
 #[cfg(feature = "dataloader")]
 pub mod data_loader;
+use axum::Router;
 #[cfg(feature = "dataloader")]
 pub use data_loader::{data_loader, data_loader_cached, DataLoader, DataLoaderRegistry, Loader};
-use axum::Router;
 
 pub fn graphql_router<Q, Mutation, Subscription>(
     schema: Schema<Q, Mutation, Subscription>,

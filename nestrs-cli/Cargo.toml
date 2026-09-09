@@ -19,6 +19,14 @@ serde_json = "1"
 # stdio/HTTP without spawning a subprocess. Stubbed (off by default) for
 # now so existing CLI builds are unaffected.
 nestrs-mcp = { path = "../nestrs-mcp", version = "0.5.2", optional = true }
+# Optional DB migrations + seeding (`nestrs-cli db ...`). Pinned to
+# 0.8.6 to match the rest of the workspace; sqlx's `migrate` feature
+# is what unlocks `sqlx::migrate::Migrator`. `postgres` is on the
+# feature list (even though we only test against SQLite) so users who
+# point DATABASE_URL at a Postgres server can run `db migrate run`
+# against the same code path.
+sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "macros", "postgres", "sqlite", "migrate"], optional = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"], optional = true }
 
 [[bin]]
 name = "nestrs-cli"
@@ -27,3 +35,16 @@ path = "src/main.rs"
 [features]
 default = []
 mcp = ["dep:nestrs-mcp", "nestrs-mcp/admin"]
+## `nestrs-cli db` subcommand family: `db migrate add|run|revert|info`
+## and `db seed --bin|--seed-file`. Uses `sqlx::migrate::Migrator`
+## under the hood; the `--backend prisma` flavor shells out to
+## `npx prisma ...`. Default-OFF so the binary stays minimal unless
+## the user opts in.
+db = ["dep:sqlx", "dep:tokio"]
+
+[dev-dependencies]
+# Used by `tests/db_cli.rs` to verify migration results against a
+# SQLite file the CLI just wrote to. Reuses the same feature set as
+# the main dep so test reads match the CLI's writes.
+sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "macros", "sqlite"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }

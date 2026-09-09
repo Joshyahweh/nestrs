@@ -3551,6 +3551,8 @@ version = "0.5.2"
 dependencies = [
  "nestrs-mcp",
  "serde_json",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]

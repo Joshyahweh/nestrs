@@ -121,6 +121,13 @@ impl UserController {
     #[use_pipes(TrimPipe)]
     async fn piped(&self) -> String { String::new() }
 
+    #[post("/piped-body")]
+    #[use_pipes(TrimPipe)]
+    async fn piped_body(
+        &self,
+        _body: nestrs::extractor::PipedBody1<CreateUserDto, TrimPipe>,
+    ) -> String { String::new() }
+
     #[get("/filtered")]
     #[use_filters(AllExceptionsFilter)]
     async fn filtered(&self) -> String { String::new() }
@@ -285,8 +292,8 @@ fn get_controller_returns_routes_guards_and_state() {
         .unwrap();
     assert_eq!(
         user.routes.len(),
-        16,
-        "expected all 16 routes parsed, got {}",
+        17,
+        "expected all 17 routes parsed, got {}",
         user.routes.len()
     );
     let methods: Vec<&str> = user.routes.iter().map(|r| r.method.as_str()).collect();
@@ -428,6 +435,23 @@ fn get_route_finds_by_method_and_path() {
 
     let piped = user.routes.iter().find(|r| r.handler == "piped").unwrap();
     assert_eq!(piped.pipes, vec!["TrimPipe".to_string()]);
+    assert!(piped.body_type.is_none());
+
+    let piped_body = user
+        .routes
+        .iter()
+        .find(|r| r.handler == "piped_body")
+        .unwrap();
+    assert_eq!(piped_body.pipes, vec!["TrimPipe".to_string()]);
+    // The parser must recognise PipedBody as a body extractor (added in
+    // Wave 5.1 — otherwise routes with non-ValidationPipe chains would be
+    // invisible to OpenAPI generation).
+    let body_ty = piped_body.body_type.as_deref().expect("body_type set");
+    assert!(
+        body_ty.contains("PipedBody1"),
+        "expected PipedBody1 in body_type, got {body_ty}"
+    );
+    assert!(body_ty.contains("CreateUserDto"));
 
     let filtered = user
         .routes

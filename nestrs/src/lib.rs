@@ -196,7 +196,9 @@ pub use oauth2_bridge::{
 #[cfg(feature = "otel")]
 pub use otel::{OpenTelemetryConfig, OtlpProtocol};
 pub use pipes::ParseIntPipe;
+pub use pipes::TrimPipe;
 pub use pipes::ValidationPipe;
+pub use crate::core::HttpPipeTransform;
 #[cfg(feature = "authz")]
 pub use policies::current_ability;
 #[cfg(feature = "authz")]
@@ -280,9 +282,9 @@ pub mod prelude {
     pub use crate::core::{
         AuthError, AuthStrategy, AxumHttpEngine, CanActivate, ConfigurableModuleBuilder,
         Controller, DatabasePing, DiscoveryService, DynamicModule, DynamicModuleBuilder,
-        ExecutionContext, GuardError, HostType, HttpExecutionArguments, HttpServerEngine,
-        Injectable, MetadataRegistry, Module, ModuleOptions, ModuleRef, PipeTransform,
-        ProviderRegistry, ProviderScope,
+        ExecutionContext, GuardError, HostType, HttpExecutionArguments, HttpPipeTransform,
+        HttpServerEngine, Injectable, MetadataRegistry, Module, ModuleOptions, ModuleRef,
+        PipeTransform, ProviderRegistry, ProviderScope,
     };
     #[cfg(feature = "graphql")]
     pub use crate::graphql;
@@ -350,13 +352,15 @@ pub mod prelude {
         MethodNotAllowedException, NestApiVersion, NestApplication, NestConfig, NestDto,
         NestFactory, NotAcceptableException, NotFoundException, NotImplementedException,
         ParseIntPipe, PathNormalization, PayloadTooLargeException, PaymentRequiredException,
+        PipedBody1, PipedBody2, PipedBody3, PipedBody4, PipedPath1, PipedPath2, PipedPath3,
+        PipedPath4, PipedQuery1, PipedQuery2, PipedQuery3, PipedQuery4,
         ProblemDetails, RateLimitOptions, RawBody, ReadinessContext, RequestContext,
         RequestContextMissing, RequestScoped, RequestScopedMissing, RequestTimeoutException,
         RequestTracingOptions, SecurityHeaders, ServiceUnavailableException, TestClient,
         TestRequest, TestingModule, TestingModuleBuilder, TooManyRequestsException, TracingConfig,
-        TracingFormat, TypedConfigModule, UnauthorizedException, UnprocessableEntityException,
-        UnsupportedMediaTypeException, ValidatedBody, ValidatedPath, ValidatedQuery,
-        ValidationPipe, VersioningType,
+        TracingFormat, TrimPipe, TypedConfigModule, UnauthorizedException,
+        UnprocessableEntityException, UnsupportedMediaTypeException, ValidatedBody, ValidatedPath,
+        ValidatedQuery, ValidationPipe, VersioningType,
     };
     #[cfg(feature = "authn")]
     pub use crate::{
@@ -3300,6 +3304,14 @@ pub struct HttpException {
     pub details: Option<Box<serde_json::Value>>,
 }
 
+impl std::fmt::Display for HttpException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.status, self.message)
+    }
+}
+
+impl std::error::Error for HttpException {}
+
 impl HttpException {
     pub fn new(
         status: axum::http::StatusCode,
@@ -3567,6 +3579,760 @@ where
     }
 }
 
+// ============================================================================
+// PipedBody / PipedQuery / PipedPath — extractors that run an arbitrary pipe
+// chain. The `#[use_pipes]` macro emits one of these per parameter when
+// `pipes.len() > 1` or when the lone pipe is not `ValidationPipe`. The
+// `ValidationPipe`-only fast path still uses `ValidatedBody` / `ValidatedQuery`
+// / `ValidatedPath` (preserved bit-for-bit).
+//
+// Per-arity structs (1..=4) bound the chain's output type via fully-qualified
+// projections on `PipeTransform`. Arity > 4 is rare in practice; users can
+// write a custom `HttpPipeTransform` that wraps a longer chain.
+// ============================================================================
+
+/// Convert a pipe error into an `HttpException`. If the inner error is
+/// already an `HttpException`, propagate its status code + body; otherwise
+/// wrap in `BadRequestException` (matches NestJS pipe semantics).
+fn __nestrs_pipe_error_to_http_exception(
+    e: Box<dyn std::error::Error + Send + Sync>,
+) -> HttpException {
+    // Downcast to HttpException — pipes that return UnprocessableEntityException
+    // (e.g. ValidationPipe) keep their 422 status.
+    if let Some(http_err) = e.downcast_ref::<HttpException>() {
+        return http_err.clone();
+    }
+    let detail = e.to_string();
+    BadRequestException::new("pipe transform failed").with_details(serde_json::json!({
+        "error": detail,
+    }))
+}
+
+// ---------- PipedBody arity 1..=4 ----------
+
+/// Body extractor that runs a single pipe on the deserialized JSON value.
+pub struct PipedBody1<T, P1>(
+    pub <P1 as nestrs_core::PipeTransform<T>>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>;
+
+#[axum::async_trait]
+impl<S, T, P1> axum::extract::FromRequest<S> for PipedBody1<T, P1>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+{
+    type Rejection = HttpException;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) = <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(
+            req, state,
+        )
+        .await
+        .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
+        let pipe = P1::default();
+        let out =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(out))
+    }
+}
+
+/// Body extractor that runs two pipes in order.
+pub struct PipedBody2<T, P1, P2>(
+    pub <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2> axum::extract::FromRequest<S> for PipedBody2<T, P1, P2>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) = <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(
+            req, state,
+        )
+        .await
+        .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
+        let pipes = (P1::default(), P2::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v2))
+    }
+}
+
+/// Body extractor that runs three pipes in order.
+pub struct PipedBody3<T, P1, P2, P3>(
+    pub <P3 as nestrs_core::PipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2, P3> axum::extract::FromRequest<S> for PipedBody3<T, P1, P2, P3>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) = <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(
+            req, state,
+        )
+        .await
+        .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
+        let pipes = (P1::default(), P2::default(), P3::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v3 = <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::transform(&pipes.2, v2)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v3))
+    }
+}
+
+/// Body extractor that runs four pipes in order.
+#[allow(clippy::type_complexity)]
+pub struct PipedBody4<T, P1, P2, P3, P4>(
+    pub <P4 as nestrs_core::PipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+    P4: nestrs_core::HttpPipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2, P3, P4> axum::extract::FromRequest<S> for PipedBody4<T, P1, P2, P3, P4>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+    P4: nestrs_core::HttpPipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) = <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(
+            req, state,
+        )
+        .await
+        .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
+        let pipes = (P1::default(), P2::default(), P3::default(), P4::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v3 = <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::transform(&pipes.2, v2)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v4 = <P4 as nestrs_core::PipeTransform<
+            <P3 as nestrs_core::PipeTransform<
+                <P2 as nestrs_core::PipeTransform<
+                    <P1 as nestrs_core::PipeTransform<T>>::Output,
+                >>::Output,
+            >>::Output,
+        >>::transform(&pipes.3, v3)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v4))
+    }
+}
+
+// ---------- PipedQuery arity 1..=4 ----------
+
+/// Query-string extractor that runs a single pipe on the deserialized value.
+pub struct PipedQuery1<T, P1>(
+    pub <P1 as nestrs_core::PipeTransform<T>>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>;
+
+#[axum::async_trait]
+impl<S, T, P1> axum::extract::FromRequestParts<S> for PipedQuery1<T, P1>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Query(value) =
+            <axum::extract::Query<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid query: {e}")))?;
+        let pipe = P1::default();
+        let out =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(out))
+    }
+}
+
+/// Query-string extractor that runs two pipes in order.
+pub struct PipedQuery2<T, P1, P2>(
+    pub <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2> axum::extract::FromRequestParts<S> for PipedQuery2<T, P1, P2>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Query(value) =
+            <axum::extract::Query<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid query: {e}")))?;
+        let pipes = (P1::default(), P2::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v2))
+    }
+}
+
+/// Query-string extractor that runs three pipes in order.
+pub struct PipedQuery3<T, P1, P2, P3>(
+    pub <P3 as nestrs_core::PipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2, P3> axum::extract::FromRequestParts<S> for PipedQuery3<T, P1, P2, P3>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Query(value) =
+            <axum::extract::Query<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid query: {e}")))?;
+        let pipes = (P1::default(), P2::default(), P3::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v3 = <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::transform(&pipes.2, v2)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v3))
+    }
+}
+
+/// Query-string extractor that runs four pipes in order.
+#[allow(clippy::type_complexity)]
+pub struct PipedQuery4<T, P1, P2, P3, P4>(
+    pub <P4 as nestrs_core::PipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+    P4: nestrs_core::HttpPipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2, P3, P4> axum::extract::FromRequestParts<S> for PipedQuery4<T, P1, P2, P3, P4>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+    P4: nestrs_core::HttpPipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Query(value) =
+            <axum::extract::Query<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid query: {e}")))?;
+        let pipes = (P1::default(), P2::default(), P3::default(), P4::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v3 = <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::transform(&pipes.2, v2)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v4 = <P4 as nestrs_core::PipeTransform<
+            <P3 as nestrs_core::PipeTransform<
+                <P2 as nestrs_core::PipeTransform<
+                    <P1 as nestrs_core::PipeTransform<T>>::Output,
+                >>::Output,
+            >>::Output,
+        >>::transform(&pipes.3, v3)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v4))
+    }
+}
+
+// ---------- PipedPath arity 1..=4 ----------
+
+/// Path extractor that runs a single pipe on the deserialized value.
+pub struct PipedPath1<T, P1>(
+    pub <P1 as nestrs_core::PipeTransform<T>>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>;
+
+#[axum::async_trait]
+impl<S, T, P1> axum::extract::FromRequestParts<S> for PipedPath1<T, P1>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Path(value) =
+            <axum::extract::Path<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid path params: {e}")))?;
+        let pipe = P1::default();
+        let out =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(out))
+    }
+}
+
+/// Path extractor that runs two pipes in order.
+pub struct PipedPath2<T, P1, P2>(
+    pub <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2> axum::extract::FromRequestParts<S> for PipedPath2<T, P1, P2>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Path(value) =
+            <axum::extract::Path<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid path params: {e}")))?;
+        let pipes = (P1::default(), P2::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v2))
+    }
+}
+
+/// Path extractor that runs three pipes in order.
+pub struct PipedPath3<T, P1, P2, P3>(
+    pub <P3 as nestrs_core::PipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2, P3> axum::extract::FromRequestParts<S> for PipedPath3<T, P1, P2, P3>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Path(value) =
+            <axum::extract::Path<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid path params: {e}")))?;
+        let pipes = (P1::default(), P2::default(), P3::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v3 = <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::transform(&pipes.2, v2)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v3))
+    }
+}
+
+/// Path extractor that runs four pipes in order.
+#[allow(clippy::type_complexity)]
+pub struct PipedPath4<T, P1, P2, P3, P4>(
+    pub <P4 as nestrs_core::PipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >>::Output,
+)
+where
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+    P4: nestrs_core::HttpPipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >;
+
+#[axum::async_trait]
+impl<S, T, P1, P2, P3, P4> axum::extract::FromRequestParts<S> for PipedPath4<T, P1, P2, P3, P4>
+where
+    S: Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + Send + 'static,
+    P1: nestrs_core::HttpPipeTransform<T>,
+    P2: nestrs_core::HttpPipeTransform<
+        <P1 as nestrs_core::PipeTransform<T>>::Output,
+    >,
+    P3: nestrs_core::HttpPipeTransform<
+        <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::Output,
+    >,
+    P4: nestrs_core::HttpPipeTransform<
+        <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::Output,
+    >,
+{
+    type Rejection = HttpException;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Path(value) =
+            <axum::extract::Path<T> as axum::extract::FromRequestParts<S>>::from_request_parts(
+                parts, state,
+            )
+            .await
+            .map_err(|e| BadRequestException::new(format!("Invalid path params: {e}")))?;
+        let pipes = (P1::default(), P2::default(), P3::default(), P4::default());
+        let v1 =
+            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+                .await
+                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v2 = <P2 as nestrs_core::PipeTransform<
+            <P1 as nestrs_core::PipeTransform<T>>::Output,
+        >>::transform(&pipes.1, v1)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v3 = <P3 as nestrs_core::PipeTransform<
+            <P2 as nestrs_core::PipeTransform<
+                <P1 as nestrs_core::PipeTransform<T>>::Output,
+            >>::Output,
+        >>::transform(&pipes.2, v2)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v4 = <P4 as nestrs_core::PipeTransform<
+            <P3 as nestrs_core::PipeTransform<
+                <P2 as nestrs_core::PipeTransform<
+                    <P1 as nestrs_core::PipeTransform<T>>::Output,
+                >>::Output,
+            >>::Output,
+        >>::transform(&pipes.3, v3)
+        .await
+        .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        Ok(Self(v4))
+    }
+}
+
 /// Runs a pre-resolved tuple of route guards left-to-right, short-circuiting on the first
 /// failure. Used by [`impl_routes!`]; not stable API.
 #[doc(hidden)]
@@ -3736,8 +4502,15 @@ pub fn __nestrs_openapi_spec_leaked(
 /// 5. **Handler**: Axum extractors (including `#[use_pipes(ValidationPipe)]`-wired `ValidatedBody` / `ValidatedQuery`
 ///    / `ValidatedPath`) run at the handler boundary in normal Axum parameter order.
 ///
-/// **Pipes** (`#[use_pipes(...)]`) are compile-time wiring on parameters (not extra Tower layers). See the
-/// mdBook page `http-pipeline-order.md` for the global `NestApplication::build_router` middleware sequence.
+/// **Pipes** (`#[use_pipes(...)]`) run at request time as part of the extractor chain. The
+/// `ValidationPipe`-only fast path emits `ValidatedBody<T>` / `ValidatedQuery<T>` / `ValidatedPath<T>`
+/// (preserved bit-for-bit from the original release). Any other pipe chain — `TrimPipe`,
+/// `ParseIntPipe`, or a custom `HttpPipeTransform` — runs through the per-arity
+/// `PipedBody<T, P1, ..., Pk>` / `PipedQuery<T, ...>` / `PipedPath<T, ...>` extractors, each of
+/// which calls `<P as Default>::default().transform(value).await?` in declaration order and
+/// surfaces pipe errors as `HttpException` (preserving the per-pipe status code — `400` from
+/// `ParseIntPipe`, `422` from `ValidationPipe`, etc.). See the mdBook page
+/// `http-pipeline-order.md` for the global `NestApplication::build_router` middleware sequence.
 ///
 /// Optional OpenAPI metadata (for `nestrs-openapi`): between the path and `with`, add
 /// `openapi ( nestrs::__nestrs_openapi_spec_leaked(...) )` — `#[routes]` emits this from `#[openapi(...)]`.

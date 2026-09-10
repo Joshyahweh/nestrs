@@ -29,7 +29,7 @@ pub use execution_context::{ExecutionContext, HostType, HttpExecutionArguments};
 pub use guard::{CanActivate, GuardError};
 pub use metadata::MetadataRegistry;
 pub use module_ref::ModuleRef;
-pub use pipe::PipeTransform;
+pub use pipe::{HttpPipeTransform, PipeTransform};
 pub use platform::{AxumHttpEngine, HttpServerEngine};
 pub use route_registry::{OpenApiResponseDesc, OpenApiRouteSpec, RouteInfo, RouteRegistry};
 pub use strategy::{AuthError, AuthStrategy};

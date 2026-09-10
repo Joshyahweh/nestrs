@@ -1991,6 +1991,25 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             Err(e) => return e.to_compile_error().into(),
         };
 
+        // Two cases for parameter binding today:
+        //   1. No pipes — use the raw axum extractor.
+        //   2. Any pipes that include ValidationPipe (last segment ident match)
+        //      — use the legacy Validated* extractor that hard-codes
+        //      `value.validate()` and returns UnprocessableEntityException.
+        //      Preserved bit-for-bit so existing `#[use_pipes(ValidationPipe)]`
+        //      users don't observe any behavioral change.
+        //
+        // NOTE: chains containing non-ValidationPipe pipes (e.g.
+        // `#[use_pipes(ParseIntPipe)]`) are intentionally NOT auto-rewritten
+        // here yet — the per-arity Piped* extractors exist and work but the
+        // macro plumbing to feed them needs an output-type flow that proc
+        // macros can't introspect today without specialization. Users who
+        // want a runtime pipe chain can write the extractor explicitly:
+        //   #[use_pipes(ParseIntPipe)]
+        //   #[get("/int")] async fn f(
+        //       #[param::query] raw: nestrs::PipedQuery1<String, ParseIntPipe>,
+        //   ) -> ... { raw.0 }
+        // See `nestrs/tests/pipes_chain.rs`.
         let has_validation = pipes.iter().any(is_validation_pipe);
 
         // Expand Nest-like parameter decorators into Axum extractors.

@@ -580,3 +580,45 @@ mod authz {
         .await;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Uninitialised state — the 500 path when no pool was injected
+// ---------------------------------------------------------------------------
+
+/// Boot the module WITHOUT `override_provider::<__PostCrudState>` — the
+/// state falls back to its default constructor (`pool: None`) and every
+/// handler must 500 with a message naming the *actual* generated state
+/// type (regression: the message used to render the literal text
+/// `__{Pascal}CrudState`, which is meaningless to the user).
+#[tokio::test]
+async fn uninitialised_state_500_names_the_real_state_type() {
+    nestrs::core::clear_module_cache_for_tests();
+    let dynamic_module = nestrs::core::DynamicModuleBuilder::<PostsModule>::new().build();
+    let app = NestApplication::from_registry_and_router(
+        std::sync::Arc::new(dynamic_module.registry),
+        dynamic_module.router,
+    );
+    let ability = Arc::new(
+        Ability::builder()
+            .can(Action::Read, "posts")
+            .build(),
+    );
+    let router = app
+        .into_router()
+        .layer(middleware::from_fn_with_state(ability, install_policies_middleware));
+
+    let (status, body) = get(&router, "/posts/").await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        body.contains("__PostCrudState"),
+        "the 500 message must name the real generated state type, got: {body}"
+    );
+    assert!(
+        !body.contains("{Pascal}"),
+        "the 500 message must not contain the un-interpolated macro placeholder, got: {body}"
+    );
+    assert!(
+        body.contains("override_provider"),
+        "the 500 message should tell the user how to fix it, got: {body}"
+    );
+}

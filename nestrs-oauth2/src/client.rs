@@ -34,7 +34,7 @@ use crate::error::{GrantError, OAuth2Error};
 /// `Instant` doesn't implement them. For wire serialisation use
 /// `TokenSetDto` (see the bottom of this file) which uses
 /// `SystemTime` + a `u64` second offset.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TokenSet {
     pub access_token: String,
     pub refresh_token: Option<String>,
@@ -44,10 +44,29 @@ pub struct TokenSet {
     pub raw: serde_json::Value,
 }
 
+impl std::fmt::Debug for TokenSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Tokens are bearer credentials — never render them. Debug output
+        // flows into logs, panic messages, and error reports. Presence
+        // (`Some("<redacted>")`) stays visible for operators.
+        f.debug_struct("TokenSet")
+            .field("access_token", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("id_token", &self.id_token.as_ref().map(|_| "<redacted>"))
+            .field("expires_at", &self.expires_at)
+            .field("scope", &self.scope)
+            .field("raw", &self.raw)
+            .finish()
+    }
+}
+
 /// OAuth2 client configuration. The `client_secret` is `Option`-shaped
 /// so a PKCE public client (RFC 8252 §7.2) can construct a client
 /// without one.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct OAuth2Options {
     pub client_id: String,
     pub client_secret: Option<String>,
@@ -63,6 +82,27 @@ pub struct OAuth2Options {
     /// you have multiple `OAuth2Client` instances for the same IdP and
     /// want them to coalesce refreshes.
     pub cache: Option<Arc<TokenCache>>,
+}
+
+impl std::fmt::Debug for OAuth2Options {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The client secret is never rendered — Debug output flows into
+        // logs and error reports. Presence stays visible for operators.
+        f.debug_struct("OAuth2Options")
+            .field("client_id", &self.client_id)
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field("authz_url", &self.authz_url)
+            .field("token_url", &self.token_url)
+            .field("redirect_uri", &self.redirect_uri)
+            .field("revoke_url", &self.revoke_url)
+            .field("userinfo_url", &self.userinfo_url)
+            .field("timeout", &self.timeout)
+            .field("cache", &self.cache)
+            .finish()
+    }
 }
 
 impl OAuth2Options {
@@ -698,7 +738,7 @@ pub fn base64_url_encode(bytes: &[u8]) -> String {
 /// `SystemTime` + a `u64` second offset, both of which implement
 /// `Serialize`/`Deserialize`. Useful for users who want to persist
 /// the token set (e.g. in a database) and reload it on a later run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TokenSetDto {
     pub access_token: String,
     pub refresh_token: Option<String>,
@@ -708,6 +748,25 @@ pub struct TokenSetDto {
     pub expires_at_unix: Option<u64>,
     pub scope: Option<String>,
     pub raw: serde_json::Value,
+}
+
+impl std::fmt::Debug for TokenSetDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Same redaction as TokenSet: tokens are bearer credentials and
+        // never reach logs via Debug. (Serialize is intentionally left
+        // untouched — it is the persistence path, not a logging path.)
+        f.debug_struct("TokenSetDto")
+            .field("access_token", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("id_token", &self.id_token.as_ref().map(|_| "<redacted>"))
+            .field("expires_at_unix", &self.expires_at_unix)
+            .field("scope", &self.scope)
+            .field("raw", &self.raw)
+            .finish()
+    }
 }
 
 impl From<&TokenSet> for TokenSetDto {
@@ -732,5 +791,63 @@ impl From<&TokenSet> for TokenSetDto {
             scope: t.scope.clone(),
             raw: t.raw.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod debug_redaction_tests {
+    use super::*;
+
+    fn sample_url(s: &str) -> Url {
+        Url::parse(s).expect("valid url")
+    }
+
+    #[test]
+    fn token_set_debug_never_shows_tokens() {
+        let set = TokenSet {
+            access_token: "at-DO-NOT-LOG-abc123".to_string(),
+            refresh_token: Some("rt-DO-NOT-LOG-def456".to_string()),
+            id_token: Some("it-DO-NOT-LOG-ghi789".to_string()),
+            expires_at: None,
+            scope: Some("openid email".to_string()),
+            raw: serde_json::json!({"token_type": "Bearer"}),
+        };
+        let rendered = format!("{set:?}");
+        assert!(!rendered.contains("DO-NOT-LOG"), "token leaked: {rendered}");
+        assert!(rendered.matches("<redacted>").count() >= 3, "expected redaction markers: {rendered}");
+        assert!(rendered.contains("openid email"), "scope should stay visible: {rendered}");
+    }
+
+    #[test]
+    fn options_debug_never_shows_client_secret() {
+        let options = OAuth2Options {
+            client_id: "web-app".to_string(),
+            client_secret: Some("s3cr3t-DO-NOT-LOG".to_string()),
+            authz_url: sample_url("https://idp.example.com/authz"),
+            token_url: sample_url("https://idp.example.com/token"),
+            redirect_uri: None,
+            revoke_url: None,
+            userinfo_url: None,
+            timeout: Duration::from_secs(30),
+            cache: None,
+        };
+        let rendered = format!("{options:?}");
+        assert!(!rendered.contains("s3cr3t"), "client secret leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
+        assert!(rendered.contains("web-app"), "client id should stay visible: {rendered}");
+    }
+
+    #[test]
+    fn token_set_dto_debug_never_shows_tokens() {
+        let dto = TokenSetDto {
+            access_token: "at-DO-NOT-LOG".to_string(),
+            refresh_token: Some("rt-DO-NOT-LOG".to_string()),
+            id_token: None,
+            expires_at_unix: Some(1_700_000_000),
+            scope: None,
+            raw: serde_json::Value::Null,
+        };
+        let rendered = format!("{dto:?}");
+        assert!(!rendered.contains("DO-NOT-LOG"), "token leaked: {rendered}");
     }
 }

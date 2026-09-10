@@ -4,11 +4,22 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct NatsTransportOptions {
     pub url: String,
     pub prefix: Option<String>,
     pub request_timeout: std::time::Duration,
+}
+
+impl std::fmt::Debug for NatsTransportOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // NATS URLs can embed `user:pass@` — redact the userinfo.
+        f.debug_struct("NatsTransportOptions")
+            .field("url", &crate::redact_url(&self.url))
+            .field("prefix", &self.prefix)
+            .field("request_timeout", &self.request_timeout)
+            .finish()
+    }
 }
 
 impl NatsTransportOptions {
@@ -147,10 +158,19 @@ impl Transport for NatsTransport {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct NatsMicroserviceOptions {
     pub url: String,
     pub prefix: Option<String>,
+}
+
+impl std::fmt::Debug for NatsMicroserviceOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NatsMicroserviceOptions")
+            .field("url", &crate::redact_url(&self.url))
+            .field("prefix", &self.prefix)
+            .finish()
+    }
 }
 
 impl NatsMicroserviceOptions {
@@ -279,5 +299,22 @@ impl crate::MicroserviceServer for NatsMicroserviceServer {
         shutdown: crate::ShutdownFuture,
     ) -> Result<(), TransportError> {
         (*self).listen_with_shutdown(shutdown).await
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn nats_url_credentials_never_reach_debug() {
+        let opts = NatsTransportOptions::new("nats://daniel:hunter2-DO-NOT-LOG@nats.local:4222");
+        let rendered = format!("{opts:?}");
+        assert!(!rendered.contains("hunter2"), "password leaked: {rendered}");
+        assert!(rendered.contains("nats://***@nats.local:4222"));
+
+        let opts = NatsMicroserviceOptions::new("nats://user:pass@nats.local");
+        let rendered = format!("{opts:?}");
+        assert!(!rendered.contains("pass@"), "password leaked: {rendered}");
     }
 }

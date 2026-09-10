@@ -8,11 +8,23 @@ use std::sync::Arc;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RabbitMqTransportOptions {
     pub url: String,
     pub work_queue: String,
     pub request_timeout: std::time::Duration,
+}
+
+impl std::fmt::Debug for RabbitMqTransportOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // AMQP URLs embed `user:pass@` — redact the userinfo; the host/vhost
+        // stay visible for operators.
+        f.debug_struct("RabbitMqTransportOptions")
+            .field("url", &crate::redact_url(&self.url))
+            .field("work_queue", &self.work_queue)
+            .field("request_timeout", &self.request_timeout)
+            .finish()
+    }
 }
 
 impl RabbitMqTransportOptions {
@@ -193,12 +205,23 @@ impl Transport for RabbitMqTransport {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RabbitMqMicroserviceOptions {
     pub url: String,
     pub work_queue: String,
     pub prefetch: u16,
     pub durable_queue: bool,
+}
+
+impl std::fmt::Debug for RabbitMqMicroserviceOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RabbitMqMicroserviceOptions")
+            .field("url", &crate::redact_url(&self.url))
+            .field("work_queue", &self.work_queue)
+            .field("prefetch", &self.prefetch)
+            .field("durable_queue", &self.durable_queue)
+            .finish()
+    }
 }
 
 impl RabbitMqMicroserviceOptions {
@@ -384,5 +407,23 @@ impl MicroserviceServer for RabbitMqMicroserviceServer {
         shutdown: crate::ShutdownFuture,
     ) -> Result<(), TransportError> {
         (*self).listen_with_shutdown(shutdown).await
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn rabbitmq_url_credentials_never_reach_debug() {
+        let opts = RabbitMqTransportOptions::new("amqp://guest:hunter2-DO-NOT-LOG@rabbit.local/vhost");
+        let rendered = format!("{opts:?}");
+        assert!(!rendered.contains("hunter2"), "password leaked: {rendered}");
+        assert!(rendered.contains("amqp://***@rabbit.local/vhost"), "host/vhost should stay visible: {rendered}");
+
+        let opts = RabbitMqMicroserviceOptions::new("amqp://user:pass@rabbit.local");
+        let rendered = format!("{opts:?}");
+        assert!(!rendered.contains("pass@"), "password leaked: {rendered}");
+        assert!(rendered.contains("***@rabbit.local"));
     }
 }

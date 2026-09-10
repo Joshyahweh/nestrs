@@ -17,6 +17,31 @@ pub mod wire;
 
 pub use wire::WIRE_FORMAT_DOC_REVISION;
 
+/// Render a connection URL with any embedded `user:pass@` userinfo removed.
+///
+/// AMQP, Redis, and NATS URLs commonly carry credentials in the authority
+/// (`amqp://user:pass@host/vhost`, `redis://:password@host`). A derived
+/// `Debug` prints the raw string into logs, panic messages, and error
+/// reports — this helper keeps the scheme/host visible for operators while
+/// never rendering the credential bytes.
+pub(crate) fn redact_url(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let auth_start = scheme_end + 3;
+    let Some(at) = url[auth_start..].find('@') else {
+        return url.to_string();
+    };
+    let at = auth_start + at;
+    // Only redact userinfo: an '@' after the first '/', '?' or '#' is part
+    // of a path/query (e.g. `amqp://host/vhost@odd`), not a credential.
+    let auth = &url[auth_start..at];
+    if auth.contains('/') || auth.contains('?') || auth.contains('#') {
+        return url.to_string();
+    }
+    format!("{}***@{}", &url[..auth_start], &url[at + 1..])
+}
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::any::TypeId;
@@ -373,5 +398,44 @@ impl ClientsModule {
         }
 
         nestrs_core::DynamicModule::from_parts(registry, axum::Router::new(), exports)
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn redact_url_strips_userinfo_credentials() {
+        // user:pass
+        assert_eq!(
+            redact_url("amqp://guest:hunter2@rabbit.local:5672/vhost"),
+            "amqp://***@rabbit.local:5672/vhost"
+        );
+        // password-only (Redis convention: empty username)
+        assert_eq!(
+            redact_url("redis://:s3cr3t@cache.local:6379/0"),
+            "redis://***@cache.local:6379/0"
+        );
+        // username only — the userinfo is still redacted whole
+        assert_eq!(redact_url("nats://daniel@nats.local"), "nats://***@nats.local");
+        // percent-encoded '@' inside the password is left intact in the
+        // authority (it is not a raw '@'), so the first '@' is the separator.
+        assert_eq!(
+            redact_url("amqp://u:p%40ss@host"),
+            "amqp://***@host"
+        );
+    }
+
+    #[test]
+    fn redact_url_leaves_credential_free_urls_alone() {
+        assert_eq!(redact_url("amqp://rabbit.local/vhost"), "amqp://rabbit.local/vhost");
+        assert_eq!(redact_url("redis://cache.local:6379"), "redis://cache.local:6379");
+        // An '@' after a path separator is not userinfo.
+        assert_eq!(
+            redact_url("amqp://host/vhost@example"),
+            "amqp://host/vhost@example"
+        );
+        assert_eq!(redact_url("not a url"), "not a url");
     }
 }

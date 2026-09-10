@@ -109,10 +109,32 @@ impl MqttTransport {
         apply_mqtt_socket(&mut mqtt_opts, &options.socket);
 
         let (client, mut eventloop) = AsyncClient::new(mqtt_opts, 64);
+        let resub_client = client.clone();
         let pend = pending.clone();
         tokio::spawn(async move {
             loop {
                 match eventloop.poll().await {
+                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                        // Restore reply-topic subscriptions of RPCs still in flight:
+                        // clean_session=true (rumqttc default) drops them at the
+                        // broker on every disconnect and rumqttc never re-issues
+                        // SUBSCRIBE on its own — without this, every pending RPC
+                        // would hang until its timeout after a reconnect.
+                        let client = resub_client.clone();
+                        let pending = pend.clone();
+                        tokio::spawn(async move {
+                            let topics: Vec<String> =
+                                pending.lock().await.keys().cloned().collect();
+                            for topic in topics {
+                                if let Err(e) = client.subscribe(&topic, QoS::AtLeastOnce).await {
+                                    tracing::warn!(
+                                        target: "nestrs_microservices",
+                                        "mqtt re-subscribe reply topic `{topic}` failed: {e}"
+                                    );
+                                }
+                            }
+                        });
+                    }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
                         let t = p.topic.clone();
                         let mut map = pend.lock().await;
@@ -316,6 +338,29 @@ impl MqttMicroserviceServer {
                 _ = &mut shutdown => break,
                 ev = eventloop.poll() => {
                     match ev {
+                        Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                            // rumqttc reconnects the socket on poll errors but never
+                            // re-issues SUBSCRIBE, and clean_session=true (rumqttc
+                            // default) makes the broker drop the subscription on
+                            // every disconnect — without this, the listener stays
+                            // connected but silently deaf after any broker restart
+                            // or network blip. Re-subscribe on every ConnAck
+                            // (initial + reconnects); brokers dedup the filter.
+                            // Spawned so a full request channel can't deadlock
+                            // the poll loop while awaiting.
+                            let client = client.clone();
+                            let topic = topic.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    client.subscribe(&topic, QoS::AtLeastOnce).await
+                                {
+                                    tracing::warn!(
+                                        target: "nestrs_microservices",
+                                        "mqtt re-subscribe after ConnAck failed: {e}"
+                                    );
+                                }
+                            });
+                        }
                         Ok(Event::Incoming(Incoming::Publish(p))) => {
                             let payload_bytes = p.payload.as_ref();
                             let req: WireRequest = match serde_json::from_slice(payload_bytes) {

@@ -39,7 +39,8 @@ For a single HTTP route, nestrs composes Axum middleware roughly as:
    - **First** interceptor is the **outermost** Tower layer (sees the request first, wraps `next`).
 
 5. **Handler + extractors** — Axum runs extractors in function-parameter order.  
-   **`#[use_pipes(ValidationPipe)]`** switches `#[param::body]` / `query` / `param` wiring to `ValidatedBody` / `ValidatedQuery` / `ValidatedPath` (validation at extraction time).
+   **`#[use_pipes(ValidationPipe)]`** is the fast path: `#[param::body]` / `query` / `param` rewrites to `ValidatedBody<T>` / `ValidatedQuery<T>` / `ValidatedPath<T>` (validation at extraction time).  
+   Other pipes (`TrimPipe`, `ParseIntPipe`, custom `HttpPipeTransform`s) run through the per-arity `PipedBody<T, P1, …, Pk>` / `PipedQuery<T, …>` / `PipedPath<T, …>` extractors — write the extractor explicitly, since the macro today only auto-rewrites the `ValidationPipe` fast path. Pipe errors surface as `HttpException` (preserving the per-pipe status code: `400` from `ParseIntPipe`, `422` from `ValidationPipe`).
 
 > **Note:** NestJS ordering differs in details; treat this page as the **nestrs contract**, not a line-for-line Nest clone.
 

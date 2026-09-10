@@ -24,10 +24,10 @@ This guide maps NestJS concepts to **nestrs** (Rust + Axum + Tower). It is aimed
 | NestJS | nestrs | Notes |
 |--------|--------|-------|
 | `@Get()`, `@Post()`, … | `#[get("path")]`, `#[post("path")]`, … | Paths are literal segments; prefix/version come from `#[controller]` |
-| `@Body()`, `@Query()`, `@Param()` | `#[param::body]`, `#[param::query]`, `#[param::param]` | With `#[use_pipes(ValidationPipe)]`, body/query/path become `ValidatedBody` / `ValidatedQuery` / `ValidatedPath` |
+| `@Body()`, `@Query()`, `@Param()` | `#[param::body]`, `#[param::query]`, `#[param::param]` | With `#[use_pipes(ValidationPipe)]`, body/query/path become `ValidatedBody` / `ValidatedQuery` / `ValidatedPath`. For other pipes (`TrimPipe`, `ParseIntPipe`, custom), use the explicit per-arity extractors: `PipedBody1<T, P>`, `PipedQuery1<T, P>`, `PipedPath1<T, P>`, … |
 | `@UseGuards()` | `#[use_guards(GuardTy)]` | Implements `CanActivate` |
 | `@UseInterceptors()` | `#[use_interceptors(InterceptorTy)]` | Implements `Interceptor` |
-| `@UsePipes()` | `#[use_pipes(ValidationPipe)]` | Validation is opt-in per route or parameter wiring |
+| `@UsePipes()` | `#[use_pipes(PipeTy)]` | `ValidationPipe` is the fast path; other pipes run via `Piped*` extractors (see [Custom decorators](custom-decorators.md)) |
 | `@UseFilters()` | `#[use_filters(FilterTy)]` | Implements `ExceptionFilter` for `HttpException` responses |
 | `@SetMetadata` / custom decorators | `#[set_metadata("k","v")]`, `#[roles("admin")]` | Stored in `MetadataRegistry`; see [Custom decorators](custom-decorators.md) |
 

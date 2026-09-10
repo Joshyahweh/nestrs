@@ -521,7 +521,10 @@ pub(super) fn parse_route_method(
         for arg in &method.sig.inputs {
             if let syn::FnArg::Typed(ty) = arg {
                 let type_str = type_to_string(&ty.ty);
-                if type_str.contains("ValidatedBody") || type_str.contains("Json<") {
+                if type_str.contains("ValidatedBody")
+                    || type_str.contains("PipedBody")
+                    || type_str.contains("Json<")
+                {
                     body_type = Some(type_str);
                     break;
                 }

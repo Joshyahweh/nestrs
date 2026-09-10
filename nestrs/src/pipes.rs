@@ -1,7 +1,7 @@
 //! Built-in [`PipeTransform`](crate::core::PipeTransform) implementations.
 
 use crate::async_trait;
-use crate::core::PipeTransform;
+use crate::core::{HttpPipeTransform, PipeTransform};
 use crate::{BadRequestException, HttpException};
 use validator::Validate;
 
@@ -20,6 +20,36 @@ impl PipeTransform<String> for ParseIntPipe {
             .map_err(|_| BadRequestException::new("Validation failed (integer expected)"))
     }
 }
+
+impl HttpPipeTransform<String> for ParseIntPipe {}
+
+/// Trims whitespace from a string (NestJS `TrimPipe` analogue).
+///
+/// Use on body DTO fields where whitespace is unsafe — common for `name`,
+/// `slug`, or other user-provided strings that downstream code might
+/// canonicalise:
+/// ```ignore
+/// #[derive(Deserialize, Validate)]
+/// struct CreateUserDto { name: String }
+///
+/// #[post("/users")]
+/// #[use_pipes(TrimPipe)]
+/// async fn create(#[param::body] PipedBody1<CreateUserDto, TrimPipe>(dto): PipedBody1<_, _>) { ... }
+/// ```
+#[derive(Default)]
+pub struct TrimPipe;
+
+#[async_trait]
+impl PipeTransform<String> for TrimPipe {
+    type Output = String;
+    type Error = HttpException;
+
+    async fn transform(&self, value: String) -> Result<Self::Output, Self::Error> {
+        Ok(value.trim().to_string())
+    }
+}
+
+impl HttpPipeTransform<String> for TrimPipe {}
 
 /// Validates a value using [`validator::Validate`] (NestJS `ValidationPipe` analogue).
 ///
@@ -87,6 +117,24 @@ mod tests {
             .await
             .expect_err("bad request");
         assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn trim_pipe_strips_whitespace() {
+        let out = TrimPipe
+            .transform("  hello world  ".to_string())
+            .await
+            .expect("trim");
+        assert_eq!(out, "hello world");
+    }
+
+    #[tokio::test]
+    async fn trim_pipe_preserves_internal_whitespace() {
+        let out = TrimPipe
+            .transform("  hello\nworld\t  ".to_string())
+            .await
+            .expect("trim");
+        assert_eq!(out, "hello\nworld");
     }
 
     #[tokio::test]

@@ -9,6 +9,14 @@ static MVC_ENV: OnceLock<Arc<Environment<'static>>> = OnceLock::new();
 
 fn load_templates_from_dir(dir: &Path) -> Result<Environment<'static>, std::io::Error> {
     let mut env = Environment::new();
+    // nestrs MVC renders HTML responses (`render_html` wraps the output in
+    // `axum::response::Html`). minijinja's default auto-escape only kicks in
+    // for `.html`/`.htm`/`.xml` template names, so `.j2`/`.jinja`/`.mjinja`
+    // (the most common Jinja naming conventions, all accepted below) would
+    // render user-supplied HTML unescaped — a stored-XSS footgun. Everything
+    // this module serves is HTML, so escape every template unconditionally;
+    // apps that need raw output can use `|safe` on the specific expression.
+    env.set_auto_escape_callback(|_| minijinja::AutoEscape::Html);
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();

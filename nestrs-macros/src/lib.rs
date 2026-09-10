@@ -4084,6 +4084,13 @@ pub fn crud(attr: TokenStream, item: TokenStream) -> TokenStream {
     let service_ident = format_ident!("{}Service", pascal);
     let list_query_ident = format_ident!("{}ListQuery", pascal);
     let state_ident = format_ident!("__{}CrudState", pascal);
+    // The 500 message shown when the state was built via the default
+    // constructor (no pool injected). Built here — at macro time — with the
+    // *real* generated ident: inside `quote!` a `{Pascal}` inside a string
+    // literal is NOT interpolated, so the message must be pre-rendered.
+    let state_uninitialised_msg = format!(
+        "CRUD state not initialised — call registry.override_provider::<{state_ident}>(Arc::new({state_ident}::from_pool(pool)))"
+    );
     let filter_ident = format_ident!("{}Filter", pascal);
     let check_policies_subject = pascal.clone();
     let sdl_const_ident = format_ident!("{}_CONTROLLER_SDL", pascal.to_uppercase());
@@ -4431,9 +4438,7 @@ pub fn crud(attr: TokenStream, item: TokenStream) -> TokenStream {
             /// built via the default constructor (no pool injected).
             fn pool(&self) -> ::std::result::Result<::std::sync::Arc<::sqlx::AnyPool>, ::nestrs::HttpException> {
                 self.pool.clone().ok_or_else(|| {
-                    ::nestrs::InternalServerErrorException::new(
-                        "CRUD state not initialised — call registry.override_provider::<__{Pascal}CrudState>(...)".to_string(),
-                    )
+                    ::nestrs::InternalServerErrorException::new(#state_uninitialised_msg)
                 })
             }
         }
@@ -4681,8 +4686,6 @@ pub fn crud(attr: TokenStream, item: TokenStream) -> TokenStream {
         #graphql_block
     };
 
-    let s = expanded.to_string();
-    eprintln!("=== EXPANDED CRUD ===\n{}\n=== END ===", s);
     expanded.into()
 }
 

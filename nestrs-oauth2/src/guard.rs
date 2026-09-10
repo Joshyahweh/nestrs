@@ -9,11 +9,14 @@
 use axum::http::request::Parts;
 use nestrs_core::{CanActivate, GuardError, ProviderRegistry};
 
+use crate::middleware::OAuth2Identity;
+
 /// `OAuth2Guard` enforces "request has a verified OAuth2 principal".
 /// The actual JWT verification runs in `install_oauth2_middleware`
-/// *before* the guard; the guard just checks the principal extension
-/// is present and, if route metadata requires, that the principal
-/// has the right role.
+/// *before* the guard; the guard is the load-bearing gate — it rejects
+/// any request whose extensions lack an `OAuth2Identity` with
+/// `GuardError::Unauthorized("OAuth2 identity required")`, which the
+/// framework maps to **HTTP 401**.
 ///
 /// Derives `Default` because `CanActivate` requires it. The
 /// `resolve(registry)` hook lets a future version pull the verifier
@@ -32,22 +35,68 @@ impl CanActivate for OAuth2Guard {
         Self
     }
 
-    async fn can_activate(&self, _parts: &Parts) -> Result<(), GuardError> {
-        // The actual enforcement happens in three places:
-        //   1. Middleware: verifies the bearer token, populates
-        //      `OAuth2Identity` into `parts.extensions`.
-        //   2. The route metadata layer (`#[roles("admin")]` etc.):
-        //      this would normally be checked here. We don't read
-        //      it because `nestrs::security::route_roles_csv` lives
-        //      in the main crate (cycle prevention).
-        //   3. The principal extractor: downstream handlers can
-        //      call `nestrs::Principal` / `OptionalPrincipal` (when
-        //      wired through `authn-bridge`) to require the identity.
-        //
-        // For this wave the guard is a no-op on `can_activate` —
-        // the middleware + principal-extractor pair is the load-
-        // bearing piece. Future waves (or a `nestrs::security::OAuth2Identity`
-        // extension type) can layer role-based checks on top.
-        Ok(())
+    async fn can_activate(&self, parts: &Parts) -> Result<(), GuardError> {
+        match parts.extensions.get::<OAuth2Identity>() {
+            Some(_) => Ok(()),
+            None => Err(GuardError::unauthorized("OAuth2 identity required")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middleware::OAuth2Identity;
+    use axum::http::{Request, Version};
+
+    fn parts_without_identity() -> Parts {
+        let req = Request::builder()
+            .method("GET")
+            .uri("/")
+            .version(Version::HTTP_11)
+            .body(())
+            .expect("static request");
+        req.into_parts().0
+    }
+
+    fn parts_with_identity() -> Parts {
+        let mut req = Request::builder()
+            .method("GET")
+            .uri("/")
+            .version(Version::HTTP_11)
+            .body(())
+            .expect("static request");
+        req.extensions_mut().insert(OAuth2Identity {
+            subject: "u-1".into(),
+            claims: serde_json::json!({ "sub": "u-1" }),
+        });
+        req.into_parts().0
+    }
+
+    #[tokio::test]
+    async fn oauth2_guard_rejects_missing_identity() {
+        let guard = OAuth2Guard;
+        let parts = parts_without_identity();
+        let err = guard.can_activate(&parts).await.expect_err("must reject");
+        match err {
+            GuardError::Unauthorized(m) => assert_eq!(m, "OAuth2 identity required"),
+            other => panic!("expected Unauthorized, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn oauth2_guard_accepts_present_identity() {
+        let guard = OAuth2Guard;
+        let parts = parts_with_identity();
+        assert!(guard.can_activate(&parts).await.is_ok());
+    }
+
+    #[test]
+    fn guard_error_unauthorized_maps_to_401() {
+        // `IntoResponse` for `GuardError` is implemented in `nestrs-core`;
+        // we need the axum trait in scope to call `.into_response()`.
+        use axum::response::IntoResponse;
+        let resp = GuardError::unauthorized("OAuth2 identity required").into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
     }
 }

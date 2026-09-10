@@ -246,6 +246,37 @@ impl Transport for KafkaTransport {
     }
 }
 
+/// Where the request-topic consumer starts on boot.
+///
+/// rskafka 0.6 has **no consumer-group / offset-commit API**, so the listener
+/// keeps its position **in memory only**: every restart starts fresh at the
+/// offset chosen here (and per-connection liveness is `at-most-once`).
+///
+/// - [`Latest`](Self::Latest) (default): skip everything already on the topic
+///   and process only requests produced after boot. Restarts do **not**
+///   re-execute old RPCs/events — the safe default: replaying a retained
+///   backlog (broker default retention can be days) re-runs every handler,
+///   including `Send` RPCs whose callers have long timed out.
+/// - [`Earliest`](Self::Earliest): drain the full retained backlog on boot.
+///   Intentional replay — every retained request is re-dispatched.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KafkaConsumerStart {
+    /// Start at the retained beginning — replay the whole backlog.
+    Earliest,
+    /// Start at the live tail — skip retained history (default).
+    #[default]
+    Latest,
+}
+
+impl From<KafkaConsumerStart> for OffsetAt {
+    fn from(start: KafkaConsumerStart) -> Self {
+        match start {
+            KafkaConsumerStart::Earliest => OffsetAt::Earliest,
+            KafkaConsumerStart::Latest => OffsetAt::Latest,
+        }
+    }
+}
+
 /// Server bootstrap options (topic layout matches [`KafkaTransportOptions`]).
 #[derive(Clone, Debug)]
 pub struct KafkaMicroserviceOptions {
@@ -254,6 +285,9 @@ pub struct KafkaMicroserviceOptions {
     pub replication_factor: i16,
     pub create_topics: bool,
     pub connection: KafkaConnectionOptions,
+    /// Consumer start on the requests topic (default [`KafkaConsumerStart::Latest`]).
+    /// See [`KafkaConsumerStart`] for the replay trade-off.
+    pub consumer_start: KafkaConsumerStart,
 }
 
 impl Default for KafkaMicroserviceOptions {
@@ -264,6 +298,7 @@ impl Default for KafkaMicroserviceOptions {
             replication_factor: 1i16,
             create_topics: true,
             connection: KafkaConnectionOptions::default(),
+            consumer_start: KafkaConsumerStart::default(),
         }
     }
 }
@@ -338,8 +373,17 @@ impl KafkaMicroserviceServer {
             )
             .await
             .map_err(|e| TransportError::new(format!("kafka partition client failed: {e}")))?;
-        let earliest = req_pc.get_offset(OffsetAt::Earliest).await.unwrap_or(0);
-        *self.next_offset.lock().await = earliest;
+        // Boot position per `consumer_start` (Latest by default — no backlog
+        // replay across restarts; see KafkaConsumerStart). A failed offset
+        // fetch is surfaced instead of silently rewinding to 0 (which would
+        // replay the whole topic).
+        let start = req_pc
+            .get_offset(self.options.consumer_start.into())
+            .await
+            .map_err(|e| {
+                TransportError::new(format!("kafka get_offset (requests) failed: {e}"))
+            })?;
+        *self.next_offset.lock().await = start;
         *g = Some(c.clone());
         Ok(c)
     }
@@ -483,4 +527,29 @@ pub async fn kafka_cluster_reachable_with(
         .await
         .map(|_| ())
         .map_err(|e| TransportError::new(format!("kafka broker unreachable: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consumer_start_defaults_to_latest_no_replay() {
+        // The audit-critical invariant: a fresh boot (and therefore every
+        // restart — rskafka 0.6 has no offset-commit API, so position is
+        // in-memory only) must NOT rewind to the retained beginning and
+        // re-execute old RPCs/events.
+        assert_eq!(KafkaConsumerStart::default(), KafkaConsumerStart::Latest);
+        let options = KafkaMicroserviceOptions::default();
+        assert_eq!(options.consumer_start, KafkaConsumerStart::Latest);
+    }
+
+    #[test]
+    fn consumer_start_maps_to_rskafka_offset_at() {
+        assert_eq!(
+            OffsetAt::from(KafkaConsumerStart::Earliest),
+            OffsetAt::Earliest
+        );
+        assert_eq!(OffsetAt::from(KafkaConsumerStart::Latest), OffsetAt::Latest);
+    }
 }

@@ -301,8 +301,9 @@ pub mod prelude {
     pub use crate::microservices;
     #[cfg(all(feature = "microservices", feature = "microservices-kafka"))]
     pub use crate::microservices::{
-        kafka_cluster_reachable_with, KafkaConnectionOptions, KafkaMicroserviceOptions,
-        KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions, KafkaTransportOptions,
+        kafka_cluster_reachable_with, KafkaConnectionOptions, KafkaConsumerStart,
+        KafkaMicroserviceOptions, KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions,
+        KafkaTransportOptions,
     };
     #[cfg(feature = "microservices")]
     pub use crate::microservices::{

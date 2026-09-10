@@ -65,6 +65,8 @@ Per-handler cross-cutting (Nest-like, not identical): **`#[use_micro_interceptor
 
 **RabbitMQ:** one work queue (default `nestrs.micro`) carries [`wire::WireRequest`](https://docs.rs/nestrs-microservices/latest/nestrs_microservices/wire/struct.WireRequest.html) JSON; request/reply uses a private reply queue name in `reply`. Bootstrap with `NestFactory::create_microservice_rabbitmq` when using the umbrella crate feature **`microservices-rabbitmq`**.
 
+**Kafka:** rskafka 0.6 has **no consumer-group / offset-commit API** — the listener's position is in-memory only, so delivery across restarts is **at-most-once**. Boot position comes from `KafkaMicroserviceOptions::consumer_start`: `KafkaConsumerStart::Latest` (default — skip retained history, no replay of old RPCs/events) or `Earliest` (drain the retained backlog — intentional replay). Make handlers idempotent if this window matters.
+
 ## Features
 
 | Feature | Purpose |

@@ -106,6 +106,23 @@ struct AppModule;
 
 Some code paths also accept **`ValidatedBody<SignupDto>`** tuple extractors (see `nestrs/tests/bootstrap_composition.rs` **`POST /validate`**). Invalid payloads return **422** with a structured error body.
 
+### Worked example: `TrimPipe` on a body string (non-`ValidationPipe` chain)
+
+`TrimPipe` runs at extraction time via the per-arity `PipedBody*` extractors. Write the extractor explicitly — the macro today only auto-rewrites the `ValidationPipe` fast path.
+
+```rust
+use nestrs::prelude::*;
+
+#[post("/echo")]
+async fn echo(
+    #[param::body] raw: PipedBody1<String, TrimPipe>,
+) -> String {
+    raw.0  // leading + trailing whitespace stripped
+}
+```
+
+Invalid input (e.g. non-JSON body) returns **400** with the per-pipe status code preserved.
+
 ## 2) Parameter “decorators” (closest to `createParamDecorator`)
 
 Nest parameter decorators hide extraction from `ExecutionContext`. In nestrs, extraction is **type-driven**:
@@ -115,6 +132,7 @@ Nest parameter decorators hide extraction from `ExecutionContext`. In nestrs, ex
 | Body DTO | **`#[param::body]`** + **`#[dto]`** + **`#[use_pipes(ValidationPipe)]`**, or **`ValidatedBody<T>`** tuple style |
 | Query DTO | **`#[param::query]`** with **`#[dto]`** + **`ValidationPipe`**, or **`ValidatedQuery<T>`** |
 | Path params | **`#[param::param]`** with **`#[dto]`**, or **`ValidatedPath<T>`** |
+| Non-`ValidationPipe` chain | Write the extractor explicitly: `PipedBody1<String, TrimPipe>`, `PipedQuery1<Q, ParseIntPipe>`, `PipedPath1<String, ParseIntPipe>`, … |
 | Raw request | **`#[param::req]`** → `Request` |
 | Headers | **`#[param::headers]`** → `HeaderMap` |
 | Client IP | **`#[param::ip]`** or **`ClientIp`** extractor (see `param_decorators_and_pipes` tests) |

@@ -44,8 +44,8 @@ pub use kafka::KafkaTransport;
 #[cfg(feature = "kafka")]
 pub use kafka::{
     kafka_cluster_reachable, kafka_cluster_reachable_with, KafkaConnectionOptions,
-    KafkaMicroserviceOptions, KafkaMicroserviceServer, KafkaSaslOptions, KafkaTlsOptions,
-    KafkaTransportOptions,
+    KafkaConsumerStart, KafkaMicroserviceOptions, KafkaMicroserviceServer, KafkaSaslOptions,
+    KafkaTlsOptions, KafkaTransportOptions,
 };
 pub use mqtt::MqttTransport;
 #[cfg(feature = "mqtt")]

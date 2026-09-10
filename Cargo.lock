@@ -2231,7 +2231,7 @@ dependencies = [
  "serde",
  "sqlx",
  "tokio",
- "validator 0.21.0",
+ "validator 0.20.0",
 ]
 
 [[package]]

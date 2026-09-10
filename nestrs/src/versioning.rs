@@ -109,11 +109,23 @@ fn rewrite_request_path_for_version(
     };
 
     let candidate_app_path = insert_version_segment(app_path, normalized_version);
-    if !state.versioned_paths.contains(&candidate_app_path) {
-        return;
-    }
+    // `@join` keeps a trailing slash on list endpoints (`/items/` route
+    // registers as `/v1/items/`), but the candidate built from an
+    // unversioned request URI has no trailing slash. Match on both forms
+    // and rewrite to whichever is actually registered — that's the exact
+    // string axum matches.
+    let matched_app_path = if state.versioned_paths.contains(&candidate_app_path) {
+        candidate_app_path
+    } else {
+        let with_trailing_slash = format!("{}/", candidate_app_path);
+        if state.versioned_paths.contains(&with_trailing_slash) {
+            with_trailing_slash
+        } else {
+            return;
+        }
+    };
 
-    let full_path = apply_root_prefix(&state.route_root_prefix, &candidate_app_path);
+    let full_path = apply_root_prefix(&state.route_root_prefix, &matched_app_path);
     let path_and_query = if let Some(query) = req.uri().query() {
         format!("{full_path}?{query}")
     } else {

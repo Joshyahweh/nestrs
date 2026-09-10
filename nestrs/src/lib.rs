@@ -4423,6 +4423,28 @@ pub fn __nestrs_guard_error_response(e: crate::core::GuardError) -> axum::respon
     res
 }
 
+/// Register a route plus its slashless twin when the path is a list endpoint
+/// (`@join` keeps a trailing slash on `GET "/"` routes — `/items/`). Without
+/// this, requests to `/items` 404 while `/items/` succeeds, which is a
+/// footgun for API consumers (NestJS serves both forms from one decorator).
+///
+/// The twin is invisible to `RouteRegistry` / OpenAPI — the canonical
+/// (slashful) form is the only one advertised. Used by `impl_routes!`;
+/// not stable API.
+#[doc(hidden)]
+pub fn __nestrs_register_route(
+    mut router: axum::Router,
+    path: &str,
+    svc: axum::routing::MethodRouter,
+) -> axum::Router {
+    router = router.route(path, svc.clone());
+    let trimmed = path.trim_end_matches('/');
+    if !trimmed.is_empty() && trimmed != path {
+        router = router.route(trimmed, svc);
+    }
+    router
+}
+
 pub async fn __nestrs_run_guards<G: __NestrsGuardTuple>(
     guards: &G,
     parts: &::axum::http::request::Parts,
@@ -4542,88 +4564,89 @@ macro_rules! impl_routes {
                 let state = registry.get::<$state_ty>();
                 let prefix = <$controller>::__nestrs_prefix();
                 let version = <$controller>::__nestrs_version();
-                let __nestrs_router = router
-                    $(
-                        .route(
-                            {
-                                let __path = $crate::impl_routes!(
-                                    @join
-                                    $crate::impl_routes!(
-                                        @effective_version
-                                        version
-                                        $(, $route_version)?
-                                    ),
-                                    prefix,
-                                    $path
-                                );
-                                $crate::core::RouteRegistry::register_spec(
-                                    stringify!($method),
-                                    __path,
-                                    concat!(module_path!(), "::", stringify!($handler)),
-                                    $crate::impl_routes!(@maybe_openapi $($openapi)?),
-                                );
-                                __path
-                            },
-                            {
+                let mut __nestrs_router = router;
+                $(
+                    __nestrs_router = $crate::__nestrs_register_route(
+                        __nestrs_router,
+                        {
+                            let __path = $crate::impl_routes!(
+                                @join
+                                $crate::impl_routes!(
+                                    @effective_version
+                                    version
+                                    $(, $route_version)?
+                                ),
+                                prefix,
+                                $path
+                            );
+                            $crate::core::RouteRegistry::register_spec(
+                                stringify!($method),
+                                __path,
+                                concat!(module_path!(), "::", stringify!($handler)),
+                                $crate::impl_routes!(@maybe_openapi $($openapi)?),
+                            );
+                            __path
+                        },
+                        {
+                            $(
                                 $(
-                                    $(
-                                        $crate::core::MetadataRegistry::set(
+                                    $crate::core::MetadataRegistry::set(
+                                        concat!(module_path!(), "::", stringify!($handler)),
+                                        $meta_key,
+                                        $meta_value,
+                                    );
+                                )*
+                            )?
+                            let __route = $crate::impl_routes!(@method $method, $handler);
+                            let __route = $crate::impl_routes!(
+                                @apply_interceptors
+                                registry,
+                                __route
+                                $(, $($interceptor),* )?
+                            );
+                            // Guards are resolved ONCE at registration time (`CanActivate::resolve`)
+                            // so stateful/DI-backed guards hold their dependencies for all requests.
+                            // The `Arc` keeps the captured closure `Clone` regardless of the guard type.
+                            let __nestrs_route_guards = ::std::sync::Arc::new((
+                                $(<$guard as $crate::core::CanActivate>::resolve(
+                                    &$crate::core::ProviderRegistry::clone(registry),
+                                ),)*
+                            ));
+                            let __route = __route.layer(::axum::middleware::from_fn(
+                                move |req: ::axum::extract::Request,
+                                      next: ::axum::middleware::Next| {
+                                    // Clone before the `async move` block: moving the `Arc`
+                                    // itself out of the closure would make it `FnOnce`.
+                                    let __nestrs_route_guards =
+                                        ::std::sync::Arc::clone(&__nestrs_route_guards);
+                                    async move {
+                                        let (mut parts, body) = req.into_parts();
+                                        parts.extensions.insert($crate::core::HandlerKey(
                                             concat!(module_path!(), "::", stringify!($handler)),
-                                            $meta_key,
-                                            $meta_value,
-                                        );
-                                    )*
-                                )?
-                                let __route = $crate::impl_routes!(@method $method, $handler);
-                                let __route = $crate::impl_routes!(
-                                    @apply_interceptors
-                                    registry,
-                                    __route
-                                    $(, $($interceptor),* )?
-                                );
-                                // Guards are resolved ONCE at registration time (`CanActivate::resolve`)
-                                // so stateful/DI-backed guards hold their dependencies for all requests.
-                                // The `Arc` keeps the captured closure `Clone` regardless of the guard type.
-                                let __nestrs_route_guards = ::std::sync::Arc::new((
-                                    $(<$guard as $crate::core::CanActivate>::resolve(
-                                        &$crate::core::ProviderRegistry::clone(registry),
-                                    ),)*
-                                ));
-                                let __route = __route.layer(::axum::middleware::from_fn(
-                                    move |req: ::axum::extract::Request,
-                                          next: ::axum::middleware::Next| {
-                                        // Clone before the `async move` block: moving the `Arc`
-                                        // itself out of the closure would make it `FnOnce`.
-                                        let __nestrs_route_guards =
-                                            ::std::sync::Arc::clone(&__nestrs_route_guards);
-                                        async move {
-                                            let (mut parts, body) = req.into_parts();
-                                            parts.extensions.insert($crate::core::HandlerKey(
-                                                concat!(module_path!(), "::", stringify!($handler)),
-                                            ));
-                                            if let Err(e) = $crate::__nestrs_run_guards(
-                                                &__nestrs_route_guards,
-                                                &parts,
-                                            )
-                                            .await
-                                            {
-                                                return $crate::__nestrs_guard_error_response(e);
-                                            }
-                                            let req =
-                                                ::axum::http::Request::from_parts(parts, body);
-                                            next.run(req).await
+                                        ));
+                                        if let Err(e) = $crate::__nestrs_run_guards(
+                                            &__nestrs_route_guards,
+                                            &parts,
+                                        )
+                                        .await
+                                        {
+                                            return $crate::__nestrs_guard_error_response(e);
                                         }
-                                    },
-                                ));
-                                let __route = $crate::impl_routes!(
-                                    @apply_filters
-                                    __route
-                                    $(, $($filter),* )?
-                                );
-                                __route.with_state(state.clone())
-                            }
-                        )
-                    )+;
+                                        let req =
+                                            ::axum::http::Request::from_parts(parts, body);
+                                        next.run(req).await
+                                    }
+                                },
+                            ));
+                            let __route = $crate::impl_routes!(
+                                @apply_filters
+                                __route
+                                $(, $($filter),* )?
+                            );
+                            __route.with_state(state.clone())
+                        }
+                    );
+                )+;
                 $crate::impl_routes!(@maybe_host_wrap $controller, __nestrs_router)
             }
         }
@@ -4653,115 +4676,116 @@ macro_rules! impl_routes {
                 let state = registry.get::<$state_ty>();
                 let prefix = <$controller>::__nestrs_prefix();
                 let version = <$controller>::__nestrs_version();
-                let __nestrs_router = router
-                    $(
-                        .route(
-                            {
-                                let __path = $crate::impl_routes!(
-                                    @join
-                                    $crate::impl_routes!(
-                                        @effective_version
-                                        version
-                                        $(, $route_version)?
-                                    ),
-                                    prefix,
-                                    $path
-                                );
-                                $crate::core::RouteRegistry::register_spec(
-                                    stringify!($method),
-                                    __path,
-                                    concat!(module_path!(), "::", stringify!($handler)),
-                                    $crate::impl_routes!(@maybe_openapi $($openapi)?),
-                                );
-                                __path
-                            },
-                            {
+                let mut __nestrs_router = router;
+                $(
+                    __nestrs_router = $crate::__nestrs_register_route(
+                        __nestrs_router,
+                        {
+                            let __path = $crate::impl_routes!(
+                                @join
+                                $crate::impl_routes!(
+                                    @effective_version
+                                    version
+                                    $(, $route_version)?
+                                ),
+                                prefix,
+                                $path
+                            );
+                            $crate::core::RouteRegistry::register_spec(
+                                stringify!($method),
+                                __path,
+                                concat!(module_path!(), "::", stringify!($handler)),
+                                $crate::impl_routes!(@maybe_openapi $($openapi)?),
+                            );
+                            __path
+                        },
+                        {
+                            $(
                                 $(
-                                    $(
-                                        $crate::core::MetadataRegistry::set(
+                                    $crate::core::MetadataRegistry::set(
+                                        concat!(module_path!(), "::", stringify!($handler)),
+                                        $meta_key,
+                                        $meta_value,
+                                    );
+                                )*
+                            )?
+                            let __route = $crate::impl_routes!(@method $method, $handler);
+                            let __route = $crate::impl_routes!(
+                                @apply_interceptors
+                                registry,
+                                __route
+                                $(, $($interceptor),* )?
+                            );
+                            // Guards are resolved ONCE at registration time (`CanActivate::resolve`)
+                            // so stateful/DI-backed guards hold their dependencies for all requests.
+                            // The `Arc` keeps the captured closure `Clone` regardless of the guard type.
+                            let __nestrs_route_guards = ::std::sync::Arc::new((
+                                $(<$guard as $crate::core::CanActivate>::resolve(
+                                    &$crate::core::ProviderRegistry::clone(registry),
+                                ),)*
+                            ));
+                            let __route = __route.layer(::axum::middleware::from_fn(
+                                move |req: ::axum::extract::Request,
+                                      next: ::axum::middleware::Next| {
+                                    // Clone before the `async move` block: moving the `Arc`
+                                    // itself out of the closure would make it `FnOnce`.
+                                    let __nestrs_route_guards =
+                                        ::std::sync::Arc::clone(&__nestrs_route_guards);
+                                    async move {
+                                        let (mut parts, body) = req.into_parts();
+                                        parts.extensions.insert($crate::core::HandlerKey(
                                             concat!(module_path!(), "::", stringify!($handler)),
-                                            $meta_key,
-                                            $meta_value,
-                                        );
-                                    )*
-                                )?
-                                let __route = $crate::impl_routes!(@method $method, $handler);
-                                let __route = $crate::impl_routes!(
-                                    @apply_interceptors
-                                    registry,
-                                    __route
-                                    $(, $($interceptor),* )?
-                                );
-                                // Guards are resolved ONCE at registration time (`CanActivate::resolve`)
-                                // so stateful/DI-backed guards hold their dependencies for all requests.
-                                // The `Arc` keeps the captured closure `Clone` regardless of the guard type.
-                                let __nestrs_route_guards = ::std::sync::Arc::new((
-                                    $(<$guard as $crate::core::CanActivate>::resolve(
-                                        &$crate::core::ProviderRegistry::clone(registry),
-                                    ),)*
-                                ));
-                                let __route = __route.layer(::axum::middleware::from_fn(
-                                    move |req: ::axum::extract::Request,
-                                          next: ::axum::middleware::Next| {
-                                        // Clone before the `async move` block: moving the `Arc`
-                                        // itself out of the closure would make it `FnOnce`.
-                                        let __nestrs_route_guards =
-                                            ::std::sync::Arc::clone(&__nestrs_route_guards);
-                                        async move {
-                                            let (mut parts, body) = req.into_parts();
-                                            parts.extensions.insert($crate::core::HandlerKey(
-                                                concat!(module_path!(), "::", stringify!($handler)),
-                                            ));
-                                            if let Err(e) = $crate::__nestrs_run_guards(
-                                                &__nestrs_route_guards,
-                                                &parts,
-                                            )
-                                            .await
-                                            {
-                                                return $crate::__nestrs_guard_error_response(e);
-                                            }
-                                            let req =
-                                                ::axum::http::Request::from_parts(parts, body);
-                                            next.run(req).await
+                                        ));
+                                        if let Err(e) = $crate::__nestrs_run_guards(
+                                            &__nestrs_route_guards,
+                                            &parts,
+                                        )
+                                        .await
+                                        {
+                                            return $crate::__nestrs_guard_error_response(e);
                                         }
-                                    },
+                                        let req =
+                                            ::axum::http::Request::from_parts(parts, body);
+                                        next.run(req).await
+                                    }
+                                },
+                            ));
+                            let __nestrs_ctrl_guard =
+                                ::std::sync::Arc::new(<$ctrl_guard as $crate::core::CanActivate>::resolve(
+                                    &$crate::core::ProviderRegistry::clone(registry),
                                 ));
-                                let __nestrs_ctrl_guard =
-                                    ::std::sync::Arc::new(<$ctrl_guard as $crate::core::CanActivate>::resolve(
-                                        &$crate::core::ProviderRegistry::clone(registry),
-                                    ));
-                                let __route = __route.layer(::axum::middleware::from_fn(
-                                    move |req: ::axum::extract::Request,
-                                          next: ::axum::middleware::Next| {
-                                        // Clone before the `async move` block: moving the `Arc`
-                                        // itself out of the closure would make it `FnOnce`.
-                                        let __nestrs_ctrl_guard =
-                                            ::std::sync::Arc::clone(&__nestrs_ctrl_guard);
-                                        async move {
-                                            let (mut parts, body) = req.into_parts();
-                                            parts.extensions.insert($crate::core::HandlerKey(
-                                                concat!(module_path!(), "::", stringify!($handler)),
-                                            ));
-                                            if let Err(e) =
-                                                __nestrs_ctrl_guard.can_activate(&parts).await
-                                            {
-                                                return $crate::__nestrs_guard_error_response(e);
-                                            }
-                                            let req =
-                                                ::axum::http::Request::from_parts(parts, body);
-                                            next.run(req).await
+                            let __route = __route.layer(::axum::middleware::from_fn(
+                                move |req: ::axum::extract::Request,
+                                      next: ::axum::middleware::Next| {
+                                    // Clone before the `async move` block: moving the `Arc`
+                                    // itself out of the closure would make it `FnOnce`.
+                                    let __nestrs_ctrl_guard =
+                                        ::std::sync::Arc::clone(&__nestrs_ctrl_guard);
+                                    async move {
+                                        let (mut parts, body) = req.into_parts();
+                                        parts.extensions.insert($crate::core::HandlerKey(
+                                            concat!(module_path!(), "::", stringify!($handler)),
+                                        ));
+                                        if let Err(e) =
+                                            __nestrs_ctrl_guard.can_activate(&parts).await
+                                        {
+                                            return $crate::__nestrs_guard_error_response(e);
                                         }
-                                    },
-                                ));
-                                let __route = $crate::impl_routes!(
-                                    @apply_filters
-                                    __route
-                                    $(, $($filter),* )?
-                                );
-                                __route.with_state(state.clone())
-                            }
-                        )
-                    )+;
+                                        let req =
+                                            ::axum::http::Request::from_parts(parts, body);
+                                        next.run(req).await
+                                    }
+                                },
+                            ));
+                            let __route = $crate::impl_routes!(
+                                @apply_filters
+                                __route
+                                $(, $($filter),* )?
+                            );
+                            __route.with_state(state.clone())
+                        }
+                    );
+                )+;
                 $crate::impl_routes!(@maybe_host_wrap $controller, __nestrs_router)
             }
         }

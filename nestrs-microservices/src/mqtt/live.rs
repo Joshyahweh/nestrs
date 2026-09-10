@@ -28,11 +28,34 @@ pub enum MqttTlsMode {
 }
 
 /// Broker socket security (TLS + username/password).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct MqttSocketOptions {
     pub username: Option<String>,
     pub password: Option<String>,
     pub tls: Option<MqttTlsMode>,
+}
+
+impl std::fmt::Debug for MqttSocketOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The password is never rendered — Debug output flows into logs,
+        // panic messages, and error reports. Presence (`Some("<redacted>")`)
+        // stays visible for operators.
+        let mut s = f.debug_struct("MqttSocketOptions");
+        s.field("username", &self.username);
+        s.field(
+            "password",
+            &self.password.as_ref().map(|_| "<redacted>"),
+        );
+        match &self.tls {
+            None => s.field("tls", &"None"),
+            Some(MqttTlsMode::Native) => s.field("tls", &"Native"),
+            Some(MqttTlsMode::CaPem(ca)) => {
+                // The PEM bytes are not secret but are bulky — log the size.
+                s.field("tls", &format_args!("CaPem({} bytes)", ca.len()))
+            }
+        };
+        s.finish()
+    }
 }
 
 /// Client options.
@@ -449,5 +472,27 @@ impl MicroserviceServer for MqttMicroserviceServer {
         shutdown: ShutdownFuture,
     ) -> Result<(), TransportError> {
         (*self).listen_with_shutdown(shutdown).await
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn mqtt_socket_debug_never_shows_the_password() {
+        let opts = MqttSocketOptions {
+            username: Some("device-42".to_string()),
+            password: Some("device-secret-DO-NOT-LOG".to_string()),
+            tls: Some(MqttTlsMode::CaPem(vec![1, 2, 3, 4])),
+        };
+        let rendered = format!("{opts:?}");
+        assert!(
+            !rendered.contains("device-secret"),
+            "password leaked: {rendered}"
+        );
+        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
+        assert!(rendered.contains("device-42"), "username should stay visible: {rendered}");
+        assert!(rendered.contains("4 bytes"), "CA PEM should render as size: {rendered}");
     }
 }

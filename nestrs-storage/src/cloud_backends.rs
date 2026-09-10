@@ -49,7 +49,7 @@ mod s3 {
     use super::*;
     use object_store::aws::AmazonS3Builder;
 
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Serialize, Deserialize)]
     pub struct S3Config {
         pub bucket: String,
         pub region: String,
@@ -59,6 +59,24 @@ mod s3 {
         /// discovers credentials from the environment / IMDS.
         pub access_key: Option<String>,
         pub secret_key: Option<String>,
+    }
+
+    impl std::fmt::Debug for S3Config {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            // The secret key is never rendered — Debug output flows into
+            // logs and error reports. (Serialize stays untouched; it is
+            // the config-persistence path, not a logging path.)
+            f.debug_struct("S3Config")
+                .field("bucket", &self.bucket)
+                .field("region", &self.region)
+                .field("endpoint", &self.endpoint)
+                .field("access_key", &self.access_key)
+                .field(
+                    "secret_key",
+                    &self.secret_key.as_ref().map(|_| "<redacted>"),
+                )
+                .finish()
+        }
     }
 
     impl S3Config {
@@ -355,13 +373,29 @@ mod azure {
     use super::*;
     use object_store::azure::MicrosoftAzureBuilder;
 
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Serialize, Deserialize)]
     pub struct AzureConfig {
         pub container: String,
         pub account: String,
         /// Optional access key. When `None`, the SDK uses
         /// `AZURE_STORAGE_ACCOUNT_NAME` + bearer-token auth.
         pub access_key: Option<String>,
+    }
+
+    impl std::fmt::Debug for AzureConfig {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            // The account access key is never rendered — Debug output flows
+            // into logs and error reports. (Serialize stays untouched; it is
+            // the config-persistence path, not a logging path.)
+            f.debug_struct("AzureConfig")
+                .field("container", &self.container)
+                .field("account", &self.account)
+                .field(
+                    "access_key",
+                    &self.access_key.as_ref().map(|_| "<redacted>"),
+                )
+                .finish()
+        }
     }
 
     impl AzureConfig {
@@ -480,3 +514,40 @@ mod azure {
 
 #[cfg(feature = "azure")]
 pub use azure::{AzureBlobStorage, AzureConfig};
+
+#[cfg(test)]
+mod debug_redaction_tests {
+    // The config structs are feature-gated inside their modules; the tests
+    // mirror that so `--all-features` exercises all of them.
+    #[cfg(feature = "s3")]
+    #[test]
+    fn s3_config_debug_never_shows_secret_key() {
+        use super::s3::S3Config;
+        let config = S3Config {
+            bucket: "assets".to_string(),
+            region: "us-east-1".to_string(),
+            endpoint: None,
+            access_key: Some("AKIAEXAMPLE".to_string()),
+            secret_key: Some("wJalrXUtnFEMI-DO-NOT-LOG".to_string()),
+        };
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains("wJalrXUtnFEMI"), "secret key leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
+        assert!(rendered.contains("AKIAEXAMPLE"), "access key id should stay visible: {rendered}");
+    }
+
+    #[cfg(feature = "azure")]
+    #[test]
+    fn azure_config_debug_never_shows_access_key() {
+        use super::azure::AzureConfig;
+        let config = AzureConfig {
+            container: "media".to_string(),
+            account: "nestrsmedia".to_string(),
+            access_key: Some("base64key-DO-NOT-LOG".to_string()),
+        };
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains("base64key"), "access key leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
+        assert!(rendered.contains("nestrsmedia"), "account should stay visible: {rendered}");
+    }
+}

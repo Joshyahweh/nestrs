@@ -5,11 +5,22 @@ use futures_util::StreamExt;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RedisTransportOptions {
     pub url: String,
     pub prefix: Option<String>,
     pub request_timeout: std::time::Duration,
+}
+
+impl std::fmt::Debug for RedisTransportOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Redis URLs embed `:password@` / `user:pass@` — redact the userinfo.
+        f.debug_struct("RedisTransportOptions")
+            .field("url", &crate::redact_url(&self.url))
+            .field("prefix", &self.prefix)
+            .field("request_timeout", &self.request_timeout)
+            .finish()
+    }
 }
 
 impl RedisTransportOptions {
@@ -191,10 +202,19 @@ impl Transport for RedisTransport {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RedisMicroserviceOptions {
     pub url: String,
     pub prefix: Option<String>,
+}
+
+impl std::fmt::Debug for RedisMicroserviceOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisMicroserviceOptions")
+            .field("url", &crate::redact_url(&self.url))
+            .field("prefix", &self.prefix)
+            .finish()
+    }
 }
 
 impl RedisMicroserviceOptions {
@@ -332,5 +352,22 @@ impl crate::MicroserviceServer for RedisMicroserviceServer {
         shutdown: crate::ShutdownFuture,
     ) -> Result<(), TransportError> {
         (*self).listen_with_shutdown(shutdown).await
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn redis_url_credentials_never_reach_debug() {
+        let opts = RedisTransportOptions::new("redis://:hunter2-DO-NOT-LOG@cache.local:6379");
+        let rendered = format!("{opts:?}");
+        assert!(!rendered.contains("hunter2"), "password leaked: {rendered}");
+        assert!(rendered.contains("redis://***@cache.local:6379"));
+
+        let opts = RedisMicroserviceOptions::new("redis://svc:pencil1@cache.local");
+        let rendered = format!("{opts:?}");
+        assert!(!rendered.contains("pencil1"), "password leaked: {rendered}");
     }
 }

@@ -322,26 +322,33 @@ async fn use_path_normalization_is_ignored_by_into_router() {
         .await
         .expect("router should serve request");
 
-    // `use_path_normalization` is applied in `listen*` methods where the app is wrapped as a Service.
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    // `use_path_normalization` is applied in `listen*` methods where the app
+    // is wrapped as a Service — `into_router` output is unaffected by it:
+    // the canonical (slashful) list-endpoint route still serves here.
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
-async fn trailing_slash_without_path_normalization_is_not_found() {
+async fn both_trailing_slash_forms_serve_the_list_endpoint() {
+    // NestJS parity: Express (loose trailing-slash matching) serves both
+    // `/api` and `/api/` from one `@Get("/")` decorator. nestrs registers
+    // the canonical slashful form (`/v1/api/`) plus a slashless twin.
     let router = NestFactory::create::<AppModule>().into_router();
 
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/v1/api/")
-                .method("GET")
-                .body(Body::empty())
-                .expect("request should be valid"),
-        )
-        .await
-        .expect("router should serve request");
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    for uri in ["/v1/api", "/v1/api/"] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request should be valid"),
+            )
+            .await
+            .expect("router should serve request");
+        assert_eq!(response.status(), StatusCode::OK, "uri {uri} should serve");
+    }
 }
 
 #[tokio::test]

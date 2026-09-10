@@ -168,6 +168,22 @@ impl MqttTransport {
             .map_err(|_| TransportError::new("mqtt request timed out"))?
             .map_err(|_| TransportError::new("mqtt reply channel closed"))
     }
+
+    /// The per-RPC reply topic is unique (UUID) and single-use: drop the
+    /// broker-side subscription once the reply landed (or the request
+    /// failed). Without this, a long-lived client accumulates one dead
+    /// subscription per RPC for the life of the connection — broker memory
+    /// and per-subscription routing overhead that grows with traffic.
+    async fn close_reply_subscription(&self, topic: &str) {
+        if let Err(e) = self.client.unsubscribe(topic).await {
+            // Not a user-visible RPC failure — the subscription dies with the
+            // next reconnect anyway (clean_session=true).
+            tracing::warn!(
+                target: "nestrs_microservices",
+                "mqtt unsubscribe reply topic `{topic}` failed: {e}"
+            );
+        }
+    }
 }
 
 #[async_trait]
@@ -212,10 +228,12 @@ impl Transport for MqttTransport {
             Ok(t) => t,
             Err(e) => {
                 self.pending.lock().await.remove(&reply_topic);
+                self.close_reply_subscription(&reply_topic).await;
                 return Err(e);
             }
         };
         self.pending.lock().await.remove(&reply_topic);
+        self.close_reply_subscription(&reply_topic).await;
 
         let wire: WireResponse = serde_json::from_str(&text)
             .map_err(|e| TransportError::new(format!("deserialize response failed: {e}")))?;

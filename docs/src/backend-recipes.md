@@ -2104,6 +2104,8 @@ nestrs exposes broker-specific **`HealthIndicator`** stubs (**`NatsBrokerHealth`
 
 There is **no** `NestFactory::create_microservice_kafka` today. Run **`KafkaMicroserviceServer::new(KafkaMicroserviceOptions::new(vec!["127.0.0.1:9092".into()]), handlers)`** with **`handlers`** collected the same way **`NestFactory::create_microservice`** builds **`TcpMicroserviceServer`** (**[`nestrs/src/lib.rs`](../../nestrs/src/lib.rs)** search **`microservice_handlers`**). Prefer **`ClientConfig::kafka`** for callers until a first-party helper lands.
 
+**Offset semantics (replay caveat):** the underlying rskafka 0.6 client has **no consumer-group / offset-commit API**, so the listener keeps its position **in memory only**. On boot it starts where **`KafkaMicroserviceOptions::consumer_start`** says: **`KafkaConsumerStart::Latest`** (default — skip retained history, so restarts do not re-execute old RPCs/events) or **`KafkaConsumerStart::Earliest`** (drain the full retained backlog — intentional replay, every retained request is re-dispatched). Delivery across restarts is **at-most-once**; make handlers idempotent if that window matters.
+
 ---
 
 # Recipe G — Event-driven architecture (EDA)

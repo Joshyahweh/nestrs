@@ -44,6 +44,7 @@ The `nestrs-microservices` crate supports additional adapters behind feature fla
 - `grpc` (tonic-based gRPC send/emit service)
 - `kafka` / `mqtt` (see crate README for options)
   - Kafka listener offsets: rskafka 0.6 has **no consumer-group / offset-commit API** — the listener's position is in-memory only, so delivery across restarts is **at-most-once**. Boot position comes from `KafkaMicroserviceOptions::consumer_start` (`KafkaConsumerStart::Latest` default — no backlog replay; `Earliest` — drain retained backlog, intentional replay). Make handlers idempotent if this window matters.
+  - MQTT reconnects: rumqttc's default `clean_session=true` drops subscriptions at the broker on every disconnect and rumqttc never re-issues SUBSCRIBE itself. Both the listener and the client re-subscribe on every ConnAck (restoring in-flight reply topics), so a broker restart or network blip no longer leaves a connected-but-deaf listener or hangs pending RPCs. Delivery across restarts is **at-most-once**.
 - `rabbitmq` (AMQP work queue + per-request reply queues; umbrella feature `microservices-rabbitmq`)
 
 ## Custom transporters

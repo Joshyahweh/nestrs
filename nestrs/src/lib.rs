@@ -177,7 +177,10 @@ pub use health_probes::DiskSpaceIndicator;
 pub use health_probes::HttpIndicator;
 pub use health_probes::{DatabaseIndicator, ProbeKind, ProbeOutcome};
 #[cfg(feature = "http-client")]
-pub use http_client::{HttpModule, HttpService};
+pub use http_client::{
+    HttpModule, HttpService, HttpServiceOptions, DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_REQUEST_TIMEOUT,
+};
 pub use http_execution_context::{ExecutionContextMissing, HttpExecutionContext};
 pub use i18n::{I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale};
 pub use interceptor::{Interceptor, LoggingInterceptor};

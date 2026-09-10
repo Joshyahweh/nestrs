@@ -1338,7 +1338,27 @@ impl MicroserviceApplication {
             None
         };
 
-        let _ = ms_task.await;
+        // Surface listener death instead of silently dropping it: in hybrid
+        // mode the app keeps serving HTTP while its microservice side is
+        // gone — without this log line the process looks healthy and the
+        // operator has no signal. (Boot failures like an unreachable broker
+        // surface here immediately.)
+        match ms_task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                tracing::error!(
+                    target: "nestrs",
+                    "microservice listener exited with error: {}",
+                    e.message
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "nestrs",
+                    "microservice listener task failed to join: {e}"
+                );
+            }
+        }
         if let Some(t) = http_task {
             let _ = t.await;
         }

@@ -342,6 +342,7 @@ nestrs::throttler::ThrottlerGuard
 nestrs::throttler::ThrottlerModule
 nestrs::throttler::ThrottlerModule::register
 nestrs::throttler::ThrottlerOptions
+nestrs::throttler::ThrottlerOptions::trusted_proxy_hops
 nestrs::throttler::ThrottlerService
 nestrs::throttler::ThrottlerState
 nestrs::trace_context::current_trace

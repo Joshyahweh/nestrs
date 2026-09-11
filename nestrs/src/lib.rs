@@ -643,9 +643,11 @@ pub struct RateLimitOptions {
     max_requests: u64,
     window_secs: u64,
     /// Number of trusted reverse proxies in front of this service (see
-    /// [`NestApplication::use_trusted_proxy_headers`]). When `0` (default), forwarded headers
-    /// are **not** consulted for the rate-limit key.
-    trusted_proxy_hops: u16,
+    /// [`NestApplication::use_trusted_proxy_headers`]). `None` (default) inherits the
+    /// application-wide hop count, so the limiter and the [`ClientIp`](crate::ClientIp)
+    /// extractor always resolve the same client identity; forwarded headers stay
+    /// untrusted when no topology was declared anywhere.
+    trusted_proxy_hops: Option<u16>,
     #[cfg(feature = "cache-redis")]
     redis: Option<RedisRateLimitOptions>,
 }
@@ -663,7 +665,7 @@ impl Default for RateLimitOptions {
         Self {
             max_requests: 100,
             window_secs: 60,
-            trusted_proxy_hops: 0,
+            trusted_proxy_hops: None,
             #[cfg(feature = "cache-redis")]
             redis: None,
         }
@@ -688,10 +690,16 @@ impl RateLimitOptions {
     /// Trust `hops` reverse proxies when deriving the client IP for the rate-limit key.
     ///
     /// Must match the actual proxy topology; see [`NestApplication::use_trusted_proxy_headers`].
-    /// Without this (default), forwarded headers are ignored and the limiter keys on connection
-    /// metadata only — spoofing `X-Forwarded-For` cannot bypass or poison limits.
+    /// Unset (default), the limiter **inherits** the application-wide hop count, so
+    /// `use_trusted_proxy_headers(1)` alone is enough — the limiter and the `ClientIp`
+    /// extractor agree on client identity. Set this only to override the app topology; a
+    /// value that diverges from it logs a warning, because one of the two will key on the
+    /// proxy's own address (collective 429s for everyone behind the proxy) while the other
+    /// trusts forwarded headers. `Some(0)` explicitly distrusts forwarded headers even when
+    /// the app declared a topology; spoofing `X-Forwarded-For` then cannot bypass or poison
+    /// limits.
     pub fn trusted_proxy_hops(mut self, hops: u16) -> Self {
-        self.trusted_proxy_hops = hops;
+        self.trusted_proxy_hops = Some(hops);
         self
     }
 
@@ -1723,8 +1731,10 @@ impl NestApplication {
     /// `client → LB → app` topology), the entry appended by your load balancer is used and any
     /// attacker-supplied prefix is ignored. Forwarded headers are **never** consulted without
     /// this setting — they are trivially spoofable, which would allow IP-based rate-limit
-    /// bypass. Pass the same hop count to [`RateLimitOptions::trusted_proxy_hops`] when using
-    /// `use_rate_limit`.
+    /// bypass. The rate limiter and throttler **inherit** this hop count automatically, so they
+    /// key on the same client identity as the `ClientIp` extractor; only pass
+    /// [`RateLimitOptions::trusted_proxy_hops`] or [`ThrottlerOptions::trusted_proxy_hops`]
+    /// to override their resolution (a divergence from this setting is logged as a warning).
     pub fn use_trusted_proxy_headers(mut self, hops: u16) -> Self {
         self.trusted_proxy_hops = Some(hops);
         self
@@ -2098,7 +2108,25 @@ impl NestApplication {
             router = headers.apply(router);
         }
 
-        if let Some(options) = self.rate_limit_options {
+        if let Some(mut options) = self.rate_limit_options {
+            // The limiter inherits the app-level trusted-proxy hop count unless
+            // it set its own, so both resolve client identity the same way. An
+            // explicit value that disagrees with the app topology means one
+            // side keys on the proxy's address (collective 429s for everyone
+            // behind the proxy) while the other trusts forwarded headers —
+            // almost always a misconfiguration, so make it loud.
+            match (options.trusted_proxy_hops, self.trusted_proxy_hops) {
+                (Some(explicit), Some(app)) if explicit != app => {
+                    tracing::warn!(
+                        target: "nestrs",
+                        "RateLimitOptions::trusted_proxy_hops ({explicit}) differs from \
+                         use_trusted_proxy_headers ({app}); the rate limiter keys on the \
+                         explicit value and may disagree with the ClientIp extractor"
+                    );
+                }
+                _ => {}
+            }
+            options.trusted_proxy_hops = options.trusted_proxy_hops.or(self.trusted_proxy_hops);
             let state = std::sync::Arc::new(RateLimitState::new(options));
             router = router.layer(axum::middleware::from_fn_with_state(
                 state,
@@ -2106,7 +2134,21 @@ impl NestApplication {
             ));
         }
 
-        if let Some(options) = throttler_options {
+        if let Some(mut options) = throttler_options {
+            // Same proxy-trust inheritance as the rate limiter above: the
+            // throttler keys on the app topology unless it set its own.
+            match (options.trusted_proxy_hops, self.trusted_proxy_hops) {
+                (Some(explicit), Some(app)) if explicit != app => {
+                    tracing::warn!(
+                        target: "nestrs",
+                        "ThrottlerOptions::trusted_proxy_hops ({explicit}) differs from \
+                         use_trusted_proxy_headers ({app}); the throttler keys on the \
+                         explicit value and may disagree with the ClientIp extractor"
+                    );
+                }
+                _ => {}
+            }
+            options.trusted_proxy_hops = options.trusted_proxy_hops.or(self.trusted_proxy_hops);
             // Register the service for guards (`ThrottlerGuard::resolve`).
             // We hold the registry in `Arc<ProviderRegistry>`; the only
             // strong ref at this point in `build_router` is the local one,
@@ -2896,7 +2938,7 @@ enum RateLimitInner {
         window_secs: u64,
         max_requests: u64,
         /// See [`RateLimitOptions::trusted_proxy_hops`].
-        trusted_proxy_hops: u16,
+        trusted_proxy_hops: Option<u16>,
     },
 }
 
@@ -2971,7 +3013,7 @@ async fn rate_limit_middleware(
 ) -> axum::response::Response {
     match &state.inner {
         RateLimitInner::Memory { options, shards } => {
-            let client_key = client_ip_from_request(&req, Some(options.trusted_proxy_hops));
+            let client_key = client_ip_from_request(&req, options.trusted_proxy_hops);
             // Shard by key hash so concurrent requests rarely contend on one mutex.
             let shard_index = {
                 use std::hash::{Hash, Hasher};
@@ -3032,7 +3074,7 @@ async fn rate_limit_middleware(
             max_requests,
             trusted_proxy_hops,
         } => {
-            let ip = client_ip_from_request(&req, Some(*trusted_proxy_hops));
+            let ip = client_ip_from_request(&req, *trusted_proxy_hops);
             let key = format!("{key_prefix}:{ip}");
             match redis_rate_allow(client, &key, *window_secs, *max_requests).await {
                 Ok(true) => {}

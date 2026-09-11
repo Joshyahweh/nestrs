@@ -262,9 +262,12 @@ pub struct ThrottlerOptions {
     /// `None` means only explicitly decorated routes are throttled.
     pub global: Option<ThrottleSpec>,
     pub backend: ThrottlerBackendKind,
-    /// Forwarded-header trust level for client-IP resolution (defaults to 0 —
-    /// forwarded headers untrusted).
-    pub trusted_proxy_hops: u16,
+    /// Forwarded-header trust level for client-IP resolution. `None` (default)
+    /// inherits the application-wide hop count from
+    /// [`crate::NestApplication::use_trusted_proxy_headers`], so the throttler
+    /// and the `ClientIp` extractor resolve the same client identity;
+    /// `Some(hops)` overrides it (forwarded headers untrusted when `Some(0)`).
+    pub trusted_proxy_hops: Option<u16>,
 }
 
 /// Injectable facade over the chosen backend.
@@ -435,7 +438,10 @@ impl ThrottlerState {
         Self {
             service: Arc::new(ThrottlerService::from_options(options)),
             global: options.global,
-            trusted_proxy_hops: options.trusted_proxy_hops,
+            // `build_router` resolves app-level inheritance into the options
+            // before calling this; standalone users default to trusting no
+            // forwarded headers (connection metadata only).
+            trusted_proxy_hops: options.trusted_proxy_hops.unwrap_or(0),
         }
     }
 }
@@ -476,10 +482,20 @@ impl crate::core::CanActivate for ThrottlerGuard {
                 "ThrottlerGuard used without ThrottlerModule/use_throttler — no ThrottlerService",
             )
         })?;
+        // Guards run at route level — inside the trusted-proxy middleware —
+        // so the per-request extension (installed by `use_trusted_proxy_headers`)
+        // is the authoritative hop count. The stored 0 only applies when the
+        // app declared no proxy topology; before this, the guard ignored the
+        // app topology entirely and keyed every request as one client.
+        let trusted_proxy_hops = parts
+            .extensions
+            .get::<crate::client_ip::TrustedProxyHops>()
+            .map(|h| h.0)
+            .unwrap_or(self.trusted_proxy_hops);
         let ip = crate::client_ip::best_effort_client_ip_from_request(
             &parts.headers,
             &parts.extensions,
-            Some(self.trusted_proxy_hops),
+            Some(trusted_proxy_hops),
         )
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".to_string());

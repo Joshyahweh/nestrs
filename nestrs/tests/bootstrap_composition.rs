@@ -690,6 +690,91 @@ async fn rate_limit_keeps_clients_in_separate_buckets_in_memory_mode() {
 }
 
 #[tokio::test]
+async fn rate_limit_inherits_trusted_proxy_hops_from_app_topology() {
+    // Same topology as the test above, minus the manual re-statement of the
+    // hop count: `use_trusted_proxy_headers(1)` is the single source of
+    // truth, and the limiter inherits it. Before inheritance, a limiter
+    // configured without `trusted_proxy_hops` keyed every proxied request on
+    // one address and collectively 429'd unrelated clients.
+    let router = NestFactory::create::<AppModule>()
+        .use_trusted_proxy_headers(1)
+        .use_rate_limit(
+            RateLimitOptions::builder()
+                .max_requests(1)
+                .window_secs(60)
+                .build(),
+        )
+        .into_router();
+
+    let request = |xff: &str| {
+        router.clone().oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .header("x-forwarded-for", xff)
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+    };
+
+    let first = request("203.0.113.10").await.expect("router should serve request");
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = request("203.0.113.11").await.expect("router should serve request");
+    assert_eq!(
+        second.status(),
+        StatusCode::OK,
+        "inherited hop count keeps proxied clients in separate buckets"
+    );
+
+    let third = request("203.0.113.10").await.expect("router should serve request");
+    assert_eq!(
+        third.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "the budget of the first client is exhausted"
+    );
+}
+
+#[tokio::test]
+async fn rate_limit_explicit_zero_hops_overrides_app_topology() {
+    // Explicit 0 is a deliberate override of the app topology (a divergence
+    // warning is logged): the limiter keys on connection metadata only, which
+    // for these oneshot requests (no ConnectInfo) is one shared `unknown`
+    // bucket — the second distinct client 429s.
+    let router = NestFactory::create::<AppModule>()
+        .use_trusted_proxy_headers(1)
+        .use_rate_limit(
+            RateLimitOptions::builder()
+                .max_requests(1)
+                .window_secs(60)
+                .trusted_proxy_hops(0)
+                .build(),
+        )
+        .into_router();
+
+    let request = |xff: &str| {
+        router.clone().oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .header("x-forwarded-for", xff)
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+    };
+
+    let first = request("203.0.113.10").await.expect("router should serve request");
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = request("203.0.113.11").await.expect("router should serve request");
+    assert_eq!(
+        second.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "explicit 0 ignores forwarded headers: one shared bucket"
+    );
+}
+
+#[tokio::test]
 async fn body_limit_rejects_large_payload() {
     let router = NestFactory::create::<AppModule>()
         .use_body_limit(4)

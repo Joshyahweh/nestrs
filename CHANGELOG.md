@@ -7,6 +7,35 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: rate limiter / throttler ignored the declared proxy topology
+
+An app behind a reverse proxy calling `use_trusted_proxy_headers(n)` but not
+re-stating the hop count on the limiter options got every proxied client keyed
+on the proxy's own address — one shared budget, collective 429s for unrelated
+users, and a trivially-exhausted limiter by a single abuser.
+
+- **The rate limiter and throttler now inherit the app-level hop count by
+  default.** `use_trusted_proxy_headers(1)` is the single source of truth:
+  `RateLimitOptions` (private field, builder unchanged) and
+  `ThrottlerOptions::trusted_proxy_hops` both resolve client identity exactly
+  like the `ClientIp` extractor. Set the limiter-level value only to override;
+  a value that diverges from the app topology logs a `tracing::warn!` (one
+  side keys on the proxy address while the other trusts forwarded headers —
+  almost always a misconfiguration).
+- **`ThrottlerOptions::trusted_proxy_hops` changed type `u16` → `Option<u16>`**
+  (pre-1.0): `None` (new default) = inherit, `Some(hops)` = explicit override,
+  `Some(0)` = deliberately distrust forwarded headers. Migration: add `Some(`
+  around any literal. The `RateLimitOptions::trusted_proxy_hops` builder keeps
+  its `u16` signature.
+- **`ThrottlerGuard` no longer hardcodes 0 hops** — the guard runs at route
+  level, inside the trusted-proxy middleware, so it now reads the per-request
+  hop count installed by `use_trusted_proxy_headers` (falling back to 0 when
+  no topology was declared). Previously every request hit the guard as one
+  client regardless of the declared topology.
+- **5 new tests** — limiter inheritance + exhausted-bucket pin, explicit
+  `Some(0)` override (shared bucket), throttler inheritance, throttler
+  explicit override, and guard-per-request topology resolution.
+
 ### Fixed — production/security audit: `#[dto]` validation markers were silent no-ops
 
 - **`#[IsUUID]` now validates** — the marker was previously stripped without

@@ -97,6 +97,22 @@ async fn get(app: &axum::Router, path: &str) -> Response {
         .expect("response")
 }
 
+/// `get` with a single-entry `x-forwarded-for` chain — the entry a trusted
+/// proxy appends for its directly-connected client.
+async fn get_xff(app: &axum::Router, path: &str, client: &str) -> Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(path)
+                .header("x-forwarded-for", client)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
 fn app_with_global_decorated(global: Option<ThrottleSpec>) -> axum::Router {
     let mut app = NestFactory::create::<DecoratedModule>();
     if let Some(g) = global {
@@ -244,6 +260,90 @@ async fn throttler_guard_rejects_via_guard_error() {
     let v: serde_json::Value = serde_json::from_slice(&body).expect("json");
     assert_eq!(v["statusCode"], 429);
     assert_eq!(v["error"], "Too Many Requests");
+}
+
+#[tokio::test]
+async fn throttler_inherits_app_trusted_proxy_hops_by_default() {
+    // One declared proxy (`use_trusted_proxy_headers(1)`): distinct
+    // `x-forwarded-for` clients must land in distinct throttle buckets even
+    // though every oneshot request shares the same (absent) ConnectInfo.
+    // Before inheritance the middleware ignored the app topology, keyed
+    // every request as `unknown`, and collectively 429'd unrelated clients.
+    let app = NestFactory::create::<DecoratedModule>()
+        .use_trusted_proxy_headers(1)
+        .use_throttler(ThrottlerOptions {
+            global: None,
+            ..ThrottlerOptions::default()
+        })
+        .into_router();
+    // `#[throttle(2, "minute")]` on /api/limited.
+    let r1 = get_xff(&app, "/api/limited", "203.0.113.10").await;
+    let r2 = get_xff(&app, "/api/limited", "203.0.113.10").await;
+    let r3 = get_xff(&app, "/api/limited", "203.0.113.10").await;
+    let r4 = get_xff(&app, "/api/limited", "203.0.113.11").await;
+    assert_eq!(r1.status(), StatusCode::OK);
+    assert_eq!(r2.status(), StatusCode::OK);
+    assert_eq!(
+        r3.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "budget of 2 exhausted for 203.0.113.10"
+    );
+    assert_eq!(
+        r4.status(),
+        StatusCode::OK,
+        "a different client behind the same proxy gets its own bucket"
+    );
+}
+
+#[tokio::test]
+async fn throttler_explicit_hops_override_app_topology() {
+    // `trusted_proxy_hops: Some(0)` is a deliberate override: even though the
+    // app declares one proxy, the throttler keys on connection metadata only
+    // — here one shared `unknown` bucket, so the second distinct client 429s.
+    // (A divergence warning is logged for this shape.)
+    let app = NestFactory::create::<DecoratedModule>()
+        .use_trusted_proxy_headers(1)
+        .use_throttler(ThrottlerOptions {
+            global: None,
+            trusted_proxy_hops: Some(0),
+            ..ThrottlerOptions::default()
+        })
+        .into_router();
+    let r1 = get_xff(&app, "/api/limited", "203.0.113.10").await;
+    let r2 = get_xff(&app, "/api/limited", "203.0.113.10").await;
+    let r3 = get_xff(&app, "/api/limited", "203.0.113.11").await;
+    assert_eq!(r1.status(), StatusCode::OK);
+    assert_eq!(r2.status(), StatusCode::OK);
+    assert_eq!(
+        r3.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "explicit 0 means forwarded headers are ignored: one shared bucket"
+    );
+}
+
+#[tokio::test]
+async fn throttler_guard_reads_proxy_topology_from_request() {
+    // The guard runs at route level — inside the trusted-proxy middleware —
+    // so it inherits the per-request hop count instead of hardcoding 0.
+    // `#[throttle(1, "minute")]` on /g/limited: each resolved client gets a
+    // budget of one.
+    let app = NestFactory::create::<GuardedModule>()
+        .use_trusted_proxy_headers(1)
+        .into_router();
+    let r1 = get_xff(&app, "/g/limited", "203.0.113.10").await;
+    let r2 = get_xff(&app, "/g/limited", "203.0.113.20").await;
+    let r3 = get_xff(&app, "/g/limited", "203.0.113.20").await;
+    assert_eq!(r1.status(), StatusCode::OK);
+    assert_eq!(
+        r2.status(),
+        StatusCode::OK,
+        "a different client behind the proxy has its own guard bucket"
+    );
+    assert_eq!(
+        r3.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "budget of 1 exhausted for 203.0.113.20"
+    );
 }
 
 #[cfg(feature = "cache-redis")]

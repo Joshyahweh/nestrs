@@ -12,6 +12,13 @@
 //! exception-filter pipeline — return [`TransportError`] from handlers (the `nestrs` crate maps
 //! `HttpException` into [`TransportError`] with JSON details in generated `#[micro_routes]` code).
 
+// lapin's auto-trait chains (`pinky_swear` → `flume` → `lock_api`) exceed
+// rustc's default trait-solver recursion depth when `RabbitMqTransport:
+// Sync` is evaluated (newer nightlies promote this via the
+// `recursion-depth-exceeding-limit` lint). Raise the crate limit instead of
+// restructuring the transport; no behavior change.
+#![recursion_limit = "256"]
+
 pub mod custom;
 pub mod wire;
 

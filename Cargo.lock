@@ -2231,7 +2231,7 @@ dependencies = [
  "serde",
  "sqlx",
  "tokio",
- "validator 0.20.0",
+ "validator",
 ]
 
 [[package]]
@@ -2826,7 +2826,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower-cookies",
- "validator 0.21.0",
+ "validator",
 ]
 
 [[package]]
@@ -3366,7 +3366,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "url",
- "validator 0.20.0",
+ "validator",
  "validator_derive",
  "wiremock",
 ]
@@ -6936,21 +6936,6 @@ checksum = "43fb22e1a008ece370ce08a3e9e4447a910e92621bb49b85d6e48a45397e7cfa"
 dependencies = [
  "idna",
  "once_cell",
- "regex",
- "serde",
- "serde_derive",
- "serde_json",
- "url",
- "validator_derive",
-]
-
-[[package]]
-name = "validator"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d68c6633c483df6780cc5277a417c7c2d1bceee2649d06c8ab6b0fd2dd3c81"
-dependencies = [
- "idna",
  "regex",
  "serde",
  "serde_derive",

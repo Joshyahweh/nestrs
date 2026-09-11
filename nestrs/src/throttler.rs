@@ -281,7 +281,7 @@ impl ThrottlerService {
             ThrottlerBackendKind::InMemory => Arc::new(InMemoryThrottler::new()),
             #[cfg(feature = "cache-redis")]
             ThrottlerBackendKind::Redis { url, key_prefix } => {
-                match RedisThrottler::new(&url, key_prefix) {
+                match RedisThrottler::new(url, key_prefix) {
                     Ok(r) => Arc::new(r),
                     Err(e) => {
                         tracing::warn!(

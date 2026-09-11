@@ -590,6 +590,11 @@ impl McpSurfaces {
     /// `sink.notify_resource_updated(uri).await` on each.
     /// The set may be empty (nobody subscribed, or the
     /// subscription has already torn down).
+    // Reserved seam for the resource-write fan-out path (see the
+    // `subscription_sinks` field doc); no production caller wires it yet, so
+    // silence dead-code rather than delete a documented, tested API. Its unit
+    // tests below exercise both empty-result paths.
+    #[allow(dead_code)]
     pub(crate) fn subscription_sinks_for(&self, uri: &str) -> Vec<SubscriptionSink> {
         let g = self.inner.lock().expect("McpSurfaces poisoned");
         if !g.subscribable_resources.contains(uri) {
@@ -1119,7 +1124,7 @@ mod tests {
         assert!(accepted
             .resource_subscriptions
             .as_ref()
-            .map_or(true, |v| v.is_empty()));
+            .is_none_or(|v| v.is_empty()));
     }
 
     #[test]
@@ -1161,7 +1166,7 @@ mod tests {
         assert!(accepted
             .resource_subscriptions
             .as_ref()
-            .map_or(true, |v| v.is_empty()));
+            .is_none_or(|v| v.is_empty()));
     }
 
     #[test]

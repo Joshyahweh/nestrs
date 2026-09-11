@@ -10,9 +10,14 @@ use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use nestrs::prelude::*;
 use nestrs::{
-    skip_throttle, throttle, ThrottleSpec, ThrottlerBackend, ThrottlerGuard, ThrottlerModule,
-    ThrottlerOptions, ThrottlerService,
+    skip_throttle, throttle, ThrottleSpec, ThrottlerGuard, ThrottlerModule, ThrottlerOptions,
+    ThrottlerService,
 };
+// Trait import: `RedisThrottler::check` below needs it in scope, but only the
+// `cache-redis`-gated test uses it — importing it unconditionally trips
+// unused-imports in builds without that feature.
+#[cfg(feature = "cache-redis")]
+use nestrs::ThrottlerBackend;
 use std::sync::Arc;
 use tower::ServiceExt;
 

@@ -6,9 +6,12 @@ pub mod auth;
 pub mod csrf;
 
 pub use auth::{
-    parse_authorization_bearer, route_metadata_csv, route_roles_csv, AuthStrategyGuard,
-    BearerToken, DemoXRoleMetadataGuard, OptionalBearerToken,
+    parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
+    DemoXRoleMetadataGuard, OptionalBearerToken,
 };
+// Consumed only by the `policies` module (feature `authz`).
+#[cfg(feature = "authz")]
+pub use auth::route_metadata_csv;
 
 #[cfg(feature = "csrf")]
 pub use csrf::{csrf_double_submit_middleware, CsrfProtectionConfig};

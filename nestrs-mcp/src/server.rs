@@ -459,7 +459,7 @@ impl ServerHandler for NestrsMcpServer {
             && requested
                 .resource_subscriptions
                 .as_ref()
-                .map_or(true, |v| v.is_empty())
+                .is_none_or(|v| v.is_empty())
         {
             return None;
         }
@@ -470,7 +470,7 @@ impl ServerHandler for NestrsMcpServer {
         if accepted
             .resource_subscriptions
             .as_ref()
-            .map_or(true, |v| v.is_empty())
+            .is_none_or(|v| v.is_empty())
         {
             return None;
         }

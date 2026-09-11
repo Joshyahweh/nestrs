@@ -157,6 +157,7 @@ nestrs::database_sqlx::SqlxDatabaseService
 nestrs::database_sqlx::SqlxDatabaseService::pool_arc
 nestrs::database_sqlx::install_default_drivers
 nestrs::exception_filter::ExceptionFilter
+nestrs::files::stream_file_from_dir
 nestrs::files::stream_file_octet_stream
 nestrs::files::stream_file_or_response
 nestrs::files::stream_file_with_content_type

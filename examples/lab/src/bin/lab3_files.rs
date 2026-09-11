@@ -34,26 +34,16 @@ impl UploadService {
     }
 }
 
-// HttpException carries inline detail storage, tripping clippy's result_large_err here.
-#[allow(clippy::result_large_err)]
-fn sanitize_download_name(raw: &str) -> Result<String, HttpException> {
-    // Reject anything that could escape the upload dir: separators, dot segments.
-    if raw.contains("..") || raw.contains('/') || raw.contains('\\') || raw.starts_with('.') {
-        return Err(BadRequestException::new("illegal path"));
-    }
-    Ok(raw.to_string())
-}
-
 #[derive(serde::Deserialize)]
 pub struct NameParams {
     name: String,
 }
-
 #[controller(prefix = "/io")]
 pub struct IoController;
 
 #[routes(state = UploadService)]
 impl IoController {
+
     /// Multipart upload: curl -F file=@somefile
     #[post("/upload")]
     pub async fn upload(
@@ -74,13 +64,11 @@ impl IoController {
     #[get("/download/:name")]
     pub async fn download(
         #[param::param] p: NameParams,
-    ) -> Result<axum::response::Response, HttpException> {
-        let name = sanitize_download_name(&p.name)?;
-        Ok(nestrs::stream_file_or_response(
-            format!("{UPLOAD_DIR}/{name}"),
-            "application/octet-stream",
-        )
-        .await)
+    ) -> axum::response::Response {
+        // The library helper rejects traversal (`..`, separators, absolute
+        // names — including percent-decoded `%2F`) and symlink plants
+        // before touching the filesystem.
+        nestrs::stream_file_from_dir(UPLOAD_DIR, &p.name, "application/octet-stream").await
     }
 }
 

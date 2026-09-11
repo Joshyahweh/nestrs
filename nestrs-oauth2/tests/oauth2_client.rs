@@ -14,7 +14,7 @@ use nestrs_oauth2::client::{
     TokenSet,
 };
 use url::Url;
-use wiremock::matchers::{body_string, body_string_contains, method, path};
+use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn default_options(server: &MockServer) -> OAuth2Options {
@@ -447,14 +447,6 @@ async fn revoke_endpoint_optional_and_called_when_configured() {
     client.revoke(&token).await.unwrap();
     // wiremock counts hits via `expect(N)`; if the call didn't reach
     // the mock, the test fails at the `.expect(2)` contract.
-}
-
-fn contains_token(name: &str, value: &str) -> String {
-    format!("token={}&token_type_hint={}", urlencode(value), name)
-}
-
-fn urlencode(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
 // 20. userinfo_endpoint_optional_and_returns_claims

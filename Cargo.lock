@@ -3410,7 +3410,6 @@ dependencies = [
  "async-graphql-parser",
  "async-graphql-value",
  "axum 0.7.9",
- "nestrs-core",
  "serde_json",
  "tokio",
 ]
@@ -3560,10 +3559,8 @@ name = "nestrs-storage"
 version = "0.5.2"
 dependencies = [
  "async-trait",
- "axum 0.7.9",
  "bytes",
  "futures",
- "nestrs-core",
  "object_store",
  "parking_lot",
  "serde",

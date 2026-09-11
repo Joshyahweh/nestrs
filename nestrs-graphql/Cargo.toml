@@ -17,7 +17,6 @@ async-graphql-derive = "=7.0.17"
 async-graphql-parser = "=7.0.17"
 async-graphql-value = "=7.0.17"
 axum.workspace = true
-nestrs-core = { version = "0.5.2", path = "../nestrs-core" }
 serde_json = "1"
 tokio.workspace = true
 

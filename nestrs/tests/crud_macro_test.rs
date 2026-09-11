@@ -193,6 +193,46 @@ async fn setup_router() -> axum::Router {
     ))
 }
 
+/// Same wiring as [`setup_router`] but seeds `n` rows with distinct authors
+/// `a00..=a{n-1}` (autoincrement ids `1..=n`), so page windows are
+/// distinguishable by id.
+async fn setup_router_n(n: usize) -> axum::Router {
+    nestrs::core::clear_module_cache_for_tests();
+
+    let pool = fresh_pool().await;
+    let svc = CrudService::<Post>::new(pool.clone());
+    for i in 0..n {
+        svc.repo()
+            .repo_crud_create(&Post {
+                id: None,
+                author: format!("a{i:02}"),
+                body: format!("post {i}"),
+            })
+            .await
+            .expect("seed row");
+    }
+
+    let dynamic_module = nestrs::core::DynamicModuleBuilder::<PostsModule>::new()
+        .override_provider::<__PostCrudState>(Arc::new(__PostCrudState::from_pool(pool)))
+        .build();
+    let app = NestApplication::from_registry_and_router(
+        std::sync::Arc::new(dynamic_module.registry),
+        dynamic_module.router,
+    );
+    let ability = Arc::new(
+        Ability::builder()
+            .can(Action::Read, "posts")
+            .can(Action::Create, "posts")
+            .can(Action::Update, "posts")
+            .can(Action::Delete, "posts")
+            .build(),
+    );
+    app.into_router().layer(middleware::from_fn_with_state(
+        ability,
+        install_policies_middleware,
+    ))
+}
+
 async fn get(router: &axum::Router, uri: &str) -> (StatusCode, String) {
     let res = router
         .clone()
@@ -313,6 +353,83 @@ async fn list_filters_by_author_via_bracketed_query() {
     assert_eq!(rows.len(), 2);
     for row in &rows {
         assert_eq!(row["author"].as_str().expect("author"), "alice");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tier-1 pagination pushdown (SQL LIMIT/OFFSET, no sort/filter/search)
+// ---------------------------------------------------------------------------
+
+async fn page_ids(r: &axum::Router, uri: &str) -> Vec<i64> {
+    let (status, body) = get(r, uri).await;
+    assert_eq!(status, StatusCode::OK, "GET {uri} failed: {body}");
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&body).expect("json");
+    rows.iter().map(|x| x["id"].as_i64().expect("id")).collect()
+}
+
+/// Plain paging queries must fetch ONLY the page window from the database
+/// (SQL `LIMIT`/`OFFSET` pushdown) — not materialize the table and slice.
+/// A regression to full-table fetch would still pass `list_returns_all_seeded_rows`;
+/// this test pins the window math on a 7-row fixture.
+#[tokio::test]
+async fn list_plain_paging_returns_exact_id_windows() {
+    let r = setup_router_n(7).await;
+
+    // Default query: page 1, per_page 20 — all 7 rows.
+    assert_eq!(page_ids(&r, "/posts/").await, vec![1, 2, 3, 4, 5, 6, 7]);
+
+    // Page 2 of 3: ids 4, 5, 6 (OFFSET 3, not "rows 4..7 after skip(3)").
+    assert_eq!(page_ids(&r, "/posts/?page=2&per_page=3").await, vec![4, 5, 6]);
+
+    // Partial last page: id 7 only.
+    assert_eq!(page_ids(&r, "/posts/?page=3&per_page=3").await, vec![7]);
+
+    // Beyond the end: empty array with 200, not 404 and not a wrapped-around page.
+    assert!(page_ids(&r, "/posts/?page=4&per_page=3").await.is_empty());
+}
+
+/// `Repository::find_all_paged` — the bounded primitive the list endpoint
+/// leans on — windows rows exactly and rejects negative arguments before
+/// any SQL runs (feature-independent error, including under
+/// `authz-row-level` where validation must precede the ability check).
+#[tokio::test]
+async fn repository_find_all_paged_windows_rows_and_rejects_negative() {
+    let pool = fresh_pool().await;
+    let svc = CrudService::<Post>::new(pool);
+    for i in 0..5 {
+        svc.repo()
+            .repo_crud_create(&Post {
+                id: None,
+                author: format!("a{i:02}"),
+                body: format!("post {i}"),
+            })
+            .await
+            .expect("seed row");
+    }
+
+    let ids = |rows: &[Post]| -> Vec<i64> { rows.iter().map(|r| r.id.unwrap()).collect() };
+
+    let rows = svc.repo().find_all_paged(2, 0).await.expect("first window");
+    assert_eq!(ids(&rows), vec![1, 2]);
+    let rows = svc.repo().find_all_paged(2, 2).await.expect("second window");
+    assert_eq!(ids(&rows), vec![3, 4]);
+    // Partial last page.
+    let rows = svc.repo().find_all_paged(2, 4).await.expect("last window");
+    assert_eq!(ids(&rows), vec![5]);
+    // Past the end and zero-width windows are empty, not errors.
+    assert!(svc.repo().find_all_paged(2, 100).await.expect("past end").is_empty());
+    assert!(svc.repo().find_all_paged(0, 0).await.expect("zero limit").is_empty());
+
+    // Negative limit/offset: Protocol error naming the constraint. Under
+    // `authz-row-level` this also proves validation runs BEFORE the
+    // ability check — no Ability is in scope here, and the error is still
+    // the non-negative one, not `requires install_policies_middleware`.
+    for (limit, offset) in [(-1, 0), (2, -3)] {
+        let err = svc.repo().find_all_paged(limit, offset).await.unwrap_err();
+        assert!(
+            matches!(err, sqlx::Error::Protocol(ref msg) if msg.contains("non-negative")),
+            "unexpected error for ({limit}, {offset}): {err:?}"
+        );
     }
 }
 

@@ -7,6 +7,50 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: `#[crud]` list endpoint materialized the entire table per request
+
+`GET /` on a `#[crud]` controller fetched **every row** from the database
+(`SELECT * FROM {table}`, no LIMIT), then sorted/filtered/searched and
+paginated in memory. On a large table this is a memory-exhaustion and DoS
+vector on every unauthenticated list request — one query bounds none of the
+work it triggers.
+
+- The list endpoint now runs in two tiers. Queries without
+  `sort`/`filter`/`search` (the default `GET /` and plain `?page`/`?per_page`
+  paging) push the window down to SQL — `LIMIT {per_page}
+  OFFSET {(page-1)*per_page}` — so the database materializes one page, not
+  the table. Results are byte-identical to the previous in-memory slice
+  (same `ORDER BY id ASC` ordering, same 422 validation on `page`/`per_page`).
+- Queries **with** `sort`/`filter`/`search` keep the full-fetch + in-memory
+  evaluation: the `@nestjsx/crud`-compatible contract (case-insensitive
+  substring filter, recursive search, `sort` over the full set before the
+  window) requires evaluating the whole result set before slicing.
+  Pushing those into SQL (dialect-aware `json_extract`) is future work;
+  until then a `?sort=id:ASC` query on a huge table still fetches wide —
+  documented, not silently truncated.
+- New API: `Repository::find_all_paged(limit, offset)` (the bounded
+  companion of `find_all`, negative arguments rejected with a `Protocol`
+  error before any SQL runs) and `CrudService::list_page(limit, offset)`.
+  Under `authz-row-level`, `find_all_authorized_paged` pushes LIMIT/OFFSET
+  into the same WHERE-compiling fast path as `find_many_authorized` — but
+  only when the matched read rule's predicate can compile to SQL. A
+  predicate that can't (e.g. a plain closure) would make SQL pages come
+  back short, so the method transparently falls back to the authz
+  fetch-all path and slices the window in Rust: pagination is always
+  exact, page windows never leak rows another principal should not see.
+- **No migration needed.** `page`/`per_page` defaults and bounds (1..=1000)
+  are unchanged; `list()` semantics are unchanged (it is now only the
+  tier-2 wide-fetch primitive plus the direct "give me everything" API).
+  Hand-written services calling `CrudService::list()` keep their current
+  behavior and can opt into the bounded window with `list_page`.
+- Tests: HTTP-level exact-window suite on a 7-row fixture (default query,
+  full middle page, partial last page, empty page past the end); direct
+  `find_all_paged` window/negative-validation tests; under
+  `authz-row-level`, interleaved-row tests proving SQL-pushdown predicates
+  paginate the *filtered* set (Alice's page 2 = her posts 4–6, not raw rows
+  4–6) and closure predicates fall back without leaking other principals'
+  rows into short pages.
+
 ### Fixed — production/security audit: WS/micro guards, pipes, and interceptors bypassed DI (silently Default-constructed)
 
 `#[use_ws_guards]` / `#[use_micro_guards]` (and the sibling pipes /

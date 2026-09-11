@@ -167,6 +167,9 @@ tower = { version = "0.5", features = ["util"] }
 serial_test = "3"
 criterion = { version = "0.5", features = ["async_tokio"] }
 futures-util = "0.3"
+# Test-only tokio features (paused clock for timeout tests). Merges with the
+# workspace tokio via feature unification; never affects downstream builds.
+tokio = { workspace = true, features = ["test-util"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "std", "rand_core"] }
 ed25519 = { version = "2", features = ["pkcs8", "pem"] }
 rand = "0.8"

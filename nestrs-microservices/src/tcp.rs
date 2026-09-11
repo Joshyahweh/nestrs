@@ -4,8 +4,31 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+
+/// Cap on a single newline-delimited JSON frame (request or response) on
+/// both ends. A peer that streams bytes without ever sending a newline can
+/// no longer grow memory without bound: past the cap the frame is rejected
+/// and the connection dropped. 1 MiB is generous for microservice RPC
+/// payloads.
+pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+
+/// Server-side idle timeout between frames on one connection. A silent or
+/// half-open connection is dropped once it exceeds this, releasing its
+/// task and buffered bytes.
+const CONNECTION_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Whole-RPC budget for the client transport (connect + write + read
+/// response): a server that accepts and never responds fails the call
+/// instead of hanging the caller.
+const CLIENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Concurrent in-flight server connections. Past the cap new connections
+/// are closed immediately (logged) rather than spawning unbounded tasks —
+/// the OS backlog absorbs the remainder.
+const MAX_CONNECTIONS: usize = 1024;
 
 #[derive(Clone, Debug)]
 pub struct TcpTransportOptions {
@@ -73,6 +96,53 @@ struct MicroserviceResponse {
     error: Option<MicroserviceErrorPayload>,
 }
 
+/// Reads one newline-terminated frame, **bounded** by `cap` bytes. Unlike
+/// `AsyncBufReadExt::read_line` (which grows the buffer without limit), a
+/// frame larger than `cap` aborts with an error — the caller drops the
+/// connection. Bytes past the newline stay in the reader's buffer, so
+/// pipelined frames survive. `Ok(None)` is a clean EOF.
+async fn read_capped_line<R>(reader: &mut R, cap: usize) -> Result<Option<String>, String>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    let mut line: Vec<u8> = Vec::with_capacity(256);
+    loop {
+        let available = match reader.fill_buf().await {
+            Ok(a) => a,
+            Err(e) => return Err(format!("read failed: {e}")),
+        };
+        if available.is_empty() {
+            // EOF: a partial frame without its terminator is malformed.
+            return if line.is_empty() {
+                Ok(None)
+            } else {
+                Err("connection closed mid-frame".to_string())
+            };
+        }
+        match available.iter().position(|&b| b == b'\n') {
+            Some(pos) => {
+                line.extend_from_slice(&available[..pos]);
+                let consumed = pos + 1;
+                reader.consume(consumed);
+                if line.len() > cap {
+                    return Err(format!("frame exceeds {cap} byte limit"));
+                }
+                return String::from_utf8(line)
+                    .map(Some)
+                    .map_err(|_| "frame is not valid UTF-8".to_string());
+            }
+            None => {
+                let len = available.len();
+                line.extend_from_slice(available);
+                reader.consume(len);
+                if line.len() > cap {
+                    return Err(format!("frame exceeds {cap} byte limit"));
+                }
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl Transport for TcpTransport {
     async fn send_json(
@@ -80,61 +150,75 @@ impl Transport for TcpTransport {
         pattern: &str,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, TransportError> {
-        let id = self.next_id();
-        let req = MicroserviceRequest {
-            id: id.clone(),
-            kind: PacketKind::Send,
-            pattern: pattern.to_string(),
-            payload,
-        };
+        // The whole RPC (connect + write + read) is bounded: a server that
+        // accepts and never responds fails the call instead of hanging the
+        // caller.
+        tokio::time::timeout(CLIENT_REQUEST_TIMEOUT, async {
+            let id = self.next_id();
+            let req = MicroserviceRequest {
+                id: id.clone(),
+                kind: PacketKind::Send,
+                pattern: pattern.to_string(),
+                payload,
+            };
 
-        let mut stream = TcpStream::connect(self.options.addr)
-            .await
-            .map_err(|e| TransportError::new(format!("tcp transport connect failed: {e}")))?;
+            let mut stream = TcpStream::connect(self.options.addr).await.map_err(|e| {
+                TransportError::new(format!("tcp transport connect failed: {e}"))
+            })?;
 
-        let line = serde_json::to_string(&req)
-            .map_err(|e| TransportError::new(format!("serialize request failed: {e}")))?;
-        stream
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| TransportError::new(format!("write request failed: {e}")))?;
-        stream
-            .write_all(b"\n")
-            .await
-            .map_err(|e| TransportError::new(format!("write request newline failed: {e}")))?;
-        stream
-            .flush()
-            .await
-            .map_err(|e| TransportError::new(format!("flush request failed: {e}")))?;
+            let line = serde_json::to_string(&req)
+                .map_err(|e| TransportError::new(format!("serialize request failed: {e}")))?;
+            stream
+                .write_all(line.as_bytes())
+                .await
+                .map_err(|e| TransportError::new(format!("write request failed: {e}")))?;
+            stream.write_all(b"\n").await.map_err(|e| {
+                TransportError::new(format!("write request newline failed: {e}"))
+            })?;
+            stream
+                .flush()
+                .await
+                .map_err(|e| TransportError::new(format!("flush request failed: {e}")))?;
 
-        let mut reader = BufReader::new(stream);
-        let mut resp_line = String::new();
-        let n = reader
-            .read_line(&mut resp_line)
-            .await
-            .map_err(|e| TransportError::new(format!("read response failed: {e}")))?;
-        if n == 0 {
-            return Err(TransportError::new("tcp transport: empty response"));
-        }
-        let resp: MicroserviceResponse = serde_json::from_str(resp_line.trim_end_matches('\n'))
-            .map_err(|e| TransportError::new(format!("deserialize response failed: {e}")))?;
-        if resp.id != id {
-            return Err(TransportError::new("tcp transport: response id mismatch"));
-        }
-        if resp.ok {
-            Ok(resp.payload.unwrap_or(serde_json::Value::Null))
-        } else {
-            let mut err = TransportError::new(
-                resp.error
-                    .as_ref()
-                    .map(|e| e.message.as_str())
-                    .unwrap_or("microservice error"),
-            );
-            if let Some(details) = resp.error.and_then(|e| e.details) {
-                err = err.with_details(details);
+            // Bounded read: a hostile server cannot stream an unbounded
+            // "response" line either.
+            let mut reader = BufReader::new(stream);
+            let resp_line = match read_capped_line(&mut reader, MAX_FRAME_BYTES).await {
+                Ok(Some(l)) => l,
+                Ok(None) => {
+                    return Err(TransportError::new("tcp transport: empty response"))
+                }
+                Err(reason) => {
+                    return Err(TransportError::new(format!("read response: {reason}")))
+                }
+            };
+            let resp: MicroserviceResponse = serde_json::from_str(&resp_line)
+                .map_err(|e| TransportError::new(format!("deserialize response failed: {e}")))?;
+            if resp.id != id {
+                return Err(TransportError::new("tcp transport: response id mismatch"));
             }
-            Err(err)
-        }
+            if resp.ok {
+                Ok(resp.payload.unwrap_or(serde_json::Value::Null))
+            } else {
+                let mut err = TransportError::new(
+                    resp.error
+                        .as_ref()
+                        .map(|e| e.message.as_str())
+                        .unwrap_or("microservice error"),
+                );
+                if let Some(details) = resp.error.and_then(|e| e.details) {
+                    err = err.with_details(details);
+                }
+                Err(err)
+            }
+        })
+        .await
+        .map_err(|_| {
+            TransportError::new(format!(
+                "tcp transport: request timed out after {CLIENT_REQUEST_TIMEOUT:?} \
+                 (connect + write + read)"
+            ))
+        })?
     }
 
     async fn emit_json(
@@ -142,33 +226,40 @@ impl Transport for TcpTransport {
         pattern: &str,
         payload: serde_json::Value,
     ) -> Result<(), TransportError> {
-        let id = self.next_id();
-        let req = MicroserviceRequest {
-            id,
-            kind: PacketKind::Emit,
-            pattern: pattern.to_string(),
-            payload,
-        };
+        tokio::time::timeout(CLIENT_REQUEST_TIMEOUT, async {
+            let id = self.next_id();
+            let req = MicroserviceRequest {
+                id,
+                kind: PacketKind::Emit,
+                pattern: pattern.to_string(),
+                payload,
+            };
 
-        let mut stream = TcpStream::connect(self.options.addr)
-            .await
-            .map_err(|e| TransportError::new(format!("tcp transport connect failed: {e}")))?;
+            let mut stream = TcpStream::connect(self.options.addr).await.map_err(|e| {
+                TransportError::new(format!("tcp transport connect failed: {e}"))
+            })?;
 
-        let line = serde_json::to_string(&req)
-            .map_err(|e| TransportError::new(format!("serialize event failed: {e}")))?;
-        stream
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| TransportError::new(format!("write event failed: {e}")))?;
-        stream
-            .write_all(b"\n")
-            .await
-            .map_err(|e| TransportError::new(format!("write event newline failed: {e}")))?;
-        stream
-            .flush()
-            .await
-            .map_err(|e| TransportError::new(format!("flush event failed: {e}")))?;
-        Ok(())
+            let line = serde_json::to_string(&req)
+                .map_err(|e| TransportError::new(format!("serialize event failed: {e}")))?;
+            stream
+                .write_all(line.as_bytes())
+                .await
+                .map_err(|e| TransportError::new(format!("write event failed: {e}")))?;
+            stream.write_all(b"\n").await.map_err(|e| {
+                TransportError::new(format!("write event newline failed: {e}"))
+            })?;
+            stream
+                .flush()
+                .await
+                .map_err(|e| TransportError::new(format!("flush event failed: {e}")))?;
+            Ok(())
+        })
+        .await
+        .map_err(|_| {
+            TransportError::new(format!(
+                "tcp transport: emit timed out after {CLIENT_REQUEST_TIMEOUT:?}"
+            ))
+        })?
     }
 }
 
@@ -210,6 +301,7 @@ impl TcpMicroserviceServer {
             .map_err(|e| TransportError::new(format!("tcp microservice bind failed: {e}")))?;
 
         let handlers = Arc::new(self.handlers);
+        let conn_slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
 
         tokio::pin!(shutdown);
 
@@ -221,10 +313,23 @@ impl TcpMicroserviceServer {
                 accepted = listener.accept() => {
                     let (stream, _peer) = accepted
                         .map_err(|e| TransportError::new(format!("tcp microservice accept failed: {e}")))?;
-                    let handlers = handlers.clone();
-                    tokio::spawn(async move {
-                        serve_connection(stream, handlers).await;
-                    });
+                    // Fail-fast cap: never spawn unbounded connection tasks.
+                    // Past the cap the new connection is closed immediately —
+                    // the OS backlog absorbs the remainder.
+                    match conn_slots.clone().try_acquire_owned() {
+                        Ok(permit) => {
+                            let handlers = handlers.clone();
+                            tokio::spawn(async move {
+                                let _permit = permit;
+                                serve_connection(stream, handlers).await;
+                            });
+                        }
+                        Err(_) => {
+                            tracing::warn!(target: "nestrs_microservices",
+                                "tcp microservice: {MAX_CONNECTIONS} concurrent connection cap reached; dropping new connection");
+                            // Dropping `stream` closes it.
+                        }
+                    }
                 }
             }
         }
@@ -235,10 +340,34 @@ impl TcpMicroserviceServer {
 
 async fn serve_connection(stream: TcpStream, handlers: Arc<Vec<Arc<dyn MicroserviceHandler>>>) {
     let (read_half, mut write_half) = stream.into_split();
-    let mut lines = BufReader::new(read_half).lines();
+    let mut reader = BufReader::new(read_half);
 
-    while let Ok(Some(line)) = lines.next_line().await {
-        let req: MicroserviceRequest = match serde_json::from_str(&line) {
+    loop {
+        let frame = match tokio::time::timeout(
+            CONNECTION_IDLE_TIMEOUT,
+            read_capped_line(&mut reader, MAX_FRAME_BYTES),
+        )
+        .await
+        {
+            // Idle or half-open connection: drop it, releasing its task.
+            Err(_elapsed) => return,
+            Ok(Err(reason)) => {
+                // Malformed or oversized frame: reply with a generic error
+                // frame (never echoing attacker bytes) and drop the
+                // connection.
+                let _ = write_half
+                    .write_all(br#"{"id":"0","ok":false,"error":{"message":"frame rejected"}}"#)
+                    .await;
+                let _ = write_half.write_all(b"\n").await;
+                tracing::warn!(target: "nestrs_microservices",
+                    "tcp microservice: dropping connection: {reason}");
+                return;
+            }
+            Ok(Ok(None)) => return, // clean EOF
+            Ok(Ok(Some(frame))) => frame,
+        };
+
+        let req: MicroserviceRequest = match serde_json::from_str(&frame) {
             Ok(v) => v,
             Err(_) => {
                 // best-effort error frame for malformed payloads

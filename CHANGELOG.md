@@ -7,6 +7,42 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: Redis transport dialed fresh connections for every RPC
+
+Every Redis microservice operation opened new TCP connections: a client
+`send_json` dialed a dedicated pubsub connection for its reply subscription
+*and* a command connection for the PUBLISH; `emit_json` dialed one per emit;
+and the server dialed a fresh command connection inside every reply task.
+Under load that is 2N+ connections of connect/handshake/teardown per second
+against the Redis server — connection storms, fd exhaustion risk, and added
+per-RPC latency. The redis dependency now enables its `connection-manager`
+feature.
+
+- **Client `send_json`** now runs over one fixed pair of long-lived
+  connections shared by all calls (and all clones of the transport): a
+  reconnecting `ConnectionManager` for PUBLISHes, and a single dedicated
+  pubsub connection owned by a pump task that routes each reply message to
+  its waiting RPC by exact channel. Per-RPC reply channels are still unique
+  unguessable UUIDs, still subscribed *before* the request is published (the
+  subscription ack is awaited), and still released immediately after the
+  reply (or timeout) — no per-RPC subscription or connection buildup. The
+  correlation-id check, wire shape, and error mapping are unchanged.
+- **`emit_json`** publishes over the shared manager (with a
+  `request_timeout`-bounded publish).
+- **Server** creates one `ConnectionManager` at `listen` and reuses it for
+  every reply; if Redis restarts, the manager reconnects transparently. The
+  existing long-lived wildcard pubsub subscription is unchanged.
+- **Failure semantics**: a dead pubsub connection (Redis restart) restarts
+  the pump on the next call; connect attempts are bounded by
+  `request_timeout` so a black-holed address fails the RPC instead of
+  hanging callers queued on the shared-connection lock.
+- **Tests**: 2 new always-on unit tests (unreachable Redis fails fast
+  without hanging; failed connects don't poison the transport) and a new
+  opt-in live suite `nestrs-microservices/tests/redis_transport_live.rs`
+  (set `NESTRS_TEST_REDIS_URL`) asserting sequential + concurrent RPCs,
+  error replies, and emits all run on a fixed connection set
+  (`INFO clients`'s `connected_clients` is stable across the whole workload).
+
 ### Fixed — production/security audit: TCP microservice transport had unbounded frames and no timeouts
 
 The TCP transport (`nestrs::microservices` TCP server + `TcpTransport`) read

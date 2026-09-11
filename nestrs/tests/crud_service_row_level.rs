@@ -192,6 +192,122 @@ async fn list_returns_only_visible_rows() {
     assert_eq!(rows[0].author, "alice");
 }
 
+/// The pagination pushdown must stay EXACT for the pre-built
+/// `AuthorIsCurrentUser` predicate (its `sql_conditions` compile into the
+/// WHERE clause, so LIMIT/OFFSET paginate on the already-filtered set):
+/// page 2 of Alice's rows contains her 4th–6th posts even with Bob's rows
+/// interleaved.
+#[tokio::test]
+async fn list_page_with_sql_pushdown_predicate_paginates_exactly() {
+    let pool = fresh_pool().await;
+    let svc = CrudService::<Post>::new(pool.clone());
+    let repo = svc.repo();
+    // Interleave: alice ids 1,3,5,7,9 + bob ids 2,4,6,8,10.
+    for i in 0..5 {
+        repo.repo_crud_create(&Post {
+            id: None,
+            author: "alice".into(),
+            body: format!("a{i}"),
+        })
+        .await
+        .unwrap();
+        repo.repo_crud_create(&Post {
+            id: None,
+            author: "bob".into(),
+            body: format!("b{i}"),
+        })
+        .await
+        .unwrap();
+    }
+
+    // Page 1: Alice's first 3 rows (ids 1, 3, 5).
+    let rows = with_ability(
+        author_rules(),
+        with_principal(alice(), async { svc.list_page(3, 0).await.expect("page 1") }),
+    )
+    .await;
+    let ids: Vec<i64> = rows.iter().map(|r| r.id.unwrap()).collect();
+    assert_eq!(ids, vec![1, 3, 5], "page 1");
+
+    // Page 2: ids 7, 9 — the window must advance over the FILTERED set,
+    // not the raw table.
+    let rows = with_ability(
+        author_rules(),
+        with_principal(alice(), async { svc.list_page(3, 3).await.expect("page 2") }),
+    )
+    .await;
+    let ids: Vec<i64> = rows.iter().map(|r| r.id.unwrap()).collect();
+    assert_eq!(ids, vec![7, 9], "page 2");
+
+    // Beyond the filtered end: empty, not a leak of Bob's rows.
+    let rows = with_ability(
+        author_rules(),
+        with_principal(alice(), async { svc.list_page(3, 6).await.expect("page 3") }),
+    )
+    .await;
+    assert!(rows.is_empty(), "no page 3 for alice");
+}
+
+/// A closure predicate has no SQL pushdown — the paged path must fall back
+/// to the fetch-all + filter + slice so page windows stay exact (a naive
+/// LIMIT-before-filter would return OTHER PRINCIPALS' rows).
+#[tokio::test]
+async fn list_page_with_closure_predicate_falls_back_and_stays_exact() {
+    let pool = fresh_pool().await;
+    let svc = CrudService::<Post>::new(pool.clone());
+    let repo = svc.repo();
+    // alice ids 1,3 + bob ids 2,4.
+    for i in 0..2 {
+        repo.repo_crud_create(&Post {
+            id: None,
+            author: "alice".into(),
+            body: format!("a{i}"),
+        })
+        .await
+        .unwrap();
+        repo.repo_crud_create(&Post {
+            id: None,
+            author: "bob".into(),
+            body: format!("b{i}"),
+        })
+        .await
+        .unwrap();
+    }
+
+    // Closure predicate: allow only rows whose author equals the principal —
+    // same semantics as AuthorIsCurrentUser but WITHOUT sql_conditions, so
+    // it filters post-load only.
+    //
+    // Alice reads page 2 (limit 1, offset 1): her SECOND row (id 3), not
+    // Bob's id 2 that a raw LIMIT 1 OFFSET 1 would return.
+    let rules = Arc::new(
+        Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "posts",
+                vec![],
+                |row: &serde_json::Value, p: &Principal| row["author"] == p.subject.as_str(),
+            )
+            .build(),
+    );
+    let rows = with_ability(
+        rules.clone(),
+        with_principal(alice(), async { svc.list_page(1, 1).await.expect("closure page 2") }),
+    )
+    .await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, Some(3), "closure predicate must filter BEFORE the window");
+    assert_eq!(rows[0].author, "alice");
+
+    // Beyond the filtered end: empty.
+    let rows = with_ability(
+        rules.clone(),
+        with_principal(alice(), async { svc.list_page(1, 2).await.expect("closure page 3") }),
+    )
+    .await;
+    assert!(rows.is_empty());
+}
+
 #[tokio::test]
 async fn update_by_another_author_is_invisible_then_denied() {
     let pool = fresh_pool().await;

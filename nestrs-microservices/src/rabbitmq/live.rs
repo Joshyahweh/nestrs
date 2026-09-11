@@ -1,12 +1,24 @@
 use crate::wire::{dispatch_emit, dispatch_send, WireError, WireKind, WireRequest, WireResponse};
 use crate::{MicroserviceHandler, MicroserviceServer, Transport, TransportError};
 use async_trait::async_trait;
-use futures_util::StreamExt;
+use futures_util::{FutureExt as _, StreamExt};
 use lapin::{options::*, types::FieldTable, BasicProperties, Connection, ConnectionProperties};
 use serde_json::Value;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
+
+/// Human-readable summary of a caught panic payload for `warn!` lines.
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = panic.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = panic.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
 
 #[derive(Clone)]
 pub struct RabbitMqTransportOptions {
@@ -311,6 +323,14 @@ impl RabbitMqMicroserviceServer {
             .await
             .map_err(|e| TransportError::new(format!("rabbitmq consume failed: {e}")))?;
 
+        // One shared channel for all reply publishes (lapin channels are
+        // cheap Arc clones and serialize internally) instead of a fresh
+        // channel per reply.
+        let reply_ch = (*conn)
+            .create_channel()
+            .await
+            .map_err(|e| TransportError::new(format!("rabbitmq reply channel failed: {e}")))?;
+
         tokio::pin!(shutdown);
         loop {
             tokio::select! {
@@ -323,9 +343,9 @@ impl RabbitMqMicroserviceServer {
                     };
 
                     let ack_ch = channel.clone();
+                    let reply_ch = reply_ch.clone();
                     let tag = delivery.delivery_tag;
                     let handlers = handlers.clone();
-                    let conn = conn.clone();
 
                     #[cfg(feature = "microservice-metrics")]
                     metrics::counter!("nestrs_microservice_rabbitmq_deliver_total").increment(1);
@@ -333,7 +353,15 @@ impl RabbitMqMicroserviceServer {
                     tokio::spawn(async move {
                         let req: WireRequest = match serde_json::from_slice(&delivery.data) {
                             Ok(v) => v,
-                            Err(_) => {
+                            Err(e) => {
+                                // Poison message: unparseable wire payloads are
+                                // dropped, not requeued (requeue => redelivery
+                                // loop). Log the length, never the bytes.
+                                tracing::warn!(
+                                    error = %e,
+                                    len = delivery.data.len(),
+                                    "rabbitmq: dropping malformed request (nack, no requeue)"
+                                );
                                 let _ = ack_ch
                                     .basic_nack(
                                         tag,
@@ -349,12 +377,68 @@ impl RabbitMqMicroserviceServer {
 
                         match req.kind {
                             WireKind::Send => {
-                                let Some(reply_q) = req.reply else {
+                                let Some(reply_q) = req.reply.clone() else {
                                     let _ = ack_ch.basic_ack(tag, BasicAckOptions::default()).await;
                                     return;
                                 };
-                                let res =
-                                    dispatch_send(&handlers, &req.pattern, req.payload.clone()).await;
+                                // Handler dispatch runs user code. A panic must
+                                // not kill the task before the ack/nack: an
+                                // unacked message gets redelivered on reconnect
+                                // (or after the broker's consumer ack-timeout
+                                // force-closes the channel), panics again, and
+                                // loops forever — while each poison message
+                                // wedges one slot of the prefetch window.
+                                let res = match AssertUnwindSafe(
+                                    dispatch_send(&handlers, &req.pattern, req.payload.clone()),
+                                )
+                                .catch_unwind()
+                                .await
+                                {
+                                    Ok(r) => r,
+                                    Err(panic) => {
+                                        tracing::warn!(
+                                            pattern = %req.pattern,
+                                            panic = %panic_message(&*panic),
+                                            "rabbitmq handler panicked; erroring reply and dropping message"
+                                        );
+                                        let wire = WireResponse {
+                                            ok: false,
+                                            payload: None,
+                                            error: Some(WireError {
+                                                message: "microservice handler panicked".to_string(),
+                                                details: None,
+                                            }),
+                                            correlation_id: req.correlation_id.clone(),
+                                        };
+                                        if let Ok(bytes) = serde_json::to_vec(&wire) {
+                                            if let Err(e) = reply_ch
+                                                .basic_publish(
+                                                    "",
+                                                    &reply_q,
+                                                    BasicPublishOptions::default(),
+                                                    &bytes,
+                                                    BasicProperties::default(),
+                                                )
+                                                .await
+                                            {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    "rabbitmq panic reply publish failed"
+                                                );
+                                            }
+                                        }
+                                        let _ = ack_ch
+                                            .basic_nack(
+                                                tag,
+                                                BasicNackOptions {
+                                                    requeue: false,
+                                                    ..Default::default()
+                                                },
+                                            )
+                                            .await;
+                                        return;
+                                    }
+                                };
                                 let wire = match res {
                                     Ok(v) => WireResponse {
                                         ok: true,
@@ -373,21 +457,50 @@ impl RabbitMqMicroserviceServer {
                                     },
                                 };
                                 if let Ok(bytes) = serde_json::to_vec(&wire) {
-                                    if let Ok(ch) = (*conn).create_channel().await {
-                                        let _ = ch
-                                            .basic_publish(
-                                                "",
-                                                &reply_q,
-                                                BasicPublishOptions::default(),
-                                                &bytes,
-                                                BasicProperties::default(),
-                                            )
-                                            .await;
+                                    if let Err(e) = reply_ch
+                                        .basic_publish(
+                                            "",
+                                            &reply_q,
+                                            BasicPublishOptions::default(),
+                                            &bytes,
+                                            BasicProperties::default(),
+                                        )
+                                        .await
+                                    {
+                                        // Silent today: the caller would just
+                                        // time out with no server-side trace.
+                                        tracing::warn!(
+                                            error = %e,
+                                            "rabbitmq reply publish failed; caller will time out"
+                                        );
                                     }
                                 }
                             }
                             WireKind::Emit => {
-                                dispatch_emit(&handlers, &req.pattern, req.payload.clone()).await;
+                                if let Err(panic) = AssertUnwindSafe(dispatch_emit(
+                                    &handlers,
+                                    &req.pattern,
+                                    req.payload.clone(),
+                                ))
+                                .catch_unwind()
+                                .await
+                                {
+                                    tracing::warn!(
+                                        pattern = %req.pattern,
+                                        panic = %panic_message(&*panic),
+                                        "rabbitmq handler panicked; dropping message"
+                                    );
+                                    let _ = ack_ch
+                                        .basic_nack(
+                                            tag,
+                                            BasicNackOptions {
+                                                requeue: false,
+                                                ..Default::default()
+                                            },
+                                        )
+                                        .await;
+                                    return;
+                                }
                             }
                         }
                         let _ = ack_ch.basic_ack(tag, BasicAckOptions::default()).await;
@@ -425,5 +538,22 @@ mod redaction_tests {
         let rendered = format!("{opts:?}");
         assert!(!rendered.contains("pass@"), "password leaked: {rendered}");
         assert!(rendered.contains("***@rabbit.local"));
+    }
+}
+
+#[cfg(test)]
+mod panic_message_tests {
+    use super::*;
+
+    #[test]
+    fn extracts_str_string_and_non_string_panics() {
+        let s: Box<dyn std::any::Any + Send> = Box::new("boom");
+        assert_eq!(panic_message(&*s), "boom");
+
+        let s: Box<dyn std::any::Any + Send> = Box::new("boom".to_string());
+        assert_eq!(panic_message(&*s), "boom");
+
+        let s: Box<dyn std::any::Any + Send> = Box::new(42i32);
+        assert_eq!(panic_message(&*s), "non-string panic payload");
     }
 }

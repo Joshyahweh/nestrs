@@ -71,6 +71,7 @@ There is no separate microservice exception-filter pipeline like Nest’s docs. 
 |--------|-----------------|-----------------------------------|
 | Before handler | `CanActivate` guards, `PipeTransform`, `Interceptor` | `MicroCanActivate`, `MicroPipeTransform`, `MicroIncomingInterceptor` |
 | Order (generated) | guards → pipes → handler (interceptors vary by layer) | **interceptors → guards → pipes → handler** |
+| DI resolution | `CanActivate::resolve(&registry)` at route registration | `MicroCanActivate::resolve(&registry)` (etc.) **per message**, via the registry-aware dispatch every `#[module(microservices = [...])]` handler is wrapped in |
 | Global exception filter | `use_global_exception_filter` + `HttpException` in response extensions | **No** — return `Result<_, TransportError>`; guards/pipes return `TransportError` |
 | Metadata / OpenAPI | `MetadataRegistry`, `#[roles]`, OpenAPI attrs | Pattern string + JSON payload only (no shared HTTP metadata registry on the wire) |
 

@@ -2361,6 +2361,9 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let mut arms = Vec::new();
+    // Same event arms, but cross-cutting concerns resolve via the registry
+    // (DI-backed guards) — emitted into `RegistryAwareWsGateway`.
+    let mut registry_arms = Vec::new();
     for h in handlers {
         let event = h.event;
         let name = h.name;
@@ -2433,7 +2436,14 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         };
 
-        let inter_ts: Vec<_> = ws_interceptors
+        // Two dispatch flavors: the plain `WsGateway` impl instantiates
+        // cross-cutting concerns via `Default` (registry-less dispatch, e.g.
+        // a hand-mounted `Arc<T>`), while the registry-aware impl resolves
+        // them through the app's `ProviderRegistry` so DI-backed guards,
+        // pipes, and interceptors actually receive their dependencies.
+        // `#[ws_gateway]` mounts the registry-aware flavor via
+        // `ws_route_with_registry`.
+        let inter_ts_plain: Vec<_> = ws_interceptors
             .iter()
             .map(|t| {
                 quote! {
@@ -2443,8 +2453,18 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             })
             .collect();
+        let inter_ts_registry: Vec<_> = ws_interceptors
+            .iter()
+            .map(|t| {
+                quote! {
+                    <#t as nestrs::ws::WsIncomingInterceptor>::resolve(registry)
+                        .before_handle(client.handshake(), #event, &__ws_payload)
+                        .await;
+                }
+            })
+            .collect();
 
-        let guard_ts: Vec<_> = ws_guards
+        let guard_ts_plain: Vec<_> = ws_guards
             .iter()
             .map(|g| {
                 quote! {
@@ -2458,8 +2478,22 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             })
             .collect();
+        let guard_ts_registry: Vec<_> = ws_guards
+            .iter()
+            .map(|g| {
+                quote! {
+                    if let Err(__e) = <#g as nestrs::ws::WsCanActivate>::resolve(registry)
+                        .can_activate_ws(client.handshake(), #event, &__ws_payload)
+                        .await
+                    {
+                        let _ = client.emit(nestrs::ws::WS_ERROR_EVENT, __e.to_json());
+                        return;
+                    }
+                }
+            })
+            .collect();
 
-        let pipe_ts: Vec<_> = ws_pipes
+        let pipe_ts_plain: Vec<_> = ws_pipes
             .iter()
             .map(|p| {
                 quote! {
@@ -2476,13 +2510,39 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             })
             .collect();
+        let pipe_ts_registry: Vec<_> = ws_pipes
+            .iter()
+            .map(|p| {
+                quote! {
+                    __ws_payload = match <#p as nestrs::ws::WsPipeTransform>::resolve(registry)
+                        .transform(#event, __ws_payload)
+                        .await
+                    {
+                        Ok(__v) => __v,
+                        Err(__e) => {
+                            let _ = client.emit(nestrs::ws::WS_ERROR_EVENT, __e.to_json());
+                            return;
+                        }
+                    };
+                }
+            })
+            .collect();
 
         arms.push(quote! {
             #event => {
                 let mut __ws_payload = payload.clone();
-                #(#inter_ts)*
-                #(#guard_ts)*
-                #(#pipe_ts)*
+                #(#inter_ts_plain)*
+                #(#guard_ts_plain)*
+                #(#pipe_ts_plain)*
+                #call
+            }
+        });
+        registry_arms.push(quote! {
+            #event => {
+                let mut __ws_payload = payload.clone();
+                #(#inter_ts_registry)*
+                #(#guard_ts_registry)*
+                #(#pipe_ts_registry)*
                 #call
             }
         });
@@ -2501,6 +2561,30 @@ pub fn ws_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             ) {
                 match event {
                     #(#arms,)*
+                    _ => {
+                        let _ = client.emit(
+                            nestrs::ws::WS_ERROR_EVENT,
+                            nestrs::serde_json::json!({
+                                "event": event,
+                                "message": "unknown event"
+                            }),
+                        );
+                    }
+                }
+            }
+        }
+
+        #[nestrs::async_trait]
+        impl nestrs::ws::RegistryAwareWsGateway for #self_ty {
+            async fn on_message_with_registry(
+                &self,
+                client: nestrs::ws::WsClient,
+                event: &str,
+                payload: nestrs::serde_json::Value,
+                registry: &nestrs::core::ProviderRegistry,
+            ) {
+                match event {
+                    #(#registry_arms,)*
                     _ => {
                         let _ = client.emit(
                             nestrs::ws::WS_ERROR_EVENT,
@@ -2534,7 +2618,12 @@ pub fn ws_gateway(attr: TokenStream, item: TokenStream) -> TokenStream {
                 registry: &nestrs::core::ProviderRegistry
             ) -> nestrs::axum::Router {
                 let gateway = registry.get::<#name>();
-                router.route(#path, nestrs::ws::ws_route(gateway))
+                // Registry-aware mount so `#[use_ws_guards]` / `#[use_ws_pipes]`
+                // / `#[use_ws_interceptors]` resolve through DI per message.
+                router.route(
+                    #path,
+                    nestrs::ws::ws_route_with_registry(gateway, registry.clone()),
+                )
             }
         }
     };
@@ -3064,6 +3153,12 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let mut message_arms = Vec::new();
     let mut event_arms = Vec::new();
+    // Same dispatch arms, but cross-cutting concerns resolve via the
+    // registry (DI-backed guards) — emitted into
+    // `RegistryAwareMicroserviceHandler`, which `handler_factory` installs
+    // for every `#[module(microservices = [...])]` entry.
+    let mut message_arms_registry = Vec::new();
+    let mut event_arms_registry = Vec::new();
     // Patterns with NATS wildcards (`*`, `>`) can never equal a concrete
     // incoming pattern, so they get guarded arms matched by
     // `nestrs::microservices::pattern_matches`. Emitted after every literal
@@ -3071,6 +3166,8 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // order.
     let mut wildcard_message_arms = Vec::new();
     let mut wildcard_event_arms = Vec::new();
+    let mut wildcard_message_arms_registry = Vec::new();
+    let mut wildcard_event_arms_registry = Vec::new();
 
     for h in handlers {
         if h.is_message {
@@ -3083,7 +3180,15 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let micro_guards = h.micro_guards.clone();
             let micro_pipes = h.micro_pipes.clone();
 
-            let micro_inter_ts: Vec<_> = micro_interceptors
+            // Two dispatch flavors: the plain `MicroserviceHandler` impl
+            // instantiates cross-cutting concerns via `Default`
+            // (registry-less dispatch), while the registry-aware impl resolves
+            // them through the app's `ProviderRegistry` so DI-backed guards,
+            // pipes, and interceptors actually receive their dependencies.
+            // `handler_factory` (installed by `#[module(microservices = [...])]`)
+            // wraps handlers so every transport dispatches the registry-aware
+            // flavor.
+            let micro_inter_ts_plain: Vec<_> = micro_interceptors
                 .iter()
                 .map(|t| {
                     quote! {
@@ -3093,8 +3198,18 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 })
                 .collect();
+            let micro_inter_ts_registry: Vec<_> = micro_interceptors
+                .iter()
+                .map(|t| {
+                    quote! {
+                        <#t as nestrs::microservices::MicroIncomingInterceptor>::resolve(registry)
+                            .before_handle_micro(#pattern, &__ms_payload)
+                            .await;
+                    }
+                })
+                .collect();
 
-            let micro_guard_ts: Vec<_> = micro_guards
+            let micro_guard_ts_plain: Vec<_> = micro_guards
                 .iter()
                 .map(|g| {
                     quote! {
@@ -3107,12 +3222,39 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 })
                 .collect();
+            let micro_guard_ts_registry: Vec<_> = micro_guards
+                .iter()
+                .map(|g| {
+                    quote! {
+                        if let Err(__e) = <#g as nestrs::microservices::MicroCanActivate>::resolve(registry)
+                            .can_activate_micro(#pattern, &__ms_payload)
+                            .await
+                        {
+                            return Some(Err(__e));
+                        }
+                    }
+                })
+                .collect();
 
-            let micro_pipe_ts: Vec<_> = micro_pipes
+            let micro_pipe_ts_plain: Vec<_> = micro_pipes
                 .iter()
                 .map(|p| {
                     quote! {
                         __ms_payload = match <#p as ::core::default::Default>::default()
+                            .transform_micro(#pattern, __ms_payload)
+                            .await
+                        {
+                            Ok(__v) => __v,
+                            Err(__e) => return Some(Err(__e)),
+                        };
+                    }
+                })
+                .collect();
+            let micro_pipe_ts_registry: Vec<_> = micro_pipes
+                .iter()
+                .map(|p| {
+                    quote! {
+                        __ms_payload = match <#p as nestrs::microservices::MicroPipeTransform>::resolve(registry)
                             .transform_micro(#pattern, __ms_payload)
                             .await
                         {
@@ -3230,9 +3372,21 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 wildcard_message_arms.push(quote! {
                     _ if nestrs::microservices::pattern_matches(#pattern, pattern) => {
                         let mut __ms_payload = payload.clone();
-                        #(#micro_inter_ts)*
-                        #(#micro_guard_ts)*
-                        #(#micro_pipe_ts)*
+                        #(#micro_inter_ts_plain)*
+                        #(#micro_guard_ts_plain)*
+                        #(#micro_pipe_ts_plain)*
+                        #decode
+                        Some({
+                            #call
+                        })
+                    }
+                });
+                wildcard_message_arms_registry.push(quote! {
+                    _ if nestrs::microservices::pattern_matches(#pattern, pattern) => {
+                        let mut __ms_payload = payload.clone();
+                        #(#micro_inter_ts_registry)*
+                        #(#micro_guard_ts_registry)*
+                        #(#micro_pipe_ts_registry)*
                         #decode
                         Some({
                             #call
@@ -3243,9 +3397,21 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 message_arms.push(quote! {
                     #pattern => {
                         let mut __ms_payload = payload.clone();
-                        #(#micro_inter_ts)*
-                        #(#micro_guard_ts)*
-                        #(#micro_pipe_ts)*
+                        #(#micro_inter_ts_plain)*
+                        #(#micro_guard_ts_plain)*
+                        #(#micro_pipe_ts_plain)*
+                        #decode
+                        Some({
+                            #call
+                        })
+                    }
+                });
+                message_arms_registry.push(quote! {
+                    #pattern => {
+                        let mut __ms_payload = payload.clone();
+                        #(#micro_inter_ts_registry)*
+                        #(#micro_guard_ts_registry)*
+                        #(#micro_pipe_ts_registry)*
                         #decode
                         Some({
                             #call
@@ -3261,7 +3427,7 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let micro_guards = h.micro_guards.clone();
             let micro_pipes = h.micro_pipes.clone();
 
-            let micro_inter_ts: Vec<_> = micro_interceptors
+            let micro_inter_ts_plain: Vec<_> = micro_interceptors
                 .iter()
                 .map(|t| {
                     quote! {
@@ -3271,8 +3437,18 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 })
                 .collect();
+            let micro_inter_ts_registry: Vec<_> = micro_interceptors
+                .iter()
+                .map(|t| {
+                    quote! {
+                        <#t as nestrs::microservices::MicroIncomingInterceptor>::resolve(registry)
+                            .before_handle_micro(#pattern, &__ms_payload)
+                            .await;
+                    }
+                })
+                .collect();
 
-            let micro_guard_ts: Vec<_> = micro_guards
+            let micro_guard_ts_plain: Vec<_> = micro_guards
                 .iter()
                 .map(|g| {
                     quote! {
@@ -3286,12 +3462,40 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 })
                 .collect();
+            let micro_guard_ts_registry: Vec<_> = micro_guards
+                .iter()
+                .map(|g| {
+                    quote! {
+                        if <#g as nestrs::microservices::MicroCanActivate>::resolve(registry)
+                            .can_activate_micro(#pattern, &__ms_payload)
+                            .await
+                            .is_err()
+                        {
+                            return true;
+                        }
+                    }
+                })
+                .collect();
 
-            let micro_pipe_ts: Vec<_> = micro_pipes
+            let micro_pipe_ts_plain: Vec<_> = micro_pipes
                 .iter()
                 .map(|p| {
                     quote! {
                         __ms_payload = match <#p as ::core::default::Default>::default()
+                            .transform_micro(#pattern, __ms_payload)
+                            .await
+                        {
+                            Ok(__v) => __v,
+                            Err(_) => return true,
+                        };
+                    }
+                })
+                .collect();
+            let micro_pipe_ts_registry: Vec<_> = micro_pipes
+                .iter()
+                .map(|p| {
+                    quote! {
+                        __ms_payload = match <#p as nestrs::microservices::MicroPipeTransform>::resolve(registry)
                             .transform_micro(#pattern, __ms_payload)
                             .await
                         {
@@ -3328,9 +3532,20 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 wildcard_event_arms.push(quote! {
                     _ if nestrs::microservices::pattern_matches(#pattern, pattern) => {
                         let mut __ms_payload = payload.clone();
-                        #(#micro_inter_ts)*
-                        #(#micro_guard_ts)*
-                        #(#micro_pipe_ts)*
+                        #(#micro_inter_ts_plain)*
+                        #(#micro_guard_ts_plain)*
+                        #(#micro_pipe_ts_plain)*
+                        #decode
+                        #call
+                        true
+                    }
+                });
+                wildcard_event_arms_registry.push(quote! {
+                    _ if nestrs::microservices::pattern_matches(#pattern, pattern) => {
+                        let mut __ms_payload = payload.clone();
+                        #(#micro_inter_ts_registry)*
+                        #(#micro_guard_ts_registry)*
+                        #(#micro_pipe_ts_registry)*
                         #decode
                         #call
                         true
@@ -3340,9 +3555,20 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 event_arms.push(quote! {
                     #pattern => {
                         let mut __ms_payload = payload.clone();
-                        #(#micro_inter_ts)*
-                        #(#micro_guard_ts)*
-                        #(#micro_pipe_ts)*
+                        #(#micro_inter_ts_plain)*
+                        #(#micro_guard_ts_plain)*
+                        #(#micro_pipe_ts_plain)*
+                        #decode
+                        #call
+                        true
+                    }
+                });
+                event_arms_registry.push(quote! {
+                    #pattern => {
+                        let mut __ms_payload = payload.clone();
+                        #(#micro_inter_ts_registry)*
+                        #(#micro_guard_ts_registry)*
+                        #(#micro_pipe_ts_registry)*
                         #decode
                         #call
                         true
@@ -3386,6 +3612,35 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 match pattern {
                     #(#event_arms,)*
                     #(#wildcard_event_arms,)*
+                    _ => false,
+                }
+            }
+        }
+
+        #[nestrs::async_trait]
+        impl nestrs::microservices::RegistryAwareMicroserviceHandler for #self_ty {
+            async fn handle_message_with_registry(
+                &self,
+                pattern: &str,
+                payload: nestrs::serde_json::Value,
+                registry: &nestrs::core::ProviderRegistry,
+            ) -> Option<Result<nestrs::serde_json::Value, nestrs::microservices::TransportError>> {
+                match pattern {
+                    #(#message_arms_registry,)*
+                    #(#wildcard_message_arms_registry,)*
+                    _ => None,
+                }
+            }
+
+            async fn handle_event_with_registry(
+                &self,
+                pattern: &str,
+                payload: nestrs::serde_json::Value,
+                registry: &nestrs::core::ProviderRegistry,
+            ) -> bool {
+                match pattern {
+                    #(#event_arms_registry,)*
+                    #(#wildcard_event_arms_registry,)*
                     _ => false,
                 }
             }

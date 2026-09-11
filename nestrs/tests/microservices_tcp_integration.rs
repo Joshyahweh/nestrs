@@ -7,6 +7,7 @@ use std::time::Duration;
 
 static EVENT_HITS: AtomicUsize = AtomicUsize::new(0);
 static WILDCARD_EVENT_HITS: AtomicUsize = AtomicUsize::new(0);
+static INTERCEPT_VIA: std::sync::Mutex<&'static str> = std::sync::Mutex::new("none");
 
 #[derive(Default)]
 #[injectable]
@@ -56,6 +57,110 @@ impl nestrs::microservices::MicroCanActivate for RejectFortyTwoGuard {
             ));
         }
         Ok(())
+    }
+}
+
+// —— DI-backed cross-cutting concerns ——
+
+// Marker provider: only resolvable from a registry that registered it.
+#[derive(Default)]
+#[injectable]
+struct GuardTicket;
+
+// Default-constructed => denies. `resolve(registry)` pulls a provider and
+// admits — so a successful round-trip proves the registry-aware dispatch
+// ran `resolve` with the app registry rather than `Default::default()`.
+#[derive(Default)]
+struct RegistryBoundGuard {
+    resolved: bool,
+}
+
+#[nestrs::async_trait]
+impl nestrs::microservices::MicroCanActivate for RegistryBoundGuard {
+    fn resolve(registry: &nestrs::core::ProviderRegistry) -> Self {
+        let _ticket: std::sync::Arc<GuardTicket> = registry.get();
+        Self { resolved: true }
+    }
+
+    async fn can_activate_micro(
+        &self,
+        _pattern: &str,
+        _payload: &serde_json::Value,
+    ) -> Result<(), nestrs::microservices::TransportError> {
+        if self.resolved {
+            Ok(())
+        } else {
+            Err(nestrs::microservices::TransportError::new(
+                "guard was not DI-resolved",
+            ))
+        }
+    }
+}
+
+// Stamps which construction path ran into the payload it transforms.
+struct RegistryBoundPipe {
+    via: &'static str,
+}
+
+impl Default for RegistryBoundPipe {
+    fn default() -> Self {
+        Self { via: "default" }
+    }
+}
+
+#[nestrs::async_trait]
+impl nestrs::microservices::MicroPipeTransform for RegistryBoundPipe {
+    fn resolve(_registry: &nestrs::core::ProviderRegistry) -> Self {
+        Self { via: "registry" }
+    }
+
+    async fn transform_micro(
+        &self,
+        _pattern: &str,
+        mut payload: serde_json::Value,
+    ) -> Result<serde_json::Value, nestrs::microservices::TransportError> {
+        payload["pipe_via"] = serde_json::Value::from(self.via);
+        Ok(payload)
+    }
+}
+
+// Records which construction path ran into a static.
+struct RegistryBoundInterceptor {
+    via: &'static str,
+}
+
+impl Default for RegistryBoundInterceptor {
+    fn default() -> Self {
+        Self { via: "default" }
+    }
+}
+
+#[nestrs::async_trait]
+impl nestrs::microservices::MicroIncomingInterceptor for RegistryBoundInterceptor {
+    fn resolve(_registry: &nestrs::core::ProviderRegistry) -> Self {
+        Self { via: "registry" }
+    }
+
+    async fn before_handle_micro(&self, _pattern: &str, _payload: &serde_json::Value) {
+        *INTERCEPT_VIA.lock().unwrap() = self.via;
+    }
+}
+
+#[derive(Default)]
+#[injectable]
+struct DiHandler;
+
+#[micro_routes]
+impl DiHandler {
+    #[message_pattern("di.echo")]
+    #[use_micro_interceptors(RegistryBoundInterceptor)]
+    #[use_micro_guards(RegistryBoundGuard)]
+    #[use_micro_pipes(RegistryBoundPipe)]
+    async fn echo(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, HttpException> {
+        Ok(payload)
     }
 }
 
@@ -134,8 +239,8 @@ impl WildcardHandler {
 
 #[module(
     controllers = [HttpController],
-    providers = [AppState, UserHandler, GuardedHandler, WildcardHandler],
-    microservices = [UserHandler, GuardedHandler, WildcardHandler]
+    providers = [AppState, UserHandler, GuardedHandler, WildcardHandler, GuardTicket, DiHandler],
+    microservices = [UserHandler, GuardedHandler, WildcardHandler, DiHandler]
 )]
 struct AppModule;
 
@@ -312,6 +417,52 @@ async fn tcp_microservice_wildcard_patterns_match_with_literal_priority() {
         .expect("emit ok");
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(WILDCARD_EVENT_HITS.load(Ordering::Relaxed) >= 1);
+
+    let _ = tx.send(());
+    let _ = join.await;
+}
+
+#[tokio::test]
+async fn tcp_microservice_cross_cutting_resolves_via_registry() {
+    *INTERCEPT_VIA.lock().unwrap() = "none";
+
+    let ms_port = pick_free_port().await;
+    let ms_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), ms_port);
+
+    let app = NestFactory::create_microservice::<AppModule>(
+        nestrs::microservices::TcpMicroserviceOptions::new(ms_addr),
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let join = tokio::spawn(async move {
+        app.listen_with_shutdown(async move {
+            let _ = rx.await;
+        })
+        .await;
+    });
+    wait_tcp(ms_addr).await;
+
+    let transport = nestrs::microservices::TcpTransport::new(
+        nestrs::microservices::TcpTransportOptions::new(ms_addr),
+    );
+    let proxy = nestrs::microservices::ClientProxy::new(std::sync::Arc::new(transport));
+
+    // The guard only admits when DI-resolved (Default denies), so a
+    // successful round-trip proves the registry-aware dispatch resolved it
+    // through the app's registry.
+    let res: serde_json::Value = proxy
+        .send("di.echo", &serde_json::json!({ "hello": "world" }))
+        .await
+        .expect("guard must have been resolved from the registry");
+
+    // The pipe stamps its construction path into the payload.
+    assert_eq!(
+        res.get("pipe_via").and_then(|v| v.as_str()),
+        Some("registry")
+    );
+    assert_eq!(res.get("hello").and_then(|v| v.as_str()), Some("world"));
+    // The interceptor observed the message via its resolved instance.
+    assert_eq!(*INTERCEPT_VIA.lock().unwrap(), "registry");
 
     let _ = tx.send(());
     let _ = join.await;

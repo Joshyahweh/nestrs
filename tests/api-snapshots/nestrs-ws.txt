@@ -9,8 +9,10 @@ nestrs_ws::CloseCode::ServiceRestart
 nestrs_ws::CloseCode::TryAgainLater
 nestrs_ws::CloseCode::UnsupportedData
 nestrs_ws::CloseCode::as_u16
+nestrs_ws::RegistryAwareWsGateway
 nestrs_ws::WS_ERROR_EVENT
 nestrs_ws::WsCanActivate
+nestrs_ws::WsCanActivate::resolve
 nestrs_ws::WsClient
 nestrs_ws::WsClient::close
 nestrs_ws::WsEvent
@@ -22,9 +24,17 @@ nestrs_ws::WsGuardError
 nestrs_ws::WsGuardError::to_json
 nestrs_ws::WsHandshake
 nestrs_ws::WsIncomingInterceptor
+nestrs_ws::WsIncomingInterceptor::resolve
 nestrs_ws::WsMessageGuard
+nestrs_ws::WsOriginError
+nestrs_ws::WsOriginError::Denied
+nestrs_ws::WsOriginError::NoOrigin
 nestrs_ws::WsPipeError
 nestrs_ws::WsPipeTransform
+nestrs_ws::WsPipeTransform::resolve
+nestrs_ws::WsSecurityConfig
+nestrs_ws::WsSecurityConfig::allow_origins
+nestrs_ws::WsSecurityConfig::require_origin
 nestrs_ws::WsSendError
 nestrs_ws::WsSendError::Closed
 nestrs_ws::WsSendError::Serialize
@@ -33,3 +43,6 @@ nestrs_ws::adapters
 nestrs_ws::serve_socket
 nestrs_ws::ws_route
 nestrs_ws::ws_route_with_guards
+nestrs_ws::ws_route_with_guards_and_security
+nestrs_ws::ws_route_with_registry
+nestrs_ws::ws_route_with_security

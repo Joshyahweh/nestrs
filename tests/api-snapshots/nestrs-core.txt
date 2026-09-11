@@ -54,6 +54,7 @@ nestrs_core::guard::GuardError::Unauthorized
 nestrs_core::metadata::MetadataRegistry
 nestrs_core::module_ref::ModuleRef
 nestrs_core::module_ref::ModuleRef::get
+nestrs_core::pipe::HttpPipeTransform
 nestrs_core::pipe::PipeTransform
 nestrs_core::pipe::PipeTransform::transform
 nestrs_core::platform::AxumHttpEngine

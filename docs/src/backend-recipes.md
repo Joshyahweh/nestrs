@@ -1992,6 +1992,13 @@ NestFactory::create_microservice_nats::<AppModule>(
 .await;
 ```
 
+**Scaling horizontally:** pass **`.with_queue_group("my-service")`** to the options so every replica
+subscribes in the same NATS queue group and the broker delivers each message to exactly one
+instance. Without a queue group every replica receives every message — duplicated event side
+effects and racing RPC replies. The listener subscribes `{prefix}.>` (default prefix `nestrs`), so
+**wildcard handler patterns** like `#[message_pattern("user.*")]` or `#[event_pattern("audit.>")]`
+receive any depth under the namespace (see **[MICROSERVICES.md](../../MICROSERVICES.md)**).
+
 Remote caller (**CLI / other service**) — **`ClientProxy`** over **`NatsTransport`**:
 
 ```rust

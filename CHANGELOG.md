@@ -7,6 +7,52 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: NATS listener subscribed a subject it could never receive; wildcard handler patterns never matched
+
+The NATS listener's wildcard subscription was built as `{prefix}>` — a
+single literal token — instead of `{prefix}.>`. NATS wildcards must be their
+own dot-delimited token, so the listener subscribed an ordinary subject name
+that no transport ever publishes to: every request and event published to
+`{prefix}.<pattern>` silently vanished. (No live-broker test exists to catch
+it.) Alongside it, `#[message_pattern]` / `#[event_pattern]` handlers were
+matched by literal string equality, so a declared wildcard pattern like
+`user.*` or `audit.>` could never fire — the incoming pattern is always
+concrete. And the listener subscribed without a queue group, so running
+multiple instances of the same service meant every instance processed every
+message: duplicated event side effects and racing RPC replies.
+
+- The listener now subscribes `{prefix}.>` (pinned by a unit test asserting
+  the subject shape, plus the subject/strip round-trip).
+- New public helper `nestrs::microservices::pattern_matches(declared,
+  incoming)` implements NATS subject-wildcard semantics: `*` matches
+  exactly one dot-delimited token, a trailing `>` matches one or more
+  trailing tokens, a non-final `>` compares literally. `#[micro_routes]`
+  now emits guarded match arms for declared patterns containing `*` or `>`
+  while plain patterns keep the literal match fast path. Literal arms are
+  emitted ahead of wildcard arms, so exact patterns win regardless of
+  declaration order. Wildcard patterns behave the same on every transport
+  (matching runs on the concrete pattern after the namespace prefix is
+  stripped); manual `MicroserviceHandler` impls can call `pattern_matches`
+  directly.
+- New opt-in `NatsMicroserviceOptions::with_queue_group("...")` subscribes
+  the listener in a NATS queue group so horizontally scaled instances
+  load-share messages (each message delivered to exactly one instance)
+  instead of each processing every one.
+- Unparseable payloads on the listener are now dropped with a `warn!`
+  (subject, error, length — never the bytes) instead of silently, and
+  failed reply publishes warn (the RPC caller's only signal would
+  otherwise be its timeout).
+- Tests: matcher table tests (literals, single-token `*`, trailing `>`,
+  non-final `>` literal, token-count mismatches, mixed wildcards); a TCP
+  transport round-trip test proving `*`/`>` patterns fire end-to-end with
+  literal priority and that non-matching patterns return the standard
+  "no microservice handler" error; NATS subject-shape and queue-group
+  builder tests. No live NATS broker was available locally (4222 closed),
+  so broker wiring is compile- and unit-verified only.
+
+No migration needed: the previous behavior was silently broken, not relied
+upon, and `with_queue_group` is additive.
+
 ### Fixed — production/security audit: Kafka rebuilt partition clients per call; RabbitMQ redelivered panicking poison messages
 
 **Kafka.** Every operation rebuilt an rskafka `PartitionClient`, and each

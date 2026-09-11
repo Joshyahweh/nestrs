@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 static EVENT_HITS: AtomicUsize = AtomicUsize::new(0);
+static WILDCARD_EVENT_HITS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Default)]
 #[injectable]
@@ -95,10 +96,46 @@ impl GuardedHandler {
     }
 }
 
+// Wildcard handler patterns. `wc.*` is declared BEFORE the literal `wc.exact`
+// on purpose: literal arms are emitted ahead of wildcard arms regardless of
+// declaration order, so `wc.exact` must hit the literal handler below.
+#[derive(Default)]
+#[injectable]
+struct WildcardHandler;
+
+#[micro_routes]
+impl WildcardHandler {
+    #[message_pattern("wc.*")]
+    async fn star(&self, _payload: serde_json::Value) -> Result<UserRes, HttpException> {
+        Ok(UserRes {
+            name: "star".to_string(),
+        })
+    }
+
+    #[message_pattern("wc.exact")]
+    async fn exact(&self, _payload: serde_json::Value) -> Result<UserRes, HttpException> {
+        Ok(UserRes {
+            name: "exact".to_string(),
+        })
+    }
+
+    #[message_pattern("deep.one.>")]
+    async fn deep(&self, _payload: serde_json::Value) -> Result<UserRes, HttpException> {
+        Ok(UserRes {
+            name: "deep".to_string(),
+        })
+    }
+
+    #[event_pattern("wc.events.>")]
+    async fn on_any_wc_event(&self, _payload: serde_json::Value) {
+        WILDCARD_EVENT_HITS.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 #[module(
     controllers = [HttpController],
-    providers = [AppState, UserHandler, GuardedHandler],
-    microservices = [UserHandler, GuardedHandler]
+    providers = [AppState, UserHandler, GuardedHandler, WildcardHandler],
+    microservices = [UserHandler, GuardedHandler, WildcardHandler]
 )]
 struct AppModule;
 
@@ -202,6 +239,79 @@ async fn tcp_microservice_send_round_trips_and_http_exception_serializes_details
         head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200"),
         "unexpected response head: {head}"
     );
+
+    let _ = tx.send(());
+    let _ = join.await;
+}
+
+#[tokio::test]
+async fn tcp_microservice_wildcard_patterns_match_with_literal_priority() {
+    WILDCARD_EVENT_HITS.store(0, Ordering::Relaxed);
+
+    let ms_port = pick_free_port().await;
+    let ms_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), ms_port);
+
+    let app = NestFactory::create_microservice::<AppModule>(
+        nestrs::microservices::TcpMicroserviceOptions::new(ms_addr),
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let join = tokio::spawn(async move {
+        app.listen_with_shutdown(async move {
+            let _ = rx.await;
+        })
+        .await;
+    });
+    wait_tcp(ms_addr).await;
+
+    let transport = nestrs::microservices::TcpTransport::new(
+        nestrs::microservices::TcpTransportOptions::new(ms_addr),
+    );
+    let proxy = nestrs::microservices::ClientProxy::new(std::sync::Arc::new(transport));
+
+    // `*` matches exactly one token: any single-token tail under `wc.` hits.
+    let res: UserRes = proxy
+        .send::<serde_json::Value, UserRes>("wc.anything", &serde_json::json!({}))
+        .await
+        .expect("wc.* should match wc.anything");
+    assert_eq!(res.name, "star");
+
+    // The literal `wc.exact` arm wins over the `wc.*` wildcard even though
+    // the wildcard was declared first.
+    let res: UserRes = proxy
+        .send::<serde_json::Value, UserRes>("wc.exact", &serde_json::json!({}))
+        .await
+        .expect("wc.exact should match");
+    assert_eq!(res.name, "exact");
+
+    // `>` matches one or more trailing tokens...
+    let res: UserRes = proxy
+        .send::<serde_json::Value, UserRes>("deep.one.tail.tokens", &serde_json::json!({}))
+        .await
+        .expect("deep.one.> should match deep.one.tail.tokens");
+    assert_eq!(res.name, "deep");
+
+    // ...but not zero trailing tokens.
+    let err = proxy
+        .send::<serde_json::Value, UserRes>("deep.one", &serde_json::json!({}))
+        .await
+        .expect_err("`>` requires at least one trailing token");
+    assert_eq!(err.message, "no microservice handler for pattern `deep.one`");
+
+    // Too many tokens for a `*` pattern.
+    let err = proxy
+        .send::<serde_json::Value, UserRes>("wc.a.b", &serde_json::json!({}))
+        .await
+        .expect_err("wc.* must not match two-token tails");
+    assert_eq!(err.message, "no microservice handler for pattern `wc.a.b`");
+
+    // Event patterns support wildcards too.
+    proxy
+        .emit("wc.events.user.created", &UserCreatedEvent { id: 5 })
+        .await
+        .expect("emit ok");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(WILDCARD_EVENT_HITS.load(Ordering::Relaxed) >= 1);
 
     let _ = tx.send(());
     let _ = join.await;

@@ -21,4 +21,8 @@ tokio.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = { version = "1", default-features = false }
-validator = { version = "0.21", features = ["derive"] }
+# Must match nestrs's pin (0.20): two validator versions in one tree means
+# DTOs derive the 0.21 `Validate` while `ValidatedBody<T>`'s `FromRequest`
+# bound wants nestrs's 0.20 trait — surfaces as an opaque axum
+# "`Handler<_, _>` is not satisfied" error (see hello-app's pin).
+validator = { version = "0.20", features = ["derive"] }

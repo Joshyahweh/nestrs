@@ -1,3 +1,10 @@
+// Every test here drives `nestrs-cli db …`, which the binary gates on its
+// own `db` Cargo feature (src/main.rs `match` arm). Under plain
+// `cargo test --workspace` no workspace member enables that feature, so the
+// spawned binary would reject every invocation; the tests are opt-in just
+// like the subcommand. CI runs with `--all-features`.
+#![cfg(feature = "db")]
+
 //! Wave 4.3 — `nestrs-cli db` CLI integration tests.
 //!
 //! 12 tests covering: migration add (with sequence + reversible +

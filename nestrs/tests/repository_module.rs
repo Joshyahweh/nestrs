@@ -1,4 +1,9 @@
-#![cfg(all(feature = "database-sqlx", feature = "authz"))]
+// `find_*_authorized` / `CrudService` row-level coverage need the
+// `authz-row-level` feature (which implies `authz` + `database-sqlx`); the
+// previous `authz`-only gate let the file compile under feature sets where
+// those methods don't exist (visible via `cargo test --workspace` feature
+// unification, which enables `authz` + `database-sqlx` without row-level).
+#![cfg(feature = "authz-row-level")]
 
 //! `Repository<T>` + `CrudService<T>` integration tests using in-memory SQLite.
 //! Covers Features B and D (RLS predicate → SQL WHERE).

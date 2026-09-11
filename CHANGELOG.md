@@ -7,6 +7,63 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: Kafka rebuilt partition clients per call; RabbitMQ redelivered panicking poison messages
+
+**Kafka.** Every operation rebuilt an rskafka `PartitionClient`, and each
+construction forces a full leader discovery (multiple broker metadata
+round-trips) before it serves a byte. The client built two per RPC
+(requests + replies topics) and one per emit; the server listener rebuilt
+one every 25 ms poll tick — even idle — and one per reply. Separately,
+rskafka retries broker connections internally with **no deadline**, so
+`request_timeout` was not honored mid-operation: a broker dying under an
+in-flight `send_json` hung the call indefinitely, and an unreachable broker
+parked reply tasks and the `kafka_cluster_reachable` liveness probe
+forever, silently.
+
+- Both the client and the server now keep one partition client per topic
+  for the connection's lifetime (rskafka migrates them transparently across
+  leader changes and broken connections, so the cache is safe). Cache hits
+  skip leader discovery entirely.
+- Every rskafka call is now bounded: client bootstrap, `get_offset`,
+  produce, and each reply fetch by `request_timeout`; each server poll
+  cycle by a 30 s stall cap; reply produces by the same cap; the liveness
+  probe by 10 s. A failed bootstrap no longer poisons the transport — the
+  next call retries.
+- The server poll loop no longer ticks a fixed 25 ms sleep + partition
+  rebuild. The 900 ms broker-side long-poll paces idle fetches (with a
+  25 ms floor guarding brokers that return empty instantly); *errors*
+  now warn and back off exponentially (250 ms → 10 s) instead of
+  silently hot-retrying a dead broker ~40×/s; a poll stalled > 30 s
+  (broker unreachable mid-poll) logs a warning and restarts the cycle.
+  Shutdown stays responsive throughout.
+- RPC semantics unchanged: correlation-id matching, at-most-once dispatch
+  (offset advanced before handler spawn, `KafkaConsumerStart`), topic
+  layout, wire shape.
+
+**RabbitMQ.** A panicking handler killed the per-delivery task before its
+`basic_ack`, so the message stayed unacked; the broker redelivered it on
+reconnect (or after its consumer ack-timeout force-closed the channel), it
+panicked again, and so on — and each poison message permanently wedged one
+slot of the prefetch window. Handler dispatch (RPC and event paths) is now
+wrapped in `catch_unwind`:
+
+- a panic logs a `warn!` with the pattern and panic message, publishes an
+  error reply ("microservice handler panicked") so the caller fails fast
+  instead of timing out, and nacks **without requeue** — the poison message
+  is dropped, not redelivered forever;
+- unparseable wire payloads (already non-requeueing) now log a warning
+  (length only, never the bytes);
+- reply publishes ride one shared channel created at listen (was: a fresh
+  channel per reply), and publish failures are logged instead of silently
+  leaving the caller to time out.
+
+Tests: Kafka — new always-on unit tests (unreachable broker fails
+`send_json`/`emit_json` within `request_timeout`, both first and second
+call); RabbitMQ — panic-payload extraction. The server-loop structural
+change (single long-lived partition client) is pinned by construction; the
+live-churn assertion pattern from the Redis suite applies when a broker is
+available.
+
 ### Fixed — production/security audit: Redis transport dialed fresh connections for every RPC
 
 Every Redis microservice operation opened new TCP connections: a client

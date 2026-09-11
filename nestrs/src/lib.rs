@@ -165,7 +165,10 @@ pub use config::{
 pub use database_sqlx::{install_default_drivers, SqlxDatabaseModule, SqlxDatabaseService};
 pub use exception_filter::ExceptionFilter;
 #[cfg(feature = "files")]
-pub use files::{stream_file_octet_stream, stream_file_or_response, stream_file_with_content_type};
+pub use files::{
+    stream_file_from_dir, stream_file_octet_stream, stream_file_or_response,
+    stream_file_with_content_type,
+};
 #[cfg(feature = "graphql-authz")]
 pub use gql_authz::{
     current_gql_ability, current_gql_principal, current_gql_transaction,
@@ -384,7 +387,8 @@ pub mod prelude {
     };
     #[cfg(feature = "files")]
     pub use crate::{
-        stream_file_octet_stream, stream_file_or_response, stream_file_with_content_type,
+        stream_file_from_dir, stream_file_octet_stream, stream_file_or_response,
+        stream_file_with_content_type,
     };
     #[cfg(feature = "http-client")]
     pub use crate::{HttpModule, HttpService};

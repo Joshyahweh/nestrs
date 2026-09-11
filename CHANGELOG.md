@@ -7,6 +7,28 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: `files` doc example taught an arbitrary-file-read footgun
+
+The `stream_file_or_response` doc example streamed `upload_dir().join(&p.name)`
+straight from a path parameter. Path extractors percent-decode before the
+handler sees the value, so `/download/..%2F..%2Fetc%2Fpasswd` served any file
+the process can read — and the pattern was the documented one.
+
+- **New `nestrs::files::stream_file_from_dir(base, name, content_type)`** —
+  the safe shape for `/download/:name` handlers: `name` must be a single path
+  component (separators, `.`/`..`, NUL rejected — Windows also rejects `:`),
+  and the resolved path is canonicalized and required to stay inside `base`,
+  so a symlink planted in the directory pointing outside is a 404, not a
+  served file. Invalid names → 400; missing → 404; other I/O errors → 500.
+- The `stream_file_or_response` / `stream_file_with_content_type` docs now
+  show the safe helper and explicitly direct request-derived paths to it.
+- **5 new tests** (`nestrs/tests/files_traversal.rs`, feature `files`):
+  valid stream, rejection of traversal/absolute/degenerate names, missing
+  file 404, symlink-plant containment, and an end-to-end route proving
+  percent-decoded `..%2F..%2F` is rejected after extraction.
+- `examples/lab lab3_files` now uses the library helper instead of its
+  private sanitizer (same behavior, one implementation).
+
 ### Fixed — production/security audit: unauthenticated health-probe endpoints were unbounded and leaked error detail
 
 The fixed `/__nestrs/health/{live,ready,startup}` endpoints mount outside

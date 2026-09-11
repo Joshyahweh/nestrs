@@ -226,7 +226,7 @@ where
             .map_err(|e| BadRequestException::new(format!("Invalid crud query string: {e}")))?;
         value
             .validate()
-            .map_err(|e| validation_to_http_exception(e))?;
+            .map_err(validation_to_http_exception)?;
         Ok(Self(value))
     }
 }

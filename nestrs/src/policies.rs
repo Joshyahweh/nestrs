@@ -1000,7 +1000,7 @@ mod tests {
         let got = ab
             .predicate(&Action::Read, &Subject::Type("Post"))
             .expect("Some");
-        assert!(got.check(&json!({ "author": "a" }), &Principal::default()) == false);
+        assert!(!got.check(&json!({ "author": "a" }), &Principal::default()));
         let principal = Arc::new(Principal {
             subject: "a".into(),
             roles: vec![],

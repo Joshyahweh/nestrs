@@ -29,7 +29,7 @@ use serde_json::json;
 /// Compare a row field to a principal value with JSON semantics (numbers
 /// compare across int/float; `"12"` the string is *not* equal to `12`).
 fn row_field_eq(row: &serde_json::Value, field: &str, expected: &serde_json::Value) -> bool {
-    row.get(field).map_or(false, |v| v == expected)
+    row.get(field) == Some(expected)
 }
 
 fn is_admin(principal: &Principal, admin_role: &str) -> bool {
@@ -418,10 +418,7 @@ impl NotDeleted {
 
 impl RowPredicate for NotDeleted {
     fn check(&self, row: &serde_json::Value, _principal: &Principal) -> bool {
-        match row.get(&self.field) {
-            None | Some(serde_json::Value::Null) => true,
-            _ => false,
-        }
+        matches!(row.get(&self.field), None | Some(serde_json::Value::Null))
     }
 
     fn sql_conditions(&self, _principal: &Principal) -> Option<Conditions> {

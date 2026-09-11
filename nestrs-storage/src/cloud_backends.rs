@@ -191,7 +191,7 @@ mod s3 {
                 let r = item.map_err(map_err)?;
                 out.push(ObjectMeta {
                     key: path_to_key(&r.location),
-                    size: r.size as u64,
+                    size: r.size,
                     last_modified_ms: Some(r.last_modified.timestamp_millis()),
                     content_type: None,
                     etag: r.e_tag,
@@ -333,7 +333,7 @@ mod gcs {
                 let r = item.map_err(map_err)?;
                 out.push(ObjectMeta {
                     key: path_to_key(&r.location),
-                    size: r.size as u64,
+                    size: r.size,
                     last_modified_ms: Some(r.last_modified.timestamp_millis()),
                     content_type: None,
                     etag: r.e_tag,
@@ -484,7 +484,7 @@ mod azure {
                 let r = item.map_err(map_err)?;
                 out.push(ObjectMeta {
                     key: path_to_key(&r.location),
-                    size: r.size as u64,
+                    size: r.size,
                     last_modified_ms: Some(r.last_modified.timestamp_millis()),
                     content_type: None,
                     etag: r.e_tag,

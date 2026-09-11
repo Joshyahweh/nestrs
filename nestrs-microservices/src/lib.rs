@@ -31,6 +31,13 @@ pub use wire::WIRE_FORMAT_DOC_REVISION;
 /// `Debug` prints the raw string into logs, panic messages, and error
 /// reports — this helper keeps the scheme/host visible for operators while
 /// never rendering the credential bytes.
+// Callers live behind the optional nats/redis/rabbitmq transport features;
+// without any of them this is legitimately dead in the lib target (the
+// `#[cfg(test)]` redaction tests below still exercise it in every config).
+#[cfg_attr(
+    not(any(feature = "nats", feature = "redis", feature = "rabbitmq")),
+    allow(dead_code)
+)]
 pub(crate) fn redact_url(url: &str) -> String {
     let Some(scheme_end) = url.find("://") else {
         return url.to_string();

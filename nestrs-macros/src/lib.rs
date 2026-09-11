@@ -3688,7 +3688,49 @@ fn field_has_marker(field: &Field, marker: &str) -> bool {
     field.attrs.iter().any(|a| a.path().is_ident(marker))
 }
 
-fn convert_dto_field_attrs(field: &Field, expose_only: bool) -> Vec<syn::Attribute> {
+/// Integer type names `#[IsInt]` accepts (the field type enforces the rest).
+const DTO_INT_TYPES: &[&str] = &[
+    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
+];
+/// Additional float type names `#[IsNumber]` accepts on top of [`DTO_INT_TYPES`].
+const DTO_FLOAT_TYPES: &[&str] = &["f32", "f64"];
+
+/// Last path-segment identifier of a field type after stripping `Option<…>`
+/// wrappers (up to validator's two-level nesting limit): `Option<String>` →
+/// `Some("String")`, `uuid::Uuid` → `Some("Uuid")`, non-path types → `None`.
+fn dto_inner_type_ident(field: &Field) -> Option<String> {
+    let mut ty = &field.ty;
+    loop {
+        let syn::Type::Path(type_path) = ty else { return None };
+        let last = type_path.path.segments.last()?;
+        if last.ident == "Option" {
+            if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
+                if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+                    ty = inner;
+                    continue;
+                }
+            }
+        }
+        return Some(last.ident.to_string());
+    }
+}
+
+/// Marker/type contradiction error for the type-enforced Nest markers
+/// (`IsString`, `IsBoolean`, `IsInt`, `IsNumber`, `IsUUID`): on a mismatched
+/// field type the marker validates nothing, which used to be silently
+/// swallowed — surface it at compile time instead.
+fn dto_marker_type_error(field: &Field, marker: &str, requires: &str) -> syn::Error {
+    syn::Error::new_spanned(
+        &field.ty,
+        format!(
+            "`#[{marker}]` requires {requires}. The Rust field type already enforces \
+             this, so the marker cannot do anything for this field — remove it or \
+             fix the field type."
+        ),
+    )
+}
+
+fn convert_dto_field_attrs(field: &Field, expose_only: bool) -> syn::Result<Vec<syn::Attribute>> {
     let mut out = Vec::new();
 
     for attr in &field.attrs {
@@ -3705,14 +3747,42 @@ fn convert_dto_field_attrs(field: &Field, expose_only: bool) -> Vec<syn::Attribu
             "IsEmail" => out.push(syn::parse_quote!(#[validate(email)])),
             "IsNotEmpty" => out.push(syn::parse_quote!(#[validate(length(min = 1))])),
             "IsString" => {
-                // Type-level no-op in Rust, retained for Nest-like readability.
+                // Type-enforced by `String`; kept as a Nest-style readability
+                // alias. On a non-`String` field it would silently validate
+                // nothing — reject the contradiction at compile time instead.
+                if dto_inner_type_ident(field).as_deref() != Some("String") {
+                    return Err(dto_marker_type_error(
+                        field,
+                        "IsString",
+                        "a `String` field (`Option<String>` included)",
+                    ));
+                }
             }
-            "IsUUID" => {
-                // validator 0.21 dropped the `uuid` built-in; UUID-ness is a
-                // type-level concern (use `uuid::Uuid`), so this is a
-                // type-level no-op like `IsString`.
+            "IsUUID" => match dto_inner_type_ident(field).as_deref() {
+                // Runtime canonical-form check for string-carried UUIDs —
+                // the common NestJS-migration shape (`id: String` +
+                // `@IsUUID()`), which previously validated nothing.
+                Some("String") => out.push(syn::parse_quote!(
+                    #[validate(custom(function = "nestrs::is_uuid"))]
+                )),
+                // serde rejects malformed UUIDs at the JSON boundary for
+                // `Uuid` fields, so the marker is satisfied by the type.
+                Some("Uuid") => {}
+                _ => {
+                    return Err(dto_marker_type_error(
+                        field,
+                        "IsUUID",
+                        "a `String` (runtime check) or `uuid::Uuid` (serde-enforced) field",
+                    ));
+                }
+            },
+            "IsBoolean" => {
+                // Type-enforced by `bool`; contradictions are compile errors
+                // (see `IsString`).
+                if dto_inner_type_ident(field).as_deref() != Some("bool") {
+                    return Err(dto_marker_type_error(field, "IsBoolean", "a `bool` field"));
+                }
             }
-            "IsBoolean" => {}
             "IsPositive" => out.push(syn::parse_quote!(#[validate(range(min = 1))])),
             "IsNegative" => out.push(syn::parse_quote!(#[validate(range(max = -1))])),
             "MinLength" => {
@@ -3745,8 +3815,33 @@ fn convert_dto_field_attrs(field: &Field, expose_only: bool) -> Vec<syn::Attribu
                     out.push(syn::parse_quote!(#[validate(range(max = #tokens))]));
                 }
             }
-            // Integer / number checks are expressed by Rust types (`i32`, `f64`, …) and `range` where needed.
-            "IsInt" | "IsNumber" => {}
+            // Integer / number checks are expressed by Rust types (`i32`, `f64`, …)
+            // and `range` where needed; contradictions are compile errors (see
+            // `IsString`).
+            "IsInt" | "IsNumber" => {
+                let Some(ident) = dto_inner_type_ident(field) else {
+                    return Err(dto_marker_type_error(
+                        field,
+                        &name,
+                        match name.as_str() {
+                            "IsInt" => "an integer field (`i8`–`i64`, `u8`–`u64`, `isize`/`usize`)",
+                            _ => "a numeric field (integers or `f32`/`f64`)",
+                        },
+                    ));
+                };
+                let numeric_ok = DTO_INT_TYPES.contains(&ident.as_str())
+                    || (name == "IsNumber" && DTO_FLOAT_TYPES.contains(&ident.as_str()));
+                if !numeric_ok {
+                    return Err(dto_marker_type_error(
+                        field,
+                        &name,
+                        match name.as_str() {
+                            "IsInt" => "an integer field (`i8`–`i64`, `u8`–`u64`, `isize`/`usize`)",
+                            _ => "a numeric field (integers or `f32`/`f64`)",
+                        },
+                    ));
+                }
+            }
             "IsUrl" => out.push(syn::parse_quote!(#[validate(url)])),
             "Matches" => {
                 if let Meta::List(list) = &attr.meta {
@@ -3771,7 +3866,7 @@ fn convert_dto_field_attrs(field: &Field, expose_only: bool) -> Vec<syn::Attribu
         out.push(syn::parse_quote!(#[serde(skip_serializing)]));
     }
 
-    out
+    Ok(out)
 }
 
 #[derive(Default)]
@@ -4778,19 +4873,32 @@ pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let field_defs: Vec<_> = fields
-        .named
-        .iter()
-        .map(|field| {
-            let attrs = convert_dto_field_attrs(field, expose_only);
-            let field_ident = field.ident.clone();
-            let ty = field.ty.clone();
-            quote! {
-                #(#attrs)*
-                pub #field_ident: #ty
+    let mut field_defs = Vec::new();
+    let mut marker_errors: Option<syn::Error> = None;
+    for field in &fields.named {
+        let attrs = match convert_dto_field_attrs(field, expose_only) {
+            Ok(attrs) => attrs,
+            Err(e) => {
+                marker_errors = Some(match marker_errors {
+                    None => e,
+                    Some(mut prev) => {
+                        prev.combine(e);
+                        prev
+                    }
+                });
+                continue;
             }
-        })
-        .collect();
+        };
+        let field_ident = field.ident.clone();
+        let ty = field.ty.clone();
+        field_defs.push(quote! {
+            #(#attrs)*
+            pub #field_ident: #ty
+        });
+    }
+    if let Some(e) = marker_errors {
+        return e.to_compile_error().into();
+    }
 
     if deny_unknown_fields {
         quote! {

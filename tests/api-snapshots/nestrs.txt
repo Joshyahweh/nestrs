@@ -60,6 +60,18 @@ nestrs::PathNormalization::AppendTrailingSlash
 nestrs::PathNormalization::TrimTrailingSlash
 nestrs::PayloadTooLargeException
 nestrs::PaymentRequiredException
+nestrs::PipedBody1
+nestrs::PipedBody2
+nestrs::PipedBody3
+nestrs::PipedBody4
+nestrs::PipedPath1
+nestrs::PipedPath2
+nestrs::PipedPath3
+nestrs::PipedPath4
+nestrs::PipedQuery1
+nestrs::PipedQuery2
+nestrs::PipedQuery3
+nestrs::PipedQuery4
 nestrs::RateLimitOptions
 nestrs::RateLimitOptions::trusted_proxy_hops
 nestrs::ReadinessContext
@@ -165,8 +177,12 @@ nestrs::health_probes::ProbeOutcome
 nestrs::health_probes::ProbeOutcome::Down
 nestrs::health_probes::ProbeOutcome::Up
 nestrs::health_probes::install_probes
+nestrs::http_client::DEFAULT_CONNECT_TIMEOUT
+nestrs::http_client::DEFAULT_REQUEST_TIMEOUT
 nestrs::http_client::HttpModule
 nestrs::http_client::HttpService
+nestrs::http_client::HttpService::from_options
+nestrs::http_client::HttpServiceOptions
 nestrs::http_execution_context::ExecutionContextMissing
 nestrs::http_execution_context::HttpExecutionContext
 nestrs::i18n::I18n
@@ -180,6 +196,7 @@ nestrs::interceptor::Interceptor
 nestrs::interceptor::Interceptor::resolve
 nestrs::interceptor::LoggingInterceptor
 nestrs::interceptor_layer
+nestrs::is_uuid
 nestrs::masking::MaskingConfig
 nestrs::masking::PolicyMaskingInterceptor
 nestrs::masking::json_response
@@ -206,6 +223,7 @@ nestrs::otel::OtlpProtocol::Grpc
 nestrs::otel::install_otlp_tracer
 nestrs::otel::shutdown_tracer_provider
 nestrs::pipes::ParseIntPipe
+nestrs::pipes::TrimPipe
 nestrs::pipes::ValidationPipe
 nestrs::policies
 nestrs::policies::Ability

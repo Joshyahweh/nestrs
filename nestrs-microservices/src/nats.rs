@@ -58,7 +58,12 @@ impl NatsTransportOptions {
     }
 
     fn wildcard_subject(&self) -> String {
-        format!("{}>", self.effective_prefix())
+        // The listener wildcard must be its own dot-delimited token: `{prefix}.>`
+        // matches every subject below the namespace. (An earlier version
+        // emitted `{prefix}>` — a single literal token — which NATS treats as
+        // an ordinary subject name, so the listener never received anything
+        // published to `{prefix}.<pattern>`.)
+        format!("{}.>", self.effective_prefix())
     }
 }
 
@@ -162,6 +167,12 @@ impl Transport for NatsTransport {
 pub struct NatsMicroserviceOptions {
     pub url: String,
     pub prefix: Option<String>,
+    /// NATS queue group for the listener subscription. When set, multiple
+    /// server instances subscribing in the same group each receive a message
+    /// at most once (broker-side load balancing); without a group every
+    /// instance receives every message, duplicating event side effects and
+    /// racing RPC replies.
+    pub queue_group: Option<String>,
 }
 
 impl std::fmt::Debug for NatsMicroserviceOptions {
@@ -169,6 +180,7 @@ impl std::fmt::Debug for NatsMicroserviceOptions {
         f.debug_struct("NatsMicroserviceOptions")
             .field("url", &crate::redact_url(&self.url))
             .field("prefix", &self.prefix)
+            .field("queue_group", &self.queue_group)
             .finish()
     }
 }
@@ -178,6 +190,7 @@ impl NatsMicroserviceOptions {
         Self {
             url: url.into(),
             prefix: None,
+            queue_group: None,
         }
     }
 
@@ -185,10 +198,19 @@ impl NatsMicroserviceOptions {
         self.prefix = Some(prefix.into());
         self
     }
+
+    /// Subscribe the listener under a NATS queue group so that horizontally
+    /// scaled instances load-share messages instead of each processing
+    /// every one.
+    pub fn with_queue_group(mut self, group: impl Into<String>) -> Self {
+        self.queue_group = Some(group.into());
+        self
+    }
 }
 
 pub struct NatsMicroserviceServer {
     options: NatsTransportOptions,
+    queue_group: Option<String>,
     handlers: Vec<std::sync::Arc<dyn MicroserviceHandler>>,
 }
 
@@ -197,12 +219,17 @@ impl NatsMicroserviceServer {
         options: NatsMicroserviceOptions,
         handlers: Vec<std::sync::Arc<dyn MicroserviceHandler>>,
     ) -> Self {
+        let queue_group = options.queue_group;
         let options = NatsTransportOptions {
             url: options.url,
             prefix: options.prefix,
             request_timeout: std::time::Duration::from_secs(5),
         };
-        Self { options, handlers }
+        Self {
+            options,
+            queue_group,
+            handlers,
+        }
     }
 
     pub async fn listen(self) -> Result<(), TransportError> {
@@ -218,10 +245,17 @@ impl NatsMicroserviceServer {
             .await
             .map_err(|e| TransportError::new(format!("nats microservice connect failed: {e}")))?;
 
-        let mut sub = client
-            .subscribe(self.options.wildcard_subject())
-            .await
-            .map_err(|e| TransportError::new(format!("nats subscribe failed: {e}")))?;
+        let subject = self.options.wildcard_subject();
+        let mut sub = match self.queue_group.as_deref() {
+            Some(group) => client
+                .queue_subscribe(subject, group.to_string())
+                .await
+                .map_err(|e| TransportError::new(format!("nats queue subscribe failed: {e}")))?,
+            None => client
+                .subscribe(subject)
+                .await
+                .map_err(|e| TransportError::new(format!("nats subscribe failed: {e}")))?,
+        };
 
         let handlers = std::sync::Arc::new(self.handlers);
 
@@ -235,7 +269,17 @@ impl NatsMicroserviceServer {
                     let pattern = self.options.strip_prefix(&msg.subject).to_string();
                     let payload: serde_json::Value = match serde_json::from_slice(&msg.payload) {
                         Ok(v) => v,
-                        Err(_) => continue,
+                        Err(e) => {
+                            // Unparseable payloads are dropped (NATS has no
+                            // ack/redelivery to poison-loop), but not silently.
+                            tracing::warn!(
+                                subject = %msg.subject,
+                                error = %e,
+                                len = msg.payload.len(),
+                                "nats: dropping malformed request"
+                            );
+                            continue;
+                        }
                     };
 
                     let handlers = handlers.clone();
@@ -253,7 +297,14 @@ impl NatsMicroserviceServer {
                                 },
                             };
                             if let Ok(bytes) = serde_json::to_vec(&wire) {
-                                let _ = client.publish(reply, bytes.into()).await;
+                                if let Err(e) = client.publish(reply, bytes.into()).await {
+                                    // The RPC caller has no signal except its
+                                    // timeout; leave a server-side trace.
+                                    tracing::warn!(
+                                        error = %e,
+                                        "nats reply publish failed; caller will time out"
+                                    );
+                                }
                             }
                         } else {
                             dispatch_emit(&handlers, &pattern, payload).await;
@@ -316,5 +367,35 @@ mod redaction_tests {
         let opts = NatsMicroserviceOptions::new("nats://user:pass@nats.local");
         let rendered = format!("{opts:?}");
         assert!(!rendered.contains("pass@"), "password leaked: {rendered}");
+    }
+}
+
+#[cfg(test)]
+mod subject_tests {
+    use super::*;
+
+    #[test]
+    fn wildcard_subject_is_its_own_dot_delimited_token() {
+        let opts = NatsTransportOptions::new("nats://localhost:4222");
+        // `nestrs.>` (two tokens) matches every subject below the `nestrs`
+        // namespace; `nestrs>` is one literal token that matches nothing the
+        // transport ever publishes to.
+        assert_eq!(opts.wildcard_subject(), "nestrs.>");
+        assert_eq!(opts.subject("user.get"), "nestrs.user.get");
+        assert_eq!(opts.strip_prefix("nestrs.user.get"), "user.get");
+
+        let opts = opts.with_prefix("app");
+        assert_eq!(opts.wildcard_subject(), "app.>");
+    }
+
+    #[test]
+    fn queue_group_builder_round_trips() {
+        let opts = NatsMicroserviceOptions::new("nats://localhost:4222");
+        assert_eq!(opts.queue_group, None);
+        let opts = opts.with_queue_group("payments");
+        assert_eq!(opts.queue_group.as_deref(), Some("payments"));
+        // Group names are not credentials; Debug keeps them for operators.
+        let rendered = format!("{opts:?}");
+        assert!(rendered.contains("payments"));
     }
 }

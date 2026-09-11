@@ -24,6 +24,16 @@ The macro surface now includes:
 
 `#[message_pattern]` / `#[event_pattern]` are activated by `#[micro_routes]`.
 
+Declared patterns may use **NATS-style wildcards**: `*` matches exactly one
+dot-delimited token, a trailing `>` matches one or more trailing tokens
+(`user.*` matches `user.get` but not `user.profile.get`; `audit.>` matches
+`audit.user.deleted` but not `audit`). Exact patterns win over wildcards
+regardless of declaration order. The same semantics apply on every transport
+(matching happens on the concrete pattern after the namespace prefix is
+stripped; see `nestrs::microservices::pattern_matches`). Note that on Redis
+the listener's broker-side subscription (`{prefix}.*`) is what delivers
+messages — its `*` is a glob that spans dots, so every depth arrives.
+
 `#[on_event]` handlers are activated by `#[event_routes]` and are auto-subscribed at runtime when
 the app boots (via `EventBus`).
 

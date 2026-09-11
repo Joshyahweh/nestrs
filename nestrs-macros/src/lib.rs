@@ -1187,6 +1187,15 @@ fn is_ws_client_type(ty: &Type) -> bool {
     seg.ident == "WsClient"
 }
 
+/// A handler pattern that uses NATS-style wildcards (`*` or `>`) can never be
+/// a literal `match` arm — the incoming pattern is always concrete. Such
+/// patterns are emitted as guarded arms matching via
+/// `nestrs::microservices::pattern_matches` instead.
+fn pattern_is_wildcard(pattern: &syn::LitStr) -> bool {
+    let p = pattern.value();
+    p.contains('*') || p.contains('>')
+}
+
 fn is_serde_json_value_type(ty: &Type) -> bool {
     let Type::Path(tp) = ty else {
         return false;
@@ -3055,6 +3064,13 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let mut message_arms = Vec::new();
     let mut event_arms = Vec::new();
+    // Patterns with NATS wildcards (`*`, `>`) can never equal a concrete
+    // incoming pattern, so they get guarded arms matched by
+    // `nestrs::microservices::pattern_matches`. Emitted after every literal
+    // arm so exact patterns win over wildcards regardless of declaration
+    // order.
+    let mut wildcard_message_arms = Vec::new();
+    let mut wildcard_event_arms = Vec::new();
 
     for h in handlers {
         if h.is_message {
@@ -3210,18 +3226,33 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             };
 
-            message_arms.push(quote! {
-                #pattern => {
-                    let mut __ms_payload = payload.clone();
-                    #(#micro_inter_ts)*
-                    #(#micro_guard_ts)*
-                    #(#micro_pipe_ts)*
-                    #decode
-                    Some({
-                        #call
-                    })
-                }
-            });
+            if pattern_is_wildcard(&pattern) {
+                wildcard_message_arms.push(quote! {
+                    _ if nestrs::microservices::pattern_matches(#pattern, pattern) => {
+                        let mut __ms_payload = payload.clone();
+                        #(#micro_inter_ts)*
+                        #(#micro_guard_ts)*
+                        #(#micro_pipe_ts)*
+                        #decode
+                        Some({
+                            #call
+                        })
+                    }
+                });
+            } else {
+                message_arms.push(quote! {
+                    #pattern => {
+                        let mut __ms_payload = payload.clone();
+                        #(#micro_inter_ts)*
+                        #(#micro_guard_ts)*
+                        #(#micro_pipe_ts)*
+                        #decode
+                        Some({
+                            #call
+                        })
+                    }
+                });
+            }
         } else {
             let pattern = h.pattern;
             let name = h.name;
@@ -3293,21 +3324,39 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 Some(_payload_ty) => quote! { let _ = self.#name(__payload).await; },
             };
 
-            event_arms.push(quote! {
-                #pattern => {
-                    let mut __ms_payload = payload.clone();
-                    #(#micro_inter_ts)*
-                    #(#micro_guard_ts)*
-                    #(#micro_pipe_ts)*
-                    #decode
-                    #call
-                    true
-                }
-            });
+            if pattern_is_wildcard(&pattern) {
+                wildcard_event_arms.push(quote! {
+                    _ if nestrs::microservices::pattern_matches(#pattern, pattern) => {
+                        let mut __ms_payload = payload.clone();
+                        #(#micro_inter_ts)*
+                        #(#micro_guard_ts)*
+                        #(#micro_pipe_ts)*
+                        #decode
+                        #call
+                        true
+                    }
+                });
+            } else {
+                event_arms.push(quote! {
+                    #pattern => {
+                        let mut __ms_payload = payload.clone();
+                        #(#micro_inter_ts)*
+                        #(#micro_guard_ts)*
+                        #(#micro_pipe_ts)*
+                        #decode
+                        #call
+                        true
+                    }
+                });
+            }
         }
     }
 
-    if message_arms.is_empty() && event_arms.is_empty() {
+    if message_arms.is_empty()
+        && wildcard_message_arms.is_empty()
+        && event_arms.is_empty()
+        && wildcard_event_arms.is_empty()
+    {
         return syn::Error::new_spanned(
             item_impl,
             "micro_routes found no #[message_pattern] or #[event_pattern] handlers in this impl block",
@@ -3328,6 +3377,7 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             ) -> Option<Result<nestrs::serde_json::Value, nestrs::microservices::TransportError>> {
                 match pattern {
                     #(#message_arms,)*
+                    #(#wildcard_message_arms,)*
                     _ => None,
                 }
             }
@@ -3335,6 +3385,7 @@ pub fn micro_routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
             async fn handle_event(&self, pattern: &str, payload: nestrs::serde_json::Value) -> bool {
                 match pattern {
                     #(#event_arms,)*
+                    #(#wildcard_event_arms,)*
                     _ => false,
                 }
             }

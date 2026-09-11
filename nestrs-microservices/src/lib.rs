@@ -188,6 +188,7 @@ pub trait Transport: Send + Sync + 'static {
 #[async_trait]
 pub trait MicroserviceHandler: Send + Sync + 'static {
     /// Handle a request/reply message pattern. Return `None` when the handler doesn't match `pattern`.
+    /// Declared patterns may use NATS-style wildcards (`*`, `>`); see [`pattern_matches`].
     async fn handle_message(
         &self,
         pattern: &str,
@@ -195,7 +196,101 @@ pub trait MicroserviceHandler: Send + Sync + 'static {
     ) -> Option<Result<serde_json::Value, TransportError>>;
 
     /// Handle a fire-and-forget event pattern. Return `true` when the handler matched `pattern`.
+    /// Declared patterns may use NATS-style wildcards (`*`, `>`); see [`pattern_matches`].
     async fn handle_event(&self, pattern: &str, payload: serde_json::Value) -> bool;
+}
+
+/// NATS-style wildcard matching for microservice handler patterns.
+///
+/// `#[message_pattern]` / `#[event_pattern]` handlers declare patterns that a
+/// transport matches against the concrete pattern it delivers (for NATS, the
+/// subject with the namespace prefix stripped). A declared pattern may use
+/// NATS subject wildcards: `*` matches exactly one dot-delimited token, and a
+/// trailing `>` matches one or more trailing tokens — so `user.*` matches
+/// `user.get` but not `user.profile.get` or `user`, and `audit.>` matches
+/// `audit.created` and `audit.user.deleted` but not `audit`. A non-final `>`
+/// is compared literally (NATS rejects it in subscriptions; a subject
+/// containing `>` may still be published).
+///
+/// Every transport delivers at least the concrete pattern, so wildcard
+/// handler patterns behave the same across transports: the NATS listener
+/// subscribes `{prefix}.>` and the Redis listener `{prefix}.*` (Redis's `*`
+/// is a glob that spans dots), while TCP/MQTT/RabbitMQ/Kafka carry the
+/// pattern inside the request payload itself.
+pub fn pattern_matches(declared: &str, incoming: &str) -> bool {
+    let declared_tokens: Vec<&str> = declared.split('.').collect();
+    let incoming_tokens: Vec<&str> = incoming.split('.').collect();
+    let mut d = 0;
+    let mut i = 0;
+    while d < declared_tokens.len() {
+        let token = declared_tokens[d];
+        // Trailing `>` matches one or more remaining tokens.
+        if token == ">" && d == declared_tokens.len() - 1 {
+            return i < incoming_tokens.len();
+        }
+        if i >= incoming_tokens.len() {
+            return false;
+        }
+        if token != "*" && token != incoming_tokens[i] {
+            return false;
+        }
+        d += 1;
+        i += 1;
+    }
+    i == incoming_tokens.len()
+}
+
+#[cfg(test)]
+mod pattern_matches_tests {
+    use super::pattern_matches;
+
+    #[test]
+    fn literal_patterns_match_exactly() {
+        assert!(pattern_matches("user.get", "user.get"));
+        assert!(!pattern_matches("user.get", "user.getx"));
+        assert!(!pattern_matches("user.get", "user.profile.get"));
+        assert!(!pattern_matches("user.get", "user"));
+    }
+
+    #[test]
+    fn star_matches_exactly_one_token() {
+        assert!(pattern_matches("user.*", "user.get"));
+        assert!(pattern_matches("*.created", "user.created"));
+        assert!(pattern_matches("a.*.c", "a.b.c"));
+        assert!(!pattern_matches("user.*", "user.profile.get"));
+        assert!(!pattern_matches("user.*", "user"));
+        assert!(!pattern_matches("user.*.created", "user.created"));
+    }
+
+    #[test]
+    fn trailing_gt_matches_one_or_more_tokens() {
+        assert!(pattern_matches("audit.>", "audit.created"));
+        assert!(pattern_matches("audit.>", "audit.user.deleted"));
+        assert!(!pattern_matches("audit.>", "audit"));
+        assert!(pattern_matches(">", "anything"));
+        assert!(pattern_matches(">", "a.b.c"));
+    }
+
+    #[test]
+    fn non_trailing_gt_is_compared_literally() {
+        assert!(pattern_matches("a.>.b", "a.>.b"));
+        assert!(!pattern_matches("a.>.b", "a.x.b"));
+    }
+
+    #[test]
+    fn token_counts_must_line_up() {
+        assert!(!pattern_matches("a.b", "a.b.c"));
+        assert!(!pattern_matches("a.b.c", "a.b"));
+        assert!(pattern_matches("*", "a"));
+        assert!(!pattern_matches("*", "a.b"));
+    }
+
+    #[test]
+    fn mixed_wildcards_compose() {
+        assert!(pattern_matches("*.user.>", "app.user.created.now"));
+        assert!(!pattern_matches("*.user.>", "user.created"));
+        assert!(pattern_matches("a.*.>", "a.b.c"));
+    }
 }
 
 pub type MicroserviceHandlerFactory =

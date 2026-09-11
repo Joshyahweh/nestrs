@@ -429,16 +429,18 @@ pub async fn install_authn_middleware(
         .map(crate::policies::Principal::from)
     {
         Some(p) => {
-            return crate::core::with_principal_erased(
+            crate::core::with_principal_erased(
                 std::sync::Arc::new(p) as std::sync::Arc<dyn std::any::Any + Send + Sync>,
                 next.run(req),
             )
             .await
         }
-        None => return next.run(req).await,
+        None => next.run(req).await,
     }
     #[cfg(not(feature = "authz"))]
-    next.run(req).await
+    {
+        next.run(req).await
+    }
 }
 
 /// Internal: build a `JwtService` from options. Public so `AuthnModule::install`

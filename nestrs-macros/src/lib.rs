@@ -4594,12 +4594,24 @@ pub fn crud(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
 
-            /// The list endpoint. Reads the authz-filtered set (which
-            /// already excludes rows the request-scoped `Ability` denies),
-            /// then applies in-memory `sort` + `page` + `per_page` +
-            /// `filter` + `search`. SQL pushdown + authz in one query is
-            /// a v2 problem — the contract here matches
-            /// `@nestjsx/crud` exactly.
+            /// The list endpoint. Two evaluation tiers:
+            ///
+            /// 1. **No `sort` / `filter` / `search`** (the default `GET /`
+            ///    and plain paging queries): the page window is pushed into
+            ///    SQL — `LIMIT {per_page} OFFSET {(page-1)*per_page}` — so
+            ///    the database materializes one page, not the whole table.
+            ///    Results are identical to the in-memory slice.
+            /// 2. **`sort` / `filter` / `search` present**: the exact
+            ///    `@nestjsx/crud` contract requires evaluating them over
+            ///    the full result set before slicing, so this tier fetches
+            ///    wide and evaluates in memory. (Pushing JSON-blob
+            ///    sort/filter/search into SQL — dialect-aware
+            ///    `json_extract` rendering — is future work.)
+            ///
+            /// Under `authz-row-level`, both tiers stay authz-filtered;
+            /// tier 1 pages in SQL only when the matched read rule's
+            /// predicate pushes down exactly (`CrudService::list_page`
+            /// handles the fallback transparently).
             pub async fn list_query(
                 &self,
                 q: &#list_query_ident,
@@ -4607,11 +4619,25 @@ pub fn crud(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ::std::vec::Vec<#output>,
                 ::nestrs::crud_macro::CrudError,
             > {
-                let mut rows = self
-                    .crud
-                    .list()
-                    .await
-                    .map_err(::nestrs::crud_macro::CrudError::from)?;
+                let rows: ::std::vec::Vec<#entity> =
+                    if q.sort.is_none() && q.filter.is_none() && q.search.is_none() {
+                        // Tier 1: SQL LIMIT/OFFSET pushdown. `page >= 1`
+                        // and `per_page` in `1..=1000` are validated on the
+                        // DTO; the saturating math only guards u32
+                        // overflow at absurd page numbers.
+                        let limit = q.per_page as i64;
+                        let offset =
+                            (q.page.saturating_sub(1)).saturating_mul(q.per_page) as i64;
+                        self.crud
+                            .list_page(limit, offset)
+                            .await
+                            .map_err(::nestrs::crud_macro::CrudError::from)?
+                    } else {
+                        let mut rows = self
+                            .crud
+                            .list()
+                            .await
+                            .map_err(::nestrs::crud_macro::CrudError::from)?;
 
                 // `sort`: comma-separated `field:DIR` pairs. The first
                 // recognised field wins (we sort stably per key, so
@@ -4673,16 +4699,16 @@ pub fn crud(attr: TokenStream, item: TokenStream) -> TokenStream {
                     });
                 }
 
-                // `page`/`per_page` slice. `per_page` is `u32` (validated
-                // >= 1, <= 1000 above), so the cast is safe.
+                // `page`/`per_page` window on the full set (the consuming
+                // iterator mirrors the old `&rows[start..end]` slice
+                // without requiring `Clone` on the entity).
                 let per_page = q.per_page as usize;
-                let page = q.page.saturating_sub(1) as usize;
-                let start = page.saturating_mul(per_page);
-                let end = (start + per_page).min(rows.len());
-                let slice: &[#entity] = if start >= rows.len() { &rows[0..0] } else { &rows[start..end] };
+                let start = (q.page.saturating_sub(1) as usize).saturating_mul(per_page);
+                rows.into_iter().skip(start).take(per_page).collect()
+                };
 
-                let mut out: ::std::vec::Vec<#output> = ::std::vec::Vec::with_capacity(slice.len());
-                for row in slice {
+                let mut out: ::std::vec::Vec<#output> = ::std::vec::Vec::with_capacity(rows.len());
+                for row in &rows {
                     let v: ::serde_json::Value =
                         ::serde_json::to_value(row).unwrap_or(::serde_json::Value::Null);
                     let dto: #output = ::serde_json::from_value(v)

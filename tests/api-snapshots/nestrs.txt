@@ -290,11 +290,15 @@ nestrs::queues::wire_queue_processors
 nestrs::raw_body::RawBody
 nestrs::repository::CrudService
 nestrs::repository::CrudService::create
+nestrs::repository::CrudService::list
 nestrs::repository::Entity
 nestrs::repository::FindManyParams
+nestrs::repository::FindManyParams::limit
 nestrs::repository::Repository
 nestrs::repository::Repository::find_all
 nestrs::repository::Repository::find_all_authorized
+nestrs::repository::Repository::find_all_authorized_paged
+nestrs::repository::Repository::find_all_paged
 nestrs::repository::Repository::find_many_authorized
 nestrs::repository::Repository::find_one
 nestrs::repository::Repository::find_one_authorized

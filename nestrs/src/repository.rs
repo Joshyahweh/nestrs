@@ -84,6 +84,33 @@ impl<T: Entity> Repository<T> {
         rows.iter().map(T::from_row).collect()
     }
 
+    /// Return one page of rows (`LIMIT {limit} OFFSET {offset}`, id ascending)
+    /// — the bounded companion to [`Self::find_all`]. Callers that already
+    /// know their page window (the `#[crud]` list endpoint) fetch only that
+    /// window from the database instead of materializing the whole table.
+    ///
+    /// `limit`/`offset` are rendered inline into the SQL text: internal
+    /// non-negative `i64`s with no injection surface, and the `Any` driver
+    /// mis-types bound parameters in LIMIT/OFFSET position on some backends
+    /// (same rationale as [`Self::find_many_authorized`]). Negative values
+    /// are rejected with a `Protocol` error.
+    pub async fn find_all_paged(&self, limit: i64, offset: i64) -> Result<Vec<T>, sqlx::Error> {
+        if limit < 0 || offset < 0 {
+            return Err(sqlx::Error::Protocol(
+                "find_all_paged: limit and offset must be non-negative".into(),
+            ));
+        }
+        let sql = format!(
+            "SELECT * FROM {} ORDER BY {} ASC LIMIT {} OFFSET {}",
+            T::TABLE,
+            T::ID_COLUMN,
+            limit,
+            offset
+        );
+        let rows = sqlx::query(&sql).fetch_all(self.pool.as_ref()).await?;
+        rows.iter().map(T::from_row).collect()
+    }
+
     /// Run a `WHERE` clause that you compose yourself (still parameterized via
     /// the bound values). Use this for queries the convenience methods can't
     /// express. The clause is appended after `WHERE ` (no leading keyword).
@@ -228,6 +255,112 @@ impl<T: Entity> Repository<T> {
                 Vec::new(),
             ),
         };
+        let mut q = sqlx::query(&sql);
+        for v in &binds {
+            q = bind_json(q, v);
+        }
+        let rows = q.fetch_all(self.pool.as_ref()).await?;
+        filter_rows_authorized(rows, predicate, T::JSON_COLUMN).await
+    }
+
+    #[cfg(feature = "authz-row-level")]
+    /// Paginated companion to [`Self::find_all_authorized`] (the row-level
+    /// analogue of [`Self::find_all_paged`]): pushes `LIMIT {limit}
+    /// OFFSET {offset}` into the SQL whenever the matched rule's predicate
+    /// can be compiled into the `WHERE` clause alongside the rule's
+    /// declarative conditions.
+    ///
+    /// Exactness gate: LIMIT applies to rows *before* the post-load
+    /// predicate filter, so a closure predicate without SQL pushdown would
+    /// make pages come back short even when more matches exist past the
+    /// LIMIT boundary (the documented [`FindManyParams::limit`] caveat).
+    /// When the predicate can't be pushed down, this method transparently
+    /// takes the [`Self::find_all_authorized`] path and slices the window
+    /// in Rust — results are always identical to filtering the full set
+    /// and slicing.
+    pub async fn find_all_authorized_paged(
+        &self,
+        action: Action,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<T>, sqlx::Error> {
+        if limit < 0 || offset < 0 {
+            return Err(sqlx::Error::Protocol(
+                "find_all_authorized_paged: limit and offset must be non-negative".into(),
+            ));
+        }
+        let ability = current_ability().ok_or_else(|| {
+            sqlx::Error::Protocol(
+                "find_all_authorized_paged requires install_policies_middleware".into(),
+            )
+        })?;
+        let subject = Subject::Type(T::TABLE);
+        if !ability.can(&action, &subject) {
+            return Ok(Vec::new());
+        }
+        let predicate = ability.predicate(&action, &subject);
+        let principal = current_principal();
+
+        // SQL-side pagination is exact only when the post-load predicate
+        // can't drop rows after the LIMIT: either there is no predicate
+        // closure at all, or its `sql_conditions` render non-empty for the
+        // current principal.
+        let predicate_pushes_down = match (&predicate, principal.as_ref()) {
+            (Some(pred), Some(p)) => pred
+                .sql_conditions(p)
+                .is_some_and(|conds| !conds.is_empty()),
+            (Some(_), None) => false,
+            (None, _) => true,
+        };
+        if !predicate_pushes_down {
+            let rows = self.find_all_authorized(action).await?;
+            let offset = usize::try_from(offset).unwrap_or(usize::MAX);
+            let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+            return Ok(rows.into_iter().skip(offset).take(limit).collect());
+        }
+
+        // Fast path: rule conditions + predicate pushdown are all in the
+        // WHERE clause, so LIMIT/OFFSET paginate exactly. The post-load
+        // predicate re-check below stays as defense in depth (same as
+        // `find_many_authorized`).
+        let mut where_parts: Vec<String> = Vec::new();
+        let mut binds: Vec<serde_json::Value> = Vec::new();
+        let mut idx = 1;
+        if let Some(conds) = ability.constraint(&action, &subject) {
+            if !conds.is_empty() {
+                let (clause, cbinds) = conditions_to_sql(&conds, idx, Some(T::JSON_COLUMN));
+                if !clause.is_empty() {
+                    where_parts.push(clause);
+                    idx += cbinds.len();
+                    binds.extend(cbinds);
+                }
+            }
+        }
+        if let (Some(pred), Some(p)) = (&predicate, principal.as_ref()) {
+            if let Some(conds) = pred.sql_conditions(p) {
+                if !conds.is_empty() {
+                    let (clause, cbinds) = conditions_to_sql(&conds, idx, Some(T::JSON_COLUMN));
+                    if !clause.is_empty() {
+                        where_parts.push(clause);
+                        binds.extend(cbinds);
+                    }
+                }
+            }
+        }
+
+        let mut sql = format!("SELECT * FROM {}", T::TABLE);
+        if !where_parts.is_empty() {
+            sql.push_str(&format!(" WHERE {}", where_parts.join(" AND ")));
+        }
+        sql.push_str(&format!(" ORDER BY {} ASC", T::ID_COLUMN));
+        // LIMIT/OFFSET rendered inline — internal non-negative i64s, no
+        // injection surface; the Any driver mis-types bound parameters in
+        // LIMIT position on some backends.
+        sql.push_str(&format!(" LIMIT {limit}"));
+        if offset > 0 {
+            sql.push_str(&format!(" OFFSET {offset}"));
+        }
+
         let mut q = sqlx::query(&sql);
         for v in &binds {
             q = bind_json(q, v);
@@ -692,5 +825,26 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
     #[cfg(feature = "authz-row-level")]
     pub async fn list(&self) -> Result<Vec<T>, sqlx::Error> {
         self.repo.find_all_authorized(Action::Read).await
+    }
+
+    #[cfg(not(feature = "authz-row-level"))]
+    /// Paged variant of [`Self::list`]: the page window is pushed into SQL
+    /// (`LIMIT {limit} OFFSET {offset}`) instead of materializing the whole
+    /// table. The `#[crud]` list endpoint uses this for queries without
+    /// `sort`/`filter`/`search`.
+    pub async fn list_page(&self, limit: i64, offset: i64) -> Result<Vec<T>, sqlx::Error> {
+        self.repo.find_all_paged(limit, offset).await
+    }
+
+    #[cfg(feature = "authz-row-level")]
+    /// Paged variant of [`Self::list`]: delegates to
+    /// [`Repository::find_all_authorized_paged`], which pushes the window
+    /// into SQL when the matched read rule's predicate allows exact
+    /// pagination and transparently falls back to the fetch-all path
+    /// otherwise (results always identical to `list()` + a window slice).
+    pub async fn list_page(&self, limit: i64, offset: i64) -> Result<Vec<T>, sqlx::Error> {
+        self.repo
+            .find_all_authorized_paged(Action::Read, limit, offset)
+            .await
     }
 }

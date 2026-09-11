@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: `#[dto]` validation markers were silent no-ops
+
+- **`#[IsUUID]` now validates** — the marker was previously stripped without
+  emitting anything, so NestJS migrants writing `#[IsUUID] id: String` got no
+  UUID check and garbage IDs flowed into downstream services. The `#[dto]`
+  macro now rewrites it to `#[validate(custom(function = "nestrs::is_uuid"))]`
+  (new public helper `nestrs::is_uuid`): a runtime canonical 8-4-4-4-12
+  hexadecimal check (any version/variant, nil UUID included — the
+  `@IsUUID("all")` equivalent) producing a 422 with an `isUuid` constraint
+  through `ValidatedBody` / `ValidatedQuery` / `ValidatedPath` /
+  `ValidationPipe`. `Option<String>` fields skip validation on `None`.
+  Fields typed `uuid::Uuid` keep the marker as a satisfied no-op — serde
+  already rejects malformed UUIDs at the JSON boundary.
+- **Marker/type contradictions are now compile errors** — `#[IsString]`,
+  `#[IsBoolean]`, `#[IsInt]`, `#[IsNumber]`, and `#[IsUUID]` on a
+  non-matching field type (e.g. `#[IsString]` on `i64`) used to be silently
+  swallowed, validating nothing. The `#[dto]` macro now fails the build with
+  an actionable message pointing at the field type. Type-matching uses
+  (e.g. `#[IsString]` on `String`, `#[IsInt]` on `i32`, all existing
+  workspace/docs examples) compile unchanged.
+- **7 new tests** in `nestrs/tests/dto_validation_markers.rs` (canonical v4,
+  nil UUID, garbage rejection, wrong group lengths, `Option` skip/validate,
+  helper parity with class-validator's `isUuid("all")` semantics).
+
 ### Security — CSWSH defence (WebSocket Origin allowlist)
 
 - **CSWSH (Cross-Site WebSocket Hijacking) defence for `nestrs-ws`** —

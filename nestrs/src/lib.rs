@@ -3504,6 +3504,42 @@ impl axum::response::IntoResponse for HttpException {
     }
 }
 
+/// Runtime UUID-format check backing the `#[dto]` `#[IsUUID]` marker.
+///
+/// The `#[dto]` macro rewrites `#[IsUUID]` on a `String` field into
+/// `#[validate(custom(function = "nestrs::is_uuid"))]`, so any DTO validated
+/// through `ValidatedBody` / `ValidatedQuery` / `ValidatedPath` /
+/// `ValidationPipe` rejects non-UUID values (422). This is the
+/// `@IsUUID("all")` equivalent: canonical `8-4-4-4-12` hexadecimal form,
+/// any version/variant, nil UUID included, case-insensitive.
+///
+/// Fields typed `uuid::Uuid` don't need the marker — serde already rejects
+/// malformed UUIDs at the JSON boundary.
+pub fn is_uuid(value: &str) -> Result<(), validator::ValidationError> {
+    const HYPHENS: [usize; 4] = [8, 13, 18, 23];
+    let bytes = value.as_bytes();
+    // Canonical 8-4-4-4-12: hyphens at the four fixed positions, ASCII hex
+    // digits everywhere else. `is_ascii_hexdigit` never matches `-`, so one
+    // pass covers both.
+    let well_formed = bytes.len() == 36
+        && bytes.iter().enumerate().all(|(i, b)| {
+            if HYPHENS.contains(&i) {
+                *b == b'-'
+            } else {
+                b.is_ascii_hexdigit()
+            }
+        });
+    if well_formed {
+        Ok(())
+    } else {
+        let mut err = validator::ValidationError::new("isUuid");
+        err.message = Some(std::borrow::Cow::from(
+            "value must be a valid UUID (8-4-4-4-12 hexadecimal)",
+        ));
+        Err(err)
+    }
+}
+
 fn __nestrs_validation_failed(e: validator::ValidationErrors) -> HttpException {
     let mut errors = Vec::new();
     for (field, field_errors) in e.field_errors() {

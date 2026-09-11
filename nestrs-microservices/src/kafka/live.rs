@@ -3,7 +3,7 @@
 //! Wire format matches Redis/NATS: JSON `WireRequest` payloads on the `requests` topic; replies go to
 //! a per-client `replies.{instance_id}` topic with record key = `correlation_id`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use super::connection::client_builder_from_parts;
@@ -69,6 +69,14 @@ pub struct KafkaTransport {
     options: KafkaTransportOptions,
     instance_id: String,
     client: Mutex<Option<Arc<rskafka::client::Client>>>,
+    /// One partition client per topic, kept for the life of the transport.
+    ///
+    /// Constructing an rskafka `PartitionClient` forces a full leader
+    /// discovery (multiple metadata round-trips); rebuilding per RPC
+    /// repeated that on every call. A constructed client self-heals — it
+    /// migrates transparently across leader changes and broken connections —
+    /// so caching it for the transport's lifetime is safe.
+    partitions: Mutex<HashMap<String, Arc<rskafka::client::partition::PartitionClient>>>,
 }
 
 impl KafkaTransport {
@@ -77,6 +85,7 @@ impl KafkaTransport {
             instance_id: Uuid::new_v4().simple().to_string(),
             options,
             client: Mutex::new(None),
+            partitions: Mutex::new(HashMap::new()),
         }
     }
 
@@ -90,32 +99,33 @@ impl KafkaTransport {
             &self.options.connection,
         )
         .map_err(|e| TransportError::new(format!("kafka client options: {e}")))?;
-        let c = Arc::new(
-            builder
+        let create_topics = self.options.create_topics;
+        let requests_topic = self.options.requests_topic();
+        let replies_topic = self.options.replies_topic(&self.instance_id);
+        let replication_factor = self.options.replication_factor;
+        // rskafka retries broker connects / metadata internally with no
+        // deadline; bound the whole bootstrap so `request_timeout` still
+        // means something against a black-holed address.
+        let c = tokio::time::timeout(self.options.request_timeout, async {
+            let c = builder
                 .build()
                 .await
-                .map_err(|e| TransportError::new(format!("kafka connect failed: {e}")))?,
-        );
-        if self.options.create_topics {
-            if let Ok(ctrl) = c.controller_client() {
-                let _ = ctrl
-                    .create_topic(
-                        self.options.requests_topic(),
-                        1,
-                        self.options.replication_factor,
-                        5_000,
-                    )
-                    .await;
-                let _ = ctrl
-                    .create_topic(
-                        self.options.replies_topic(&self.instance_id),
-                        1,
-                        self.options.replication_factor,
-                        5_000,
-                    )
-                    .await;
+                .map_err(|e| TransportError::new(format!("kafka connect failed: {e}")))?;
+            if create_topics {
+                if let Ok(ctrl) = c.controller_client() {
+                    let _ = ctrl
+                        .create_topic(requests_topic, 1, replication_factor, 5_000)
+                        .await;
+                    let _ = ctrl
+                        .create_topic(replies_topic, 1, replication_factor, 5_000)
+                        .await;
+                }
             }
-        }
+            Ok::<_, TransportError>(c)
+        })
+        .await
+        .map_err(|_| TransportError::new("kafka connect timed out"))??;
+        let c = Arc::new(c);
         *g = Some(c.clone());
         Ok(c)
     }
@@ -123,14 +133,59 @@ impl KafkaTransport {
     async fn partition(
         &self,
         topic: &str,
-    ) -> Result<rskafka::client::partition::PartitionClient, TransportError> {
+    ) -> Result<Arc<rskafka::client::partition::PartitionClient>, TransportError> {
+        // Connect before taking the partition-cache lock so the two locks
+        // are never nested.
         let c = self.connect().await?;
-        c.partition_client(topic.to_owned(), 0, UnknownTopicHandling::Retry)
-            .await
-            .map_err(|e| {
-                TransportError::new(format!("kafka partition client `{topic}` failed: {e}"))
-            })
+        cached_partition(
+            &c,
+            &self.partitions,
+            topic,
+            self.options.request_timeout,
+        )
+        .await
     }
+}
+
+/// Partition client for `topic` (partition 0 — single-partition topic
+/// layout), reusing `cache`. The cache lock is held across the
+/// (timeout-bounded) construction so concurrent callers don't each pay
+/// leader discovery (single-flight); cache hits return immediately.
+async fn cached_partition(
+    client: &rskafka::client::Client,
+    cache: &Mutex<HashMap<String, Arc<rskafka::client::partition::PartitionClient>>>,
+    topic: &str,
+    timeout: std::time::Duration,
+) -> Result<Arc<rskafka::client::partition::PartitionClient>, TransportError> {
+    let mut g = cache.lock().await;
+    if let Some(pc) = g.get(topic) {
+        return Ok(Arc::clone(pc));
+    }
+    let pc = tokio::time::timeout(
+        timeout,
+        client.partition_client(topic.to_owned(), 0, UnknownTopicHandling::Retry),
+    )
+    .await
+    .map_err(|_| TransportError::new(format!("kafka partition client `{topic}` timed out")))?
+    .map_err(|e| TransportError::new(format!("kafka partition client `{topic}` failed: {e}")))?;
+    let pc = Arc::new(pc);
+    g.insert(topic.to_owned(), Arc::clone(&pc));
+    Ok(pc)
+}
+
+/// Produce `record` on `pc`, bounded by `cap` — rskafka retries internally
+/// with no deadline, so an unreachable broker would otherwise park the
+/// caller forever.
+async fn bounded_produce(
+    pc: &rskafka::client::partition::PartitionClient,
+    record: Record,
+    cap: std::time::Duration,
+) -> Result<(), TransportError> {
+    tokio::time::timeout(cap, pc.produce(vec![record], Compression::default()))
+        .await
+        .map_err(|_| TransportError::new("kafka produce timed out"))?
+        .map(|_| ())
+        .map_err(|e| TransportError::new(format!("kafka produce failed: {e}")))
 }
 
 #[async_trait]
@@ -151,10 +206,13 @@ impl Transport for KafkaTransport {
         let req_pc = self.partition(&self.options.requests_topic()).await?;
         let rep_pc = self.partition(&reply_topic).await?;
 
-        let start_off = rep_pc
-            .get_offset(OffsetAt::Latest)
-            .await
-            .map_err(|e| TransportError::new(format!("kafka get_offset (replies) failed: {e}")))?;
+        let start_off = tokio::time::timeout(
+            self.options.request_timeout,
+            rep_pc.get_offset(OffsetAt::Latest),
+        )
+        .await
+        .map_err(|_| TransportError::new("kafka get_offset (replies) timed out"))?
+        .map_err(|e| TransportError::new(format!("kafka get_offset (replies) failed: {e}")))?;
 
         let record = Record {
             key: None,
@@ -162,10 +220,7 @@ impl Transport for KafkaTransport {
             headers: BTreeMap::new(),
             timestamp: Utc::now(),
         };
-        req_pc
-            .produce(vec![record], Compression::default())
-            .await
-            .map_err(|e| TransportError::new(format!("kafka produce failed: {e}")))?;
+        bounded_produce(&req_pc, record, self.options.request_timeout).await?;
         #[cfg(feature = "microservice-metrics")]
         metrics::counter!("nestrs_microservice_kafka_produce_total", "topic" => "requests")
             .increment(1);
@@ -174,12 +229,16 @@ impl Transport for KafkaTransport {
         let mut next_off = start_off;
 
         loop {
-            if tokio::time::Instant::now() > deadline {
-                return Err(TransportError::new("kafka request timed out"));
-            }
-            let (records, _) = rep_pc
-                .fetch_records(next_off, 1..1_000_000, 500)
-                .await
+            // Bound each fetch by the remaining budget: rskafka retries
+            // internally with no deadline, so without this a broker dying
+            // mid-RPC hangs `send_json` far past `request_timeout` (the
+            // deadline check below only ran *between* fetches).
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let fetched =
+                tokio::time::timeout(remaining, rep_pc.fetch_records(next_off, 1..1_000_000, 500))
+                    .await
+                    .map_err(|_| TransportError::new("kafka request timed out"))?;
+            let (records, _) = fetched
                 .map_err(|e| TransportError::new(format!("kafka fetch (replies) failed: {e}")))?;
 
             if records.is_empty() {
@@ -235,10 +294,7 @@ impl Transport for KafkaTransport {
             headers: BTreeMap::new(),
             timestamp: Utc::now(),
         };
-        req_pc
-            .produce(vec![record], Compression::default())
-            .await
-            .map_err(|e| TransportError::new(format!("kafka produce failed: {e}")))?;
+        bounded_produce(&req_pc, record, self.options.request_timeout).await?;
         #[cfg(feature = "microservice-metrics")]
         metrics::counter!("nestrs_microservice_kafka_produce_total", "topic" => "requests")
             .increment(1);
@@ -400,96 +456,173 @@ impl KafkaMicroserviceServer {
         let client = self.ensure_client().await?;
         let requests_topic = self.options.requests_topic();
         let handlers = Arc::new(self.handlers);
-        let next_offset = self.next_offset;
-        let c2 = client;
 
         tokio::pin!(shutdown);
+
+        // One partition client for the whole listener (was: rebuilt every
+        // 25 ms poll tick — a full leader discovery, i.e. multiple metadata
+        // round-trips, per tick, even idle). Cancellable against shutdown so
+        // a broker that is down at boot doesn't wedge `listen`.
+        let req_pc = loop {
+            tokio::select! {
+                _ = &mut shutdown => return Ok(()),
+                built = client.partition_client(requests_topic.clone(), 0, UnknownTopicHandling::Retry) => match built {
+                    Ok(p) => break Arc::new(p),
+                    Err(e) => {
+                        tracing::warn!(
+                            topic = %requests_topic,
+                            error = %e,
+                            "kafka requests partition unavailable; retrying in 1s"
+                        );
+                        tokio::select! {
+                            _ = &mut shutdown => return Ok(()),
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                        }
+                    }
+                }
+            }
+        };
+
+        // Reply partition clients, shared by every reply task (was: one
+        // fresh partition client — leader discovery and all — per reply).
+        let reply_pcs: Arc<Mutex<HashMap<String, Arc<rskafka::client::partition::PartitionClient>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        // In-memory consumer position (rskafka 0.6 has no offset-commit
+        // API); advanced before dispatch (at-most-once), same as before.
+        let mut next_off = *self.next_offset.lock().await;
+
+        // Pacing/backoff for the poll loop. Empty fetches are normal
+        // idleness (the 900 ms broker-side long-poll paces them); errors
+        // and stalls back off exponentially instead of hot-retrying a
+        // dead broker every 25 ms.
+        let mut error_backoff_ms: u64 = 250;
+        const ERROR_BACKOFF_MAX_MS: u64 = 10_000;
+        const POLL_STALL_CAP: std::time::Duration = std::time::Duration::from_secs(30);
+        const REPLY_PRODUCE_CAP: std::time::Duration = std::time::Duration::from_secs(30);
+
         loop {
             tokio::select! {
                 _ = &mut shutdown => break,
-                _ = tokio::time::sleep(std::time::Duration::from_millis(25)) => {
-                    let req_pc = match c2
-                        .partition_client(requests_topic.clone(), 0, UnknownTopicHandling::Retry)
-                        .await
-                    {
-                        Ok(p) => p,
-                        Err(_) => continue,
-                    };
-                    let fetched = {
-                        let off = next_offset.lock().await;
-                        req_pc.fetch_records(*off, 1..4_000_000, 900).await
-                    };
-                    let (records, _) = match fetched {
-                        Ok(x) => x,
-                        Err(_) => continue,
-                    };
-                    if records.is_empty() {
-                        continue;
-                    }
-                    let last_off = records.iter().map(|r| r.offset).max().unwrap_or(0);
-                    {
-                        let mut off = next_offset.lock().await;
-                        *off = last_off + 1;
-                    }
-                    for ro in records {
-                        let payload_bytes = match ro.record.value.as_deref() {
-                            Some(b) => b,
-                            None => continue,
-                        };
-                        let req: WireRequest = match serde_json::from_slice(payload_bytes) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
-                        let handlers = handlers.clone();
-                        let client = c2.clone();
-                        match req.kind {
-                            WireKind::Send => {
-                                let Some(reply_topic) = req.reply.clone() else { continue };
-                                let corr = req.correlation_id.clone().unwrap_or_default();
-                                tokio::spawn(async move {
-                                    let res = dispatch_send(&handlers, &req.pattern, req.payload.clone()).await;
-                                    let reply_corr = req.correlation_id.clone();
-                                    let wire = match res {
-                                        Ok(v) => WireResponse {
-                                            ok: true,
-                                            payload: Some(v),
-                                            error: None,
-                                            correlation_id: reply_corr,
-                                        },
-                                        Err(e) => WireResponse {
-                                            ok: false,
-                                            payload: None,
-                                            error: Some(WireError {
-                                                message: e.message,
-                                                details: e.details,
-                                            }),
-                                            correlation_id: req.correlation_id.clone(),
-                                        },
-                                    };
-                                    if let Ok(bytes) = serde_json::to_vec(&wire) {
-                                        if let Ok(rep_pc) = client
-                                            .partition_client(reply_topic.clone(), 0, UnknownTopicHandling::Retry)
-                                            .await
-                                        {
-                                            let rec = Record {
-                                                key: Some(corr.into_bytes()),
-                                                value: Some(bytes),
-                                                headers: BTreeMap::new(),
-                                                timestamp: Utc::now(),
-                                            };
-                                            let _ = rep_pc.produce(vec![rec], Compression::default()).await;
-                                            #[cfg(feature = "microservice-metrics")]
-                                            metrics::counter!("nestrs_microservice_kafka_produce_total", "topic" => "replies")
-                                                .increment(1);
-                                        }
-                                    }
-                                });
+                fetched = tokio::time::timeout(
+                    POLL_STALL_CAP,
+                    req_pc.fetch_records(next_off, 1..4_000_000, 900),
+                ) => {
+                    match fetched {
+                        // Fetch stuck >30s: the broker went unreachable
+                        // mid-poll (rskafka retries internally with no
+                        // deadline). Warn and start a fresh cycle; the
+                        // internal backoff keeps pacing within each cycle.
+                        Err(_stalled) => {
+                            tracing::warn!(
+                                topic = %requests_topic,
+                                "kafka requests poll stalled for 30s (broker unreachable?); restarting poll cycle"
+                            );
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!(
+                                topic = %requests_topic,
+                                error = %e,
+                                backoff_ms = error_backoff_ms,
+                                "kafka requests fetch failed; backing off"
+                            );
+                            tokio::select! {
+                                _ = &mut shutdown => break,
+                                _ = tokio::time::sleep(std::time::Duration::from_millis(error_backoff_ms)) => {}
                             }
-                            WireKind::Emit => {
+                            error_backoff_ms = (error_backoff_ms * 2).min(ERROR_BACKOFF_MAX_MS);
+                        }
+                        Ok(Ok((records, _))) if records.is_empty() => {
+                            // Idle: the 900 ms long-poll paced this cycle;
+                            // the short floor only guards brokers that
+                            // return empty instantly. No backoff growth —
+                            // idleness is normal.
+                            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                        }
+                        Ok(Ok((records, _))) => {
+                            error_backoff_ms = 250;
+                            let last_off = records.iter().map(|r| r.offset).max().unwrap_or(next_off);
+                            next_off = last_off + 1;
+                            for ro in records {
+                                let payload_bytes = match ro.record.value.as_deref() {
+                                    Some(b) => b,
+                                    None => continue,
+                                };
+                                let req: WireRequest = match serde_json::from_slice(payload_bytes) {
+                                    Ok(v) => v,
+                                    Err(_) => continue,
+                                };
                                 let handlers = handlers.clone();
-                                tokio::spawn(async move {
-                                    dispatch_emit(&handlers, &req.pattern, req.payload.clone()).await;
-                                });
+                                let reply_pcs = reply_pcs.clone();
+                                let client = client.clone();
+                                match req.kind {
+                                    WireKind::Send => {
+                                        let Some(reply_topic) = req.reply.clone() else { continue };
+                                        let corr = req.correlation_id.clone().unwrap_or_default();
+                                        tokio::spawn(async move {
+                                            let res = dispatch_send(&handlers, &req.pattern, req.payload.clone()).await;
+                                            let reply_corr = req.correlation_id.clone();
+                                            let wire = match res {
+                                                Ok(v) => WireResponse {
+                                                    ok: true,
+                                                    payload: Some(v),
+                                                    error: None,
+                                                    correlation_id: reply_corr,
+                                                },
+                                                Err(e) => WireResponse {
+                                                    ok: false,
+                                                    payload: None,
+                                                    error: Some(WireError {
+                                                        message: e.message,
+                                                        details: e.details,
+                                                    }),
+                                                    correlation_id: req.correlation_id.clone(),
+                                                },
+                                            };
+                                            if let Ok(bytes) = serde_json::to_vec(&wire) {
+                                                let rep_pc = match cached_partition(
+                                                    &client,
+                                                    &reply_pcs,
+                                                    &reply_topic,
+                                                    REPLY_PRODUCE_CAP,
+                                                )
+                                                .await
+                                                {
+                                                    Ok(pc) => pc,
+                                                    Err(e) => {
+                                                        tracing::warn!(
+                                                            error = %e.message,
+                                                            "kafka reply partition unavailable; dropping reply"
+                                                        );
+                                                        return;
+                                                    }
+                                                };
+                                                let rec = Record {
+                                                    key: Some(corr.into_bytes()),
+                                                    value: Some(bytes),
+                                                    headers: BTreeMap::new(),
+                                                    timestamp: Utc::now(),
+                                                };
+                                                if let Err(e) = bounded_produce(&rep_pc, rec, REPLY_PRODUCE_CAP).await {
+                                                    tracing::warn!(
+                                                        error = %e.message,
+                                                        "kafka reply produce failed; caller will time out"
+                                                    );
+                                                    return;
+                                                }
+                                                #[cfg(feature = "microservice-metrics")]
+                                                metrics::counter!("nestrs_microservice_kafka_produce_total", "topic" => "replies")
+                                                    .increment(1);
+                                            }
+                                        });
+                                    }
+                                    WireKind::Emit => {
+                                        let handlers = handlers.clone();
+                                        tokio::spawn(async move {
+                                            dispatch_emit(&handlers, &req.pattern, req.payload.clone()).await;
+                                        });
+                                    }
+                                }
                             }
                         }
                     }
@@ -522,9 +655,12 @@ pub async fn kafka_cluster_reachable_with(
 ) -> Result<(), TransportError> {
     let builder = client_builder_from_parts(brokers, connection)
         .map_err(|e| TransportError::new(format!("kafka client options: {e}")))?;
-    builder
-        .build()
+    // The probe must fail fast: rskafka retries broker connects internally
+    // with no deadline, and a health check that hangs forever wedges the
+    // prober.
+    tokio::time::timeout(std::time::Duration::from_secs(10), builder.build())
         .await
+        .map_err(|_| TransportError::new("kafka broker unreachable: probe timed out"))?
         .map(|_| ())
         .map_err(|e| TransportError::new(format!("kafka broker unreachable: {e}")))
 }
@@ -551,5 +687,79 @@ mod tests {
             OffsetAt::Earliest
         );
         assert_eq!(OffsetAt::from(KafkaConsumerStart::Latest), OffsetAt::Latest);
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Binds + drops a listener so the port is guaranteed-refused (a
+    /// hard-coded port could be taken by a real broker).
+    fn dead_addr() -> String {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind temp listener");
+        let addr = l.local_addr().expect("local addr");
+        drop(l);
+        format!("127.0.0.1:{}", addr.port())
+    }
+
+    fn dead_transport(request_timeout: Duration) -> KafkaTransport {
+        let mut opts = KafkaTransportOptions::new(vec![dead_addr()]);
+        opts.request_timeout = request_timeout;
+        opts.create_topics = false;
+        KafkaTransport::new(opts)
+    }
+
+    #[tokio::test]
+    async fn unreachable_kafka_fails_the_rpc_without_hanging() {
+        let transport = dead_transport(Duration::from_millis(500));
+        let start = std::time::Instant::now();
+        let err = transport
+            .send_json("audit.ping", serde_json::json!({"n": 1}))
+            .await
+            .expect_err("unreachable broker must fail the RPC");
+        // `request_timeout` must be honored end-to-end (rskafka retries
+        // internally with no deadline; without the transport-level bounds
+        // this call hangs forever).
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "send_json hung: {:?} ({err:?})",
+            start.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn unreachable_kafka_fails_the_rpc_again_after_a_failure() {
+        // A failed connect must leave the shared client cell empty so the
+        // next call retries (is not poisoned).
+        let transport = dead_transport(Duration::from_millis(500));
+        transport
+            .send_json("audit.ping", serde_json::json!({}))
+            .await
+            .expect_err("first call must fail");
+        let err = transport
+            .send_json("audit.ping", serde_json::json!({}))
+            .await
+            .expect_err("second call must fail too");
+        assert!(
+            err.message.contains("kafka"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unreachable_kafka_fails_emit_without_hanging() {
+        let transport = dead_transport(Duration::from_millis(500));
+        let start = std::time::Instant::now();
+        transport
+            .emit_json("audit.tick", serde_json::json!({"seq": 1}))
+            .await
+            .expect_err("unreachable broker must fail the emit");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "emit_json hung: {:?}",
+            start.elapsed()
+        );
     }
 }

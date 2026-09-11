@@ -25,6 +25,25 @@
 //! unreachable (guard rejects, route errors), the probe reports down —
 //! stamp a route that is reachable by unauthenticated k8s probes.
 //!
+//! # Hardening
+//!
+//! The probe endpoints mount **outside** every middleware layer (they must
+//! stay reachable under load shedding and rate limits), which makes them an
+//! unauthenticated surface. Three protections apply as a result:
+//!
+//! - **Panic guard** — probe execution runs on its own task; a panicking
+//!   indicator or stamped handler becomes a 503, never a dropped
+//!   connection.
+//! - **Generic Down messages** — responses say *that* the check failed
+//!   (plus failing indicator names), never *why*: raw error strings (DB
+//!   endpoints, dependency URLs, paths) go to `tracing` only.
+//! - **Short-TTL cache with in-flight coalescing** — liveness and readiness
+//!   outcomes are cached for 5s and concurrent probes share one execution,
+//!   so a probe storm (or an attacker) cannot amplify work into the
+//!   dependencies the indicators call. This is deliberately *not* a
+//!   429-style rate cap: k8s treats any non-2xx probe as a failure and
+//!   restarts the pod, so rate-limiting a probe would fail the probe.
+//!
 //! # Indicators
 //!
 //! [`DatabaseIndicator`], [`HttpIndicator`], and [`DiskSpaceIndicator`]
@@ -93,6 +112,68 @@ fn probe_routes() -> &'static RwLock<HashMap<ProbeKind, (&'static str, String)>>
 /// most once per process, whichever app hits it first.
 static STARTUP_CACHE: tokio::sync::OnceCell<ProbeOutcome> = tokio::sync::OnceCell::const_new();
 
+/// How long a liveness/readiness outcome stays fresh. k8s default
+/// `periodSeconds` is 10, so a 5s cache never hides state for more than
+/// half a probe period — but it caps indicator execution (DB pings,
+/// dependency HTTP GETs) at one run per window no matter how fast the
+/// endpoint is hammered.
+const PROBE_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Generic Down message served when a probe execution panics. The panic
+/// detail goes to `tracing`.
+const PROBE_PANIC_MESSAGE: &str = "probe execution failed";
+
+/// Outcome cache for one probe kind: fresh results are served directly,
+/// concurrent callers share the in-flight execution, and a completed result
+/// is served from cache until the TTL lapses. Execution rate is thereby
+/// capped at one run per TTL window per probe kind.
+#[derive(Clone)]
+struct ProbeCache {
+    inner: Arc<tokio::sync::Mutex<Option<(std::time::Instant, ProbeOutcome)>>>,
+}
+
+impl ProbeCache {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(tokio::sync::Mutex::new(None)),
+        }
+    }
+
+    /// Serve the cached outcome when fresh; otherwise start `make` (which
+    /// spawns the guarded execution) and store its result. Callers arriving
+    /// while an execution is in flight wait for it instead of piling on —
+    /// one execution serves the whole concurrent burst.
+    async fn get_or_refresh(
+        &self,
+        make: impl FnOnce() -> tokio::task::JoinHandle<ProbeOutcome>,
+    ) -> ProbeOutcome {
+        let mut guard = self.inner.lock().await;
+        if let Some((at, ref outcome)) = *guard {
+            if at.elapsed() < PROBE_CACHE_TTL {
+                return outcome.clone();
+            }
+        }
+        // Probe execution runs on its own task: a panic in an indicator or
+        // stamped handler surfaces as a JoinError here (→ 503) instead of
+        // unwinding the connection's task and dropping the probe request.
+        let outcome = match make().await {
+            Ok(outcome) => outcome,
+            Err(join_err) => {
+                tracing::error!(
+                    target: "nestrs",
+                    "health probe execution panicked: {join_err}"
+                );
+                ProbeOutcome::Down {
+                    status: 500,
+                    message: PROBE_PANIC_MESSAGE.to_string(),
+                }
+            }
+        };
+        *guard = Some((std::time::Instant::now(), outcome.clone()));
+        outcome
+    }
+}
+
 /// Resolve the stamped probe routes from the global route + metadata
 /// registries. Called from `build_router` before the endpoints are mounted.
 fn resolve_stamped_probes() {
@@ -130,8 +211,16 @@ impl From<ProbeOutcome> for crate::HealthStatus {
 }
 
 /// Issue an internal self-request through the captured main router and
-/// translate the response status into a probe outcome.
-async fn mirror_request(router: axum::Router, method: &'static str, path: &str) -> ProbeOutcome {
+/// translate the response status into a probe outcome. The Down message is
+/// generic (`"{kind} check failed"`) — the method/path/status detail goes to
+/// `tracing` only, since the probe endpoints are reachable without
+/// authentication and must not disclose internal route topology.
+async fn mirror_request(
+    router: axum::Router,
+    method: &'static str,
+    path: &str,
+    kind: &'static str,
+) -> ProbeOutcome {
     use tower::ServiceExt;
     let request = axum::http::Request::builder()
         .method(method)
@@ -144,16 +233,51 @@ async fn mirror_request(router: axum::Router, method: &'static str, path: &str) 
             if resp.status().is_success() {
                 ProbeOutcome::Up
             } else {
+                tracing::warn!(
+                    target: "nestrs",
+                    "{kind} probe: stamped handler {method} {path} returned {status}"
+                );
                 ProbeOutcome::Down {
                     status,
-                    message: format!("probe handler {method} {path} returned {status}"),
+                    message: format!("{kind} check failed"),
                 }
             }
         }
-        Err(err) => ProbeOutcome::Down {
-            status: 500,
-            message: format!("probe dispatch to {method} {path} failed: {err}"),
-        },
+        Err(err) => {
+            tracing::error!(
+                target: "nestrs",
+                "{kind} probe: dispatch to {method} {path} failed: {err}"
+            );
+            ProbeOutcome::Down {
+                status: 500,
+                message: format!("{kind} check failed"),
+            }
+        }
+    }
+}
+
+/// Aggregate the `enable_readiness_check` indicators into one outcome.
+/// Failing indicator *names* ride in the message (they are the operator's
+/// own static labels); their raw error text goes to `tracing` only.
+async fn aggregate_readiness(indicators: Vec<Arc<dyn crate::HealthIndicator>>) -> ProbeOutcome {
+    let mut failing: Vec<&str> = Vec::new();
+    for ind in &indicators {
+        if let crate::HealthStatus::Down { message } = ind.check().await {
+            tracing::warn!(
+                target: "nestrs",
+                "readiness indicator '{}' reports down: {message}",
+                ind.name()
+            );
+            failing.push(ind.name());
+        }
+    }
+    if failing.is_empty() {
+        ProbeOutcome::Up
+    } else {
+        ProbeOutcome::Down {
+            status: 503,
+            message: format!("readiness failed ({})", failing.join("; ")),
+        }
     }
 }
 
@@ -192,7 +316,6 @@ pub fn install_probes(
     router: axum::Router,
     readiness_indicators: Vec<Arc<dyn crate::HealthIndicator>>,
 ) -> axum::Router {
-    use crate::HealthStatus;
     resolve_stamped_probes();
     let main = std::sync::Arc::new(router.clone());
 
@@ -218,12 +341,20 @@ pub fn install_probes(
                     axum::routing::get(move || {
                         let main = std::sync::Arc::clone(&main);
                         async move {
+                            // Startup is evaluated once per process (k8s
+                            // contract) — the OnceCell is the cap.
                             let outcome = match &stamped_route {
                                 Some((method, path)) => {
                                     let (method, path) = (*method, path.clone());
                                     STARTUP_CACHE
                                         .get_or_init(|| async {
-                                            mirror_request((*main).clone(), method, &path).await
+                                            mirror_request(
+                                                (*main).clone(),
+                                                method,
+                                                &path,
+                                                "startup",
+                                            )
+                                            .await
                                         })
                                         .await
                                 }
@@ -240,14 +371,29 @@ pub fn install_probes(
             }
             ProbeKind::Liveness => {
                 let main = std::sync::Arc::clone(&main);
+                let cache = ProbeCache::new();
                 probe_router = probe_router.route(
                     kind.path(),
                     axum::routing::get(move || {
                         let main = std::sync::Arc::clone(&main);
+                        let cache = cache.clone();
                         async move {
-                            let outcome = match &stamped_route {
+                            let outcome = match stamped_route.clone() {
                                 Some((method, path)) => {
-                                    mirror_request((*main).clone(), method, path).await
+                                    let main = std::sync::Arc::clone(&main);
+                                    cache
+                                        .get_or_refresh(move || {
+                                            tokio::spawn(async move {
+                                                mirror_request(
+                                                    (*main).clone(),
+                                                    method,
+                                                    &path,
+                                                    "liveness",
+                                                )
+                                                .await
+                                            })
+                                        })
+                                        .await
                                 }
                                 None => ProbeOutcome::Up,
                             };
@@ -258,32 +404,43 @@ pub fn install_probes(
             }
             ProbeKind::Readiness => {
                 let main = std::sync::Arc::clone(&main);
+                let cache = ProbeCache::new();
                 let indicators: Vec<Arc<dyn crate::HealthIndicator>> =
                     readiness_indicators.iter().map(Arc::clone).collect();
                 probe_router = probe_router.route(
                     kind.path(),
                     axum::routing::get(move || {
                         let main = std::sync::Arc::clone(&main);
+                        let cache = cache.clone();
                         let indicators = indicators.clone();
                         async move {
-                            let outcome = if let Some((method, path)) = &stamped_route {
-                                mirror_request((*main).clone(), method, path).await
-                            } else {
-                                // No stamped handler: aggregate the
-                                // `enable_readiness_check` indicators.
-                                let mut downs: Vec<String> = Vec::new();
-                                for ind in &indicators {
-                                    if let HealthStatus::Down { message } = ind.check().await {
-                                        downs.push(format!("{}: {message}", ind.name()));
-                                    }
+                            let outcome = match stamped_route.clone() {
+                                Some((method, path)) => {
+                                    let main = std::sync::Arc::clone(&main);
+                                    cache
+                                        .get_or_refresh(move || {
+                                            tokio::spawn(async move {
+                                                mirror_request(
+                                                    (*main).clone(),
+                                                    method,
+                                                    &path,
+                                                    "readiness",
+                                                )
+                                                .await
+                                            })
+                                        })
+                                        .await
                                 }
-                                if downs.is_empty() {
-                                    ProbeOutcome::Up
-                                } else {
-                                    ProbeOutcome::Down {
-                                        status: 503,
-                                        message: downs.join("; "),
-                                    }
+                                None => {
+                                    // No stamped handler: aggregate the
+                                    // `enable_readiness_check` indicators.
+                                    cache
+                                        .get_or_refresh(move || {
+                                            tokio::spawn(async move {
+                                                aggregate_readiness(indicators).await
+                                            })
+                                        })
+                                        .await
                                 }
                             };
                             outcome_response(&outcome)

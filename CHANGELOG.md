@@ -7,6 +7,40 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: unauthenticated health-probe endpoints were unbounded and leaked error detail
+
+The fixed `/__nestrs/health/{live,ready,startup}` endpoints mount outside
+every middleware layer (they must stay reachable under load shedding), which
+made them an unauthenticated surface with no execution bound: every hit ran
+the `DatabaseIndicator` / `HttpIndicator` readiness work (DB pings, outbound
+dependency GETs) — a probe storm (or an attacker) amplified directly into
+the dependencies — and Down responses carried raw error text (internal route
+paths, DB endpoints, dependency URLs, panic payloads) to any unauthenticated
+caller. A panicking indicator unwound the connection task entirely.
+
+- **Panic guard** — probe execution now runs on its own task: a panicking
+  indicator or stamped handler becomes a 503 with a generic message instead
+  of a dropped connection.
+- **Generic Down messages** — responses say *that* a check failed (plus
+  failing indicator names), never *why*: the mirrored handler's
+  method/path/status, indicator error text, and panic payloads go to
+  `tracing` only.
+- **Short-TTL cache with in-flight coalescing** — liveness and readiness
+  outcomes are cached for 5s (k8s default `periodSeconds` is 10), and
+  concurrent probes share one execution, capping indicator execution at one
+  run per window no matter how fast the endpoint is hammered. Deliberately
+  *not* a 429-style rate cap: k8s treats any non-2xx probe as a failure and
+  restarts the pod, so rate-limiting a probe would fail the probe.
+- The `enable_readiness_check` endpoint (`/ready`-style, user-configured
+  path) keeps its NestJS-terminus response shape — it sits inside the normal
+  middleware stack (rate limit, CatchPanic when enabled) and its
+  per-indicator detail is the documented terminus contract.
+- **5 new tests** — panicking indicator → 503 (not a dropped connection),
+  stamped panicking handler → 503 (own binary: stamps are process-global),
+  aggregation redaction (indicator names in, `postgres://secret-host:5432`
+  out), and 8-request concurrent-burst coalescing to exactly one indicator
+  execution + TTL cache follow-ups.
+
 ### Fixed — production/security audit: rate limiter / throttler ignored the declared proxy topology
 
 An app behind a reverse proxy calling `use_trusted_proxy_headers(n)` but not

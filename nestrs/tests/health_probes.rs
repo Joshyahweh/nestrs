@@ -83,7 +83,8 @@ async fn liveness_mirror_reports_stamped_handler_status() {
 async fn readiness_mirror_surfaces_handler_failure_as_503() {
     let app = probe_app();
     // `#[readiness]` on `/internal/broken` (500) ⇒ ready endpoint 503 with
-    // the failing status in the message.
+    // a generic message: the probe endpoints are unauthenticated, so the
+    // failing path/status goes to `tracing`, never into the response.
     let r = get(&app, "/__nestrs/health/ready").await;
     assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
     let body = axum::body::to_bytes(r.into_body(), 4096)
@@ -92,9 +93,10 @@ async fn readiness_mirror_surfaces_handler_failure_as_503() {
     let v: serde_json::Value = serde_json::from_slice(&body).expect("json");
     assert_eq!(v["status"], "error");
     let msg = v["message"].as_str().expect("message");
+    assert_eq!(msg, "readiness check failed", "generic message: {msg}");
     assert!(
-        msg.contains("500") && msg.contains("/internal/broken"),
-        "message names the failing probe: {msg}"
+        !msg.contains("/internal/broken") && !msg.contains("500"),
+        "internal route topology must not leak into probe responses: {msg}"
     );
 }
 

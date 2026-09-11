@@ -106,7 +106,10 @@ pub use rabbitmq::{
 pub use redis::{
     RedisMicroserviceOptions, RedisMicroserviceServer, RedisTransport, RedisTransportOptions,
 };
-pub use tcp::{TcpMicroserviceOptions, TcpMicroserviceServer, TcpTransport, TcpTransportOptions};
+pub use tcp::{
+    TcpMicroserviceOptions, TcpMicroserviceServer, TcpTransport, TcpTransportOptions,
+    MAX_FRAME_BYTES,
+};
 
 #[doc(hidden)]
 pub use linkme;

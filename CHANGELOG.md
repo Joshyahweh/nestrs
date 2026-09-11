@@ -7,6 +7,38 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: TCP microservice transport had unbounded frames and no timeouts
+
+The TCP transport (`nestrs::microservices` TCP server + `TcpTransport`) read
+newline-delimited frames with unbounded line readers on both ends, spawned a
+task per accepted connection with no cap, and never timed anything out. A
+peer that streamed bytes without ever sending a newline grew server (and
+client) memory without bound; silent connections and unanswered RPCs hung
+forever.
+
+- **Bounded frames (1 MiB default)** — frames are now read with
+  `MAX_FRAME_BYTES` caps on both ends. A frame past the cap gets a generic
+  `frame rejected` error frame (never echoing attacker bytes) and the
+  connection is dropped. The reader accumulates via `fill_buf`/`consume`, so
+  pipelined frames queued behind a rejected one are not lost on healthy
+  connections.
+- **Server idle timeout (30 s)** — a silent or half-open connection is
+  dropped, releasing its task and buffered bytes.
+- **Client whole-RPC timeout (30 s)** — `TcpTransport::send_json` /
+  `emit_json` bound connect + write + read: a server that accepts and never
+  responds fails the call instead of hanging the caller (the client's own
+  response read is capped too).
+- **Connection cap (1024 concurrent)** — past the cap new connections are
+  closed immediately with a warning (fail-fast) instead of spawning unbounded
+  tasks.
+- `MAX_FRAME_BYTES` is re-exported from `nestrs::microservices` so tests and
+  deployments can assert against the exact wire budget.
+- **4 new tests** (`nestrs/tests/tcp_frame_hardening.rs`, feature
+  `microservices`): oversized-frame rejection + connection drop, pipelined
+  frames surviving the capped reader, idle-connection drop, and client
+  timeout against a silent server (the two timeout tests run under tokio's
+  paused clock, so they exercise the real 30 s paths in milliseconds).
+
 ### Fixed — production/security audit: `files` doc example taught an arbitrary-file-read footgun
 
 The `stream_file_or_response` doc example streamed `upload_dir().join(&p.name)`

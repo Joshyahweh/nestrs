@@ -95,6 +95,58 @@ RateLimitOptions::builder()
     .build()
 ```
 
+## Route-level throttling
+
+Where the global rate limiter applies one budget to everything, `use_throttler` applies per-route budgets that individual handlers declare with decorators:
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_throttler(
+        ThrottlerOptions::builder()
+            .global(ThrottleSpec::parse("100/minute"))   // fallback for undecorated routes
+            .build(),
+    )
+    .listen(3000)
+    .await;
+```
+
+Per route:
+
+```rust
+#[routes(state = AppState)]
+impl UploadController {
+    #[post("/avatar")]
+    #[throttle(5, "minute")]        // 5 uploads per client per minute
+    async fn avatar(/* … */) { /* … */ }
+
+    #[get("/status")]
+    #[skip_throttle]                // exempt entirely
+    async fn status() -> &'static str { "ok" }
+}
+```
+
+- `#[throttle(n, "second" | "minute" | "hour")]` overrides the global spec for that route; rejected requests get `429` with `Retry-After` and `X-RateLimit-Remaining` headers.
+- `#[skip_throttle]` exempts a route entirely.
+- `ThrottlerOptions.global` is the fallback for undecorated routes — `None` means only explicitly decorated routes are throttled.
+- Like the rate limiter, the throttler supports a shared Redis backend (`cache-redis` feature) and inherits the trusted-proxy hop count (below).
+
+## Proxy topology and client identity
+
+Both the rate limiter and the throttler key on the **client IP**, and the `ClientIp` extractor exposes it to handlers. Behind a reverse proxy or load balancer, the socket address is the proxy's — so client identity has to come from `X-Forwarded-For` / `X-Real-IP`. Those headers are attacker-spoofable, so nestrs never trusts them unless you declare your topology:
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_trusted_proxy_headers(1)   // exactly one trusted proxy in front
+    .use_rate_limit(RateLimitOptions::builder().max_requests(200).window_secs(60).build())
+    .listen(3000)
+    .await;
+```
+
+- `use_trusted_proxy_headers(hops)` declares how many trusted proxies sit in front. The client address is read **right-most-first**: with the common `client → LB → app` topology, the entry appended by your load balancer is used and any attacker-supplied prefix is ignored.
+- Forwarded headers are **never** consulted without this setting — trusting them by default would allow trivial IP-based rate-limit bypass.
+- The rate limiter and throttler **inherit** the hop count automatically, so they key on the same identity as `ClientIp`. Divergent per-component overrides are logged as a `tracing` WARN.
+- Common topologies: direct exposure → omit the call (default 0 hops); one load balancer → `1`; LB + CDN → `2` (count only hops you control and trust).
+
 ## CSRF protection
 
 CSRF protection targets cookie-based browser flows. Bearer token APIs in `Authorization` headers are not CSRF-bound and do not need this.
@@ -104,7 +156,7 @@ CSRF protection targets cookie-based browser flows. Bearer token APIs in `Author
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["csrf", "cookies"] }
+nestrs = { version = "1.0.0", features = ["csrf", "cookies"] }
 ```
 
   </Step>
@@ -156,7 +208,7 @@ Always pair cookie or session middleware with `use_csrf_protection` for any endp
 
 ## Guards and authentication
 
-nestrs does not bundle a JWT or Passport library. Instead, you implement `CanActivate` (HTTP guards) or `AuthStrategy` (credential-validation strategies) and compose them on controllers or individual routes.
+For token validation you implement `CanActivate` (HTTP guards) or `AuthStrategy` (credential-validation strategies) and compose them on controllers or individual routes. For full OAuth2 — client flows, JWKS-based resource-server validation, social providers — see the [OAuth2 guide](/guides/oauth2); for per-row authorization see the [authorization guide](/guides/authorization).
 
 ### CanActivate guard
 
@@ -248,16 +300,16 @@ NestFactory::create::<AppModule>()
 
 ## Production error sanitization
 
-By default nestrs forwards internal error details to the client. Call `enable_production_errors_from_env()` to suppress stack traces and internal messages whenever `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV` equals `production` or `prod`:
+5xx JSON bodies are **sanitized by default whenever the runtime environment is production** — the first non-empty value of `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV` is compared (case-insensitively) against `production` / `prod`. Sanitization replaces the internal `message` with `"An unexpected error occurred"`, drops any `errors` payload, and inserts the canonical reason phrase, so stack traces and internal detail never reach clients. No builder call is needed in production; `enable_production_errors_from_env()` re-reads the environment (kept for explicitness), and `enable_production_errors()` forces sanitization on in any environment — useful for staging that runs with `NESTRS_ENV=staging`:
 
 ```rust
 NestFactory::create::<AppModule>()
-    .enable_production_errors_from_env()
+    .enable_production_errors()   // force on regardless of environment
     .listen(3000)
     .await;
 ```
 
-Call `enable_production_errors()` unconditionally if you want sanitization regardless of environment.
+`disable_production_errors()` opts out even in production — for internal admin services behind a trusted boundary that want detailed errors.
 
 ## Pre-production checklist
 
@@ -282,13 +334,20 @@ Run through this list before deploying a browser-facing or multi-tenant API:
 <Accordion title="Rate limiting and timeouts">
 
 - `use_rate_limit(...)` is configured (or enforced at the edge).
+- `use_throttler(...)` covers expensive routes with tighter `#[throttle]` budgets where needed.
 - `use_body_limit(...)` is set per endpoint class.
 - `use_request_timeout(...)` is set for public routes.
 
 </Accordion>
+<Accordion title="Proxy topology">
+
+- `use_trusted_proxy_headers(hops)` matches the real proxy chain — 0 if directly exposed.
+- No component overrides `trusted_proxy_hops` to a divergent value (WARN at startup if so).
+
+</Accordion>
 <Accordion title="Errors and dependencies">
 
-- `enable_production_errors_from_env()` (or `enable_production_errors()`) is active.
+- 5xx sanitization is active (default in production; `disable_production_errors()` only behind a trusted boundary).
 - `cargo audit` is passing locally and in CI.
 - Secrets are loaded from env / secret manager, not committed to source.
 - Logs do not contain tokens, passwords, or API keys.

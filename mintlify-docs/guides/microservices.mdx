@@ -21,7 +21,7 @@ Add the features you need to `Cargo.toml`:
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["microservices", "microservices-nats"] }
+nestrs = { version = "1.0.0", features = ["microservices", "microservices-nats"] }
 ```
 
 ## Defining message handlers
@@ -182,7 +182,7 @@ impl GatewayService {
 Enable the `microservices-grpc` feature and use the gRPC-specific factory and options:
 
 ```toml
-nestrs = { version = "0.3.8", features = ["microservices", "microservices-grpc"] }
+nestrs = { version = "1.0.0", features = ["microservices", "microservices-grpc"] }
 ```
 
 ```rust
@@ -261,6 +261,28 @@ EventBus::emit("user.created", serde_json::json!({ "id": 42 })).await;
 ```
 
 Handlers annotated with `#[on_event("...")]` inside an `#[event_routes]` impl block are auto-subscribed at app boot.
+
+## Transport hardening (TCP)
+
+The TCP transport applies fixed resource bounds so a misbehaving or hostile peer cannot exhaust server memory:
+
+| Bound | Value | Behavior |
+|---|---|---|
+| Max frame size | 1 MiB | Larger frames are rejected before allocation; oversized JSON payloads get an error reply instead of being buffered. |
+| Connection idle timeout | 30 s | Connections with no traffic are closed. |
+| Client request timeout | 30 s | A `send` call to an unresponsive peer errors instead of hanging forever. |
+| Max concurrent connections | 1024 | Enforced with a connection semaphore; connections past the cap are refused and the drop is logged (visible in `tracing`). |
+
+These are protocol-level defaults, not configurable knobs — size large payloads differently (chunk, or move to Kafka/NATS for big messages) rather than trying to raise them.
+
+## Broker failure semantics
+
+What happens when a message cannot be processed is transport-specific:
+
+- **RabbitMQ** — malformed (undeserializable) messages are `basic_nack`ed with **requeue disabled**: they are dropped, not redelivered. A handler **panic** is caught (`catch_unwind`); the error is published to the reply queue for RPC patterns and the message is nacked without requeue. Poison messages therefore never wedge the consumer's prefetch slots — a crashing handler cannot stall the whole work queue.
+- **Kafka** — the listener keeps its position **in memory** (rskafka has no offset-commit API). Restarts follow `KafkaConsumerStart::Latest` (default, skip retained history) or `Earliest` (full replay). Delivery across restarts is at-most-once; make handlers idempotent.
+- **NATS core** — messages are ephemeral; an offline subscriber misses them. Use JetStream for integration events you must not lose.
+- **Redis / TCP** — at-least-once on retry; treat every handler as re-executable.
 
 ## Reliability guidance
 

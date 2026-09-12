@@ -54,11 +54,46 @@ NestFactory::create::<AppModule>()
     .await;
 ```
 
-## 3. Prometheus metrics
+## 3. Health, readiness, and probe decorators
+
+**Liveness** (`enable_health_check("/health")`) is a constant `200 {"status":"ok"}` — use it for "should this process be restarted".
+
+**Readiness** (`enable_readiness_check("/ready", [indicators])`) runs your **`HealthIndicator`** implementations on each scrape; any `Down` ⇒ `503` with a Terminus-style JSON body (`status`, `info`, `error`, `details`) — use it for "should this pod receive traffic".
+
+**Probe decorators** mirror a *real handler* as a fixed probe endpoint:
+
+| Decorator | Mirrored endpoint | Semantics |
+|-----------|-------------------|-----------|
+| **`#[liveness]`** | `GET /__nestrs/health/live` | 2xx from the handler ⇒ up, otherwise down |
+| **`#[readiness]`** | `GET /__nestrs/health/ready` | 2xx ⇒ up, otherwise down |
+| **`#[startup]`** | `GET /__nestrs/health/startup` | Evaluated **once per process** and cached |
+
+```rust
+#[routes(state = AppState)]
+impl HealthController {
+    #[get("/health/deep")]
+    #[readiness]
+    pub async fn deep(State(s): State<AppState>) -> impl IntoResponse {
+        match s.check_deps().await {
+            Ok(_) => (StatusCode::OK, Json(json!({"deps": "ok"}))),
+            Err(_) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"deps": "down"}))),
+        }
+    }
+}
+```
+
+- Probe endpoints mount at the **server root** (not under `set_global_prefix` / URI versioning) so orchestrators probe without prefixes.
+- Results are cached for **5 seconds** per endpoint (probe-storm self-DoS guard); a **panicking** handler reports down with a generic message (raw errors go to `tracing` only).
+- Route collisions: if your own routes already occupy `/__nestrs/health/live|ready`, **your routes win** — the framework skips its mirrored endpoint.
+- Kubernetes wiring: `livenessProbe` → `/__nestrs/health/live` (or your `enable_health_check` path), `readinessProbe` → `/__nestrs/health/ready`, `startupProbe` → `/__nestrs/health/startup`.
+
+Use decorators when liveness should depend on something the app actually does; use the builder calls when a constant 200 plus indicator checks is enough.
+
+## 4. Prometheus metrics
 
 [`NestApplication::enable_metrics`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.enable_metrics) registers a Prometheus scrape handler (histogram `http_request_duration_seconds`, counters, in-flight gauge, etc.). Keep `/metrics` in [`RequestTracingOptions::skip_paths`](https://docs.rs/nestrs/latest/nestrs/struct.RequestTracingOptions.html) so scrapes do not flood request logs.
 
-## 4. Optional: OpenTelemetry (OTLP)
+## 5. Optional: OpenTelemetry (OTLP)
 
 Enable the **`otel`** feature and use [`configure_tracing_opentelemetry`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.configure_tracing_opentelemetry) instead of (or after the same pattern as) `configure_tracing`. This keeps [`TracingConfig`](https://docs.rs/nestrs/latest/nestrs/struct.TracingConfig.html) formatting and adds a `tracing-opentelemetry` layer that exports spans (including `http.server.request`) to an OTLP endpoint.
 
@@ -66,7 +101,7 @@ Enable the **`otel`** feature and use [`configure_tracing_opentelemetry`](https:
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["otel"] }
+nestrs = { version = "1.0.0", features = ["otel"] }
 ```
 
 **`main`:**

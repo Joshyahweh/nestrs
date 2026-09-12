@@ -35,8 +35,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nestrs = "0.3.8"
-nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+nestrs = "1.0.0"
+nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -47,8 +47,8 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 ### A.2 Same stack + OpenAPI + JSON
 
 ```toml
-nestrs = { version = "0.3.8", features = ["openapi"] }
-nestrs-openapi = "0.3.8"
+nestrs = { version = "1.0.0", features = ["openapi"] }
+nestrs-openapi = "1.0.0"
 utoipa = { version = "5", features = ["axum_extras"] }
 ```
 
@@ -57,7 +57,7 @@ Wire **[OpenAPI](openapi-http.md)** on [`NestApplication`](appendix-api-cookbook
 ### A.3 MySQL variant (feature swap only)
 
 ```toml
-nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-mysql"] }
+nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-mysql"] }
 ```
 
 `DATABASE_URL` example: `mysql://user:pass@localhost:3306/mydb`
@@ -65,7 +65,7 @@ nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-mysql"] }
 ### A.4 SQLite local / CI (matches [`examples/hello-app`](../../examples/hello-app))
 
 ```toml
-nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-sqlite"] }
+nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-sqlite"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "sqlite"] }
 ```
 
@@ -283,7 +283,7 @@ curl -s "http://127.0.0.1:3000/api/v1/users/"
 
 The repository ships a full **end-to-end** example at:
 
-**[`nestrs-prisma/examples/quickstart.rs`](../../nestrs-prisma/examples/quickstart.rs)** (also on GitHub: `nestrs-prisma/examples/quickstart.rs` on tag **`v0.3.8`**).
+**[`nestrs-prisma/examples/quickstart.rs`](../../nestrs-prisma/examples/quickstart.rs)** (also on GitHub: `nestrs-prisma/examples/quickstart.rs` on tag **`v1.0.0`**).
 
 It demonstrates:
 
@@ -646,7 +646,7 @@ Expose **`GET /users?skip=&take=`** via **`ValidatedQuery`** and return **`Json<
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["mongo"] }
+nestrs = { version = "1.0.0", features = ["mongo"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 mongodb = "3"
 bson = "3"
@@ -972,8 +972,8 @@ Then **`GET /:id`** can **`find_one`** into **`ProfileDoc`** and serialize **`id
 ### C.1 `Cargo.toml`
 
 ```toml
-nestrs = { version = "0.3.8", features = ["graphql"] }
-nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+nestrs = { version = "1.0.0", features = ["graphql"] }
+nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
 async-graphql = "=7.0.17"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -1258,7 +1258,7 @@ Keep **thin resolvers**; put transaction boundaries in a **`UserRepository`** `#
 ### D.1 `Cargo.toml`
 
 ```toml
-nestrs = { version = "0.3.8", features = ["graphql", "mongo"] }
+nestrs = { version = "1.0.0", features = ["graphql", "mongo"] }
 mongodb = "3"
 bson = "3"
 async-graphql = "=7.0.17"
@@ -1578,8 +1578,8 @@ Add **`#[derive(Debug, serde::Deserialize, serde::Serialize)]`** on **`ProfileDo
 ### E.1 `Cargo.toml`
 
 ```toml
-nestrs = { version = "0.3.8", features = ["microservices", "microservices-grpc"] }
-nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+nestrs = { version = "1.0.0", features = ["microservices", "microservices-grpc"] }
+nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -1960,16 +1960,16 @@ All transports deserialize the same **`WireRequest`** JSON (**[`wire`](https://d
 
 ```toml
 # NATS micro listener + NATS client in another crate
-nestrs = { version = "0.3.8", features = ["microservices", "microservices-nats"] }
+nestrs = { version = "1.0.0", features = ["microservices", "microservices-nats"] }
 
 # Redis micro listener
-nestrs = { version = "0.3.8", features = ["microservices", "microservices-redis"] }
+nestrs = { version = "1.0.0", features = ["microservices", "microservices-redis"] }
 
 # RabbitMQ work-queue listener
-nestrs = { version = "0.3.8", features = ["microservices", "microservices-rabbitmq"] }
+nestrs = { version = "1.0.0", features = ["microservices", "microservices-rabbitmq"] }
 
 # Kafka transport (client) — enable kafka on nestrs-microservices transitively
-nestrs = { version = "0.3.8", features = ["microservices", "microservices-kafka"] }
+nestrs = { version = "1.0.0", features = ["microservices", "microservices-kafka"] }
 ```
 
 Match **exactly one** broker feature set per binary unless you know how layers compose.
@@ -2055,6 +2055,8 @@ NestFactory::create_microservice_rabbitmq::<AppModule>(
 
 JSON **`WireRequest`** bodies land on the **work queue**; replies use private reply queues per the adapter (**[`README`](../../nestrs-microservices/README.md)** § RabbitMQ).
 
+**Failure semantics:** malformed (undeserializable) messages are **`basic_nack`ed with requeue disabled** — dropped, not redelivered. A handler **panic** is caught via `catch_unwind`: the error is published to the reply queue (RPC patterns) and the message is nacked without requeue, so poison messages never wedge the consumer's prefetch slots and a crashing handler cannot stall the work queue. Pair with the **DLX/DLQ** pattern in **§ F.7** for operator-visible replay.
+
 ### F.6 `ClientsModule`: multiple named brokers in one HTTP app
 
 Register brokers as a **dynamic module**, then merge it into your root module (**[`dynamic_modules.rs`](../../nestrs/tests/dynamic_modules.rs)**):
@@ -2112,6 +2114,19 @@ nestrs exposes broker-specific **`HealthIndicator`** stubs (**`NatsBrokerHealth`
 There is **no** `NestFactory::create_microservice_kafka` today. Run **`KafkaMicroserviceServer::new(KafkaMicroserviceOptions::new(vec!["127.0.0.1:9092".into()]), handlers)`** with **`handlers`** collected the same way **`NestFactory::create_microservice`** builds **`TcpMicroserviceServer`** (**[`nestrs/src/lib.rs`](../../nestrs/src/lib.rs)** search **`microservice_handlers`**). Prefer **`ClientConfig::kafka`** for callers until a first-party helper lands.
 
 **Offset semantics (replay caveat):** the underlying rskafka 0.6 client has **no consumer-group / offset-commit API**, so the listener keeps its position **in memory only**. On boot it starts where **`KafkaMicroserviceOptions::consumer_start`** says: **`KafkaConsumerStart::Latest`** (default — skip retained history, so restarts do not re-execute old RPCs/events) or **`KafkaConsumerStart::Earliest`** (drain the full retained backlog — intentional replay, every retained request is re-dispatched). Delivery across restarts is **at-most-once**; make handlers idempotent if that window matters.
+
+### F.11 TCP transport hardening (fixed bounds)
+
+The TCP listener applies fixed resource bounds so a misbehaving or hostile peer cannot exhaust server memory:
+
+| Bound | Value | Behavior |
+|-------|-------|----------|
+| Max frame size | **1 MiB** | Larger frames are rejected before allocation; oversized JSON payloads get an error reply instead of being buffered. |
+| Connection idle timeout | **30 s** | Connections with no traffic are closed. |
+| Client request timeout | **30 s** | A `send` to an unresponsive peer errors instead of hanging forever. |
+| Max concurrent connections | **1024** | Enforced with a connection semaphore; connections past the cap are refused and the drop is logged (`tracing`). |
+
+These are protocol-level defaults, not knobs — chunk large payloads or move to Kafka/NATS for big messages rather than trying to raise them.
 
 ---
 
@@ -2212,7 +2227,14 @@ Subscribe to **`order.created`** (NATS/Kafka/`on_event`) and update a read-optim
 | WebSockets + DB | **`ws`** + **`nestrs-ws`** + same providers |
 | Kafka / NATS / Redis micros | **`microservices-*`** features |
 | OpenAPI + any DB | **`openapi`** + services calling Prisma/Mongo/SQLx |
+| Caching alongside any recipe | **`CacheModule`** — bounded in-memory default (below) |
 | CLI scaffolds | **`nestrs-cli generate resource --transport …`** — [CLI](cli.md) |
+
+---
+
+## Bounded in-memory cache (default cap)
+
+When a recipe uses **`CacheModule`** with the in-memory backend (**`CacheOptions::in_memory()`**), the store is **bounded**: the default cap is **10 000 entries**, and when the store is full, inserting a *new* key FIFO-evicts the oldest-inserted entry (updating an existing key never evicts — it refreshes the entry's position). Pass **`CacheOptions::in_memory_with_max_entries(n)`** for a larger working set, or **`in_memory_with_max_entries(0)`** to disable caching entirely (writes are dropped). The bound prevents a flood of distinct cache keys — including attacker-influenced keys — from growing the map without limit. Full caching guide: **Mintlify § ecosystem/caching**.
 
 ---
 

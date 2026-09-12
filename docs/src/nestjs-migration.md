@@ -48,9 +48,9 @@ This guide maps NestJS concepts to **nestrs** (Rust + Axum + Tower). It is aimed
 
 | Nest area | nestrs crate / feature | Starting point |
 |-----------|------------------------|----------------|
-| Swagger / OpenAPI | `nestrs-openapi`, feature `openapi` | [OpenAPI & HTTP](openapi-http.md) |
-| GraphQL | `nestrs-graphql`, feature `graphql` | [GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md) |
-| WebSockets gateways | `nestrs-ws`, feature `ws` | Same chapter + `#[ws_gateway]`, `#[ws_routes]` |
+| Swagger / OpenAPI | `nestrs-openapi`, feature `openapi`; `#[dto]` derives `schemars::JsonSchema` — `schema_entry` / `with_schemas` land DTOs under `components.schemas` | [OpenAPI & HTTP](openapi-http.md) |
+| GraphQL | `nestrs-graphql`, feature `graphql`; federation gateway via feature `graphql-federation-gateway` (batched `EntityResolver`, `_service { sdl }`) | [GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md) |
+| WebSockets gateways | `nestrs-ws`, feature `ws`; origin allowlist via `WsSecurityConfig` + `ws_route_with_security` (CSWSH) | Same chapter + `#[ws_gateway]`, `#[ws_routes]` |
 | Microservices / messaging | `nestrs-microservices`, features `microservices`, `microservices-*` | [Microservices](microservices.md) |
 
 ## Common pitfalls

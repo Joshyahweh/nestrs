@@ -25,7 +25,6 @@ use crate::security::route_metadata_csv;
 use async_trait::async_trait;
 use axum::http::request::Parts;
 use std::any::TypeId;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -69,9 +68,16 @@ impl Action {
 
 /// Subject of a policy check. `Type("Post")` matches the *class*; `Instance(json)`
 /// matches a specific document and is consulted against `Rule::conditions`.
+///
+/// `Type` owns its name so runtime-built subject names (a response's `"type"`
+/// field during masking, per-request route metadata in `PoliciesGuard`) resolve
+/// without leaking. Pre-1.0 this held `&'static str`, which forced every
+/// dynamic name to be `Box::leak`ed — the masking walker leaked one box per
+/// masked object per response, and the guard leaked through a dedup set behind
+/// a global mutex.
 #[derive(Clone, Debug)]
 pub enum Subject {
-    Type(&'static str),
+    Type(String),
     Instance(serde_json::Value),
 }
 
@@ -80,7 +86,7 @@ impl Subject {
     /// `"type"` field, falling back to the JSON type tag.
     pub fn type_name<'a>(&'a self, fallback: &'a str) -> &'a str {
         match self {
-            Subject::Type(s) => s,
+            Subject::Type(s) => s.as_str(),
             Subject::Instance(v) => v.get("type").and_then(|x| x.as_str()).unwrap_or(fallback),
         }
     }
@@ -508,7 +514,7 @@ impl CanActivate for PoliciesGuard {
             // matching rule must (a) grant the action on the type, and (b) if
             // the rule carries `conditions`, satisfy them against the
             // *principal* (so `{ "roles": "admin" }` can gate admin routes).
-            let subject = Subject::Type(leak_static(&entry.subject_type));
+            let subject = Subject::Type(entry.subject_type.clone());
             if !ability.can(&entry.action, &subject) {
                 return Err(GuardError::forbidden(
                     format!(
@@ -551,27 +557,12 @@ impl CanActivate for PoliciesGuard {
     }
 }
 
-// `Subject::Type` requires a `&'static str`. For route-metadata subject names
-// (which are dynamic strings) we leak them — they're long-lived and bounded
-// by the route table, so the cost is negligible. The unique values are
-// deduplicated to keep the leak set small.
-fn leak_static(s: &str) -> &'static str {
-    use std::sync::Mutex;
-    static LEAKED: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
-    let mut guard = LEAKED.lock().expect("leak_static poisoned");
-    let set = guard.get_or_insert_with(HashSet::new);
-    if let Some(existing) = set.get(s) {
-        existing
-    } else {
-        let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
-        set.insert(leaked);
-        leaked
-    }
-}
-
 // ---------------------------------------------------------------------------
 // PoliciesModule
 // ---------------------------------------------------------------------------
+// (Historical note: building `Subject::Type` from route metadata used to leak
+// each subject name through a dedup set behind a global mutex. `Subject::Type`
+// owns its name now, so the guard path needs no leak machinery at all.)
 
 /// Configuration for [`PoliciesModule::register`].
 #[derive(Clone)]
@@ -796,9 +787,30 @@ mod tests {
             .can(Action::Read, "Post")
             .can(Action::Update, "Post")
             .build();
-        assert!(ab.can(&Action::Read, &Subject::Type("Post")));
-        assert!(ab.can(&Action::Update, &Subject::Type("Post")));
-        assert!(!ab.can(&Action::Delete, &Subject::Type("Post")));
+        assert!(ab.can(&Action::Read, &Subject::Type("Post".into())));
+        assert!(ab.can(&Action::Update, &Subject::Type("Post".into())));
+        assert!(!ab.can(&Action::Delete, &Subject::Type("Post".into())));
+    }
+
+    // --- audit #51: Subject::Type owns its name ------------------------------
+    //
+    // Pre-fix `Subject::Type(&'static str)` forced every runtime-built name
+    // (a response's "type" field during masking, per-request route metadata)
+    // to be leaked. The compile-level pin: these names have no `&'static`
+    // form — with the old enum this function could not exist.
+
+    #[test]
+    fn subject_type_accepts_runtime_owned_names() {
+        let ab = Ability::builder().can(Action::Read, "Post").build();
+        let name = format!("{}{}", "Po", "st");
+        assert!(ab.can(&Action::Read, &Subject::Type(name)));
+        assert!(
+            !ab.can(&Action::Read, &Subject::Type(format!("{}{}", "No", "pe"))),
+            "runtime-built non-matching name still denies"
+        );
+        // And the type name round-trips through `type_name` (rule matching).
+        let s = Subject::Type(format!("{}{}", "Po", "st"));
+        assert_eq!(s.type_name(""), "Post");
     }
 
     #[test]
@@ -837,7 +849,7 @@ mod tests {
             .can_on_fields(Action::Read, "User", vec!["id".into(), "email".into()])
             .can(Action::Update, "User")
             .build();
-        let read_user = Subject::Type("User");
+        let read_user = Subject::Type("User".into());
         let fields = ab.allowed_fields(&Action::Read, &read_user).expect("Some");
         assert_eq!(fields, vec!["id", "email"]);
         let update_fields = ab.allowed_fields(&Action::Update, &read_user);
@@ -855,7 +867,7 @@ mod tests {
             .can_with_conditions(Action::Read, "Post", conds.clone())
             .build();
         let got = ab
-            .constraint(&Action::Read, &Subject::Type("Post"))
+            .constraint(&Action::Read, &Subject::Type("Post".into()))
             .expect("Some");
         assert_eq!(got.get("status").unwrap(), &json!("published"));
     }
@@ -952,7 +964,7 @@ mod tests {
                 |_row: &serde_json::Value, _p: &Principal| false,
             )
             .build();
-        assert!(ab.can(&Action::Read, &Subject::Type("Post")));
+        assert!(ab.can(&Action::Read, &Subject::Type("Post".into())));
     }
 
     #[tokio::test]
@@ -966,7 +978,7 @@ mod tests {
             )
             .build();
         let fields = ab
-            .allowed_fields(&Action::Read, &Subject::Type("Post"))
+            .allowed_fields(&Action::Read, &Subject::Type("Post".into()))
             .expect("Some");
         assert_eq!(fields, vec!["id"]);
         // Empty vec => no field restriction.
@@ -980,7 +992,7 @@ mod tests {
             .build();
         assert!(
             unrestricted
-                .allowed_fields(&Action::Read, &Subject::Type("Post"))
+                .allowed_fields(&Action::Read, &Subject::Type("Post".into()))
                 .is_none(),
             "empty fields vec => all fields"
         );
@@ -998,7 +1010,7 @@ mod tests {
             .can(Action::Update, "Post")
             .build();
         let got = ab
-            .predicate(&Action::Read, &Subject::Type("Post"))
+            .predicate(&Action::Read, &Subject::Type("Post".into()))
             .expect("Some");
         assert!(!got.check(&json!({ "author": "a" }), &Principal::default()));
         let principal = Arc::new(Principal {
@@ -1008,7 +1020,7 @@ mod tests {
         });
         assert!(got.check(&json!({ "author": "a" }), &principal));
         assert!(
-            ab.predicate(&Action::Update, &Subject::Type("Post"))
+            ab.predicate(&Action::Update, &Subject::Type("Post".into()))
                 .is_none(),
             "plain can() rule has no predicate"
         );

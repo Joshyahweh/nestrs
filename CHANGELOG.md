@@ -7,6 +7,66 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-12
+
+First stable release. Everything since 0.5.2 is in this version: the
+NestJS-parity waves (federation gateway, DB migrations + seeding CLI,
+`#[crud]`, public-API snapshot gate, MCP protocol surface, OAuth2,
+row-level authorization, `#[use_pipes]` extraction-time chains) and a
+full production/security audit (2026-09-10, fix-as-we-go) whose 25
+findings — plus 2 discovered during fixes — are all landed below.
+
+**Stability:** from 1.0.0 onward the public API is covered by full
+[semver](https://semver.org) (see `STABILITY.md`) — breaking changes
+only in a new major. The 0.x-era breaking changes that had been
+flagged "pre-1.0" in earlier entries (`CacheOptions::InMemory` gaining
+`max_entries`, `Subject::Type` moving from `&'static str` to `String`)
+are folded into this major bump; migration notes are in their entries.
+
+### Docs — every surface synced with the landed behavior; version strings to 1.0.0
+
+- Mintlify + mdBook now document the audit-landed semantics: request-scope
+  resolution off-scope (`try_get` → `None`, `get` → panic naming the fixes)
+  and `spawn_with_request_scope` snapshot semantics; the bounded in-memory
+  cache (`in_memory()`, `in_memory_with_max_entries(n)`, FIFO eviction);
+  `register_use_value_with_lifecycle` / `register_use_factory_with_lifecycle`
+  and the `ProviderLifecycle` hooks; dependency-first hook ordering (reversed
+  on shutdown); and the `Piped*` extractor pipes (`TrimPipe`, explicit chains,
+  first error short-circuits).
+- **New pages** — `#[crud]` generation (guides/crud + docs/src/crud.md),
+  OAuth2 client/resource-server/social flows (guides/oauth2 + docs/src/oauth2.md),
+  authorization abilities/guards/row-level (guides/authorization +
+  docs/src/authorization.md), and the `nestrs-cli db` migrations-and-seeding
+  reference (cli/overview + docs/src/cli.md, ecosystem/database). Nav
+  registered in both docs.json and SUMMARY.md.
+- **Ops hardening documented** — route-level throttling
+  (`use_throttler`, `#[throttle]` / `#[skip_throttle]`, 429 headers),
+  trusted-proxy client identity (`use_trusted_proxy_headers`, right-most-first
+  XFF, rate-limit/throttler inheritance), production error sanitization
+  (default-on in production, force/opt-out builders), probe decorators
+  (`#[liveness]` / `#[readiness]` / `#[startup]` mirrored under
+  `/__nestrs/health/*`, 5 s cache), request-id charset gate, TCP microservice
+  bounds (1 MiB frames, 30 s idle/client timeouts, 1024 connection cap),
+  RabbitMQ nack-drop/poison-message semantics, and the
+  `#[config(namespace)]` namespaced env system — across security,
+  observability, microservices, and fundamentals pages on both surfaces.
+- MCP crate docs (guide + api/crates page + mdBook) expanded to the full
+  protocol surface: server, tools/surfaces, elicitation, tasks, source
+  introspection.
+- All version strings across mintlify, mdBook, README, and the website
+  updated from 0.3.8/0.5.2-era references to 1.0.0.
+- Removed dead `documentation`/`readme`/`description` fields from
+  `[workspace.package]` (nightly cargo warned on every build; every member
+  crate sets its own crate-specific values), the redundant workspace/member
+  `homepage` (identical to `repository`), and the 12 explicit
+  `readme = "README.md"` lines (auto-inferred when README.md sits at the
+  crate root) — silencing the nightly `redundant_homepage` / `manual_readme`
+  manifest lints across the workspace.
+- Rustdoc: new module-level docs for `#[nestrs::crud]` runtime support
+  (adapter rationale, serde_qs contract) and a full `#[crud]` macro
+  reference in nestrs-macros; every intra-doc link in the workspace passes
+  `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features`.
+
 ### Fixed — production/security audit: masking interceptor leaked one `Box` per masked object per response
 
 - **`mask_value` leaked the response's `"type"` field.** For every JSON

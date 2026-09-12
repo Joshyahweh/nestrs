@@ -7,6 +7,38 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: request-scope panic across `tokio::spawn`
+
+- **`Request`-scoped providers panicked when resolved off the request task.**
+  A handler that spawned background work with bare `tokio::spawn` ran the
+  child with no request scope (task-locals do not cross `spawn`), and
+  resolving a `Request`-scoped provider there panicked — through
+  `registry.try_get` too, which violated its documented "returns `None`
+  instead of panicking" contract. Resolution off-scope is now graceful:
+  - `registry.try_get::<T>()` returns `None` (absence, same as a missing
+    provider — the doc now spells out both cases).
+  - `registry.get::<T>()` still panics (`get` is the panic-on-unresolvable
+    API, same as "not registered"), but with a message that names the fixes
+    instead of a dead-end.
+  - **New: `spawn_with_request_scope(future)`** — the supported way to run
+    background work that resolves `Request`-scoped providers. Spawned inside
+    a request, the child receives a **snapshot** of the request scope: it
+    resolves the same request-scoped instances the request had at spawn
+    time (including any in-flight `TransactionSlot`), while values
+    constructed or inserted after the spawn stay private to whichever side
+    created them. Spawned outside any scope, the child gets a fresh empty
+    scope — request-scoped providers construct per spawned task and are
+    isolated from every other task. The ability / principal slots are
+    deliberately **not** carried: row-level authz stays deny-closed in the
+    spawned task unless the caller explicitly wraps the future with the
+    ability helpers.
+- **Tests:** five new `nestrs-core` unit tests — off-scope `try_get` returns
+  `None` (not a panic); off-scope `get` panics with the fix in the message;
+  the child resolves the parent's instance (no re-construction, `Arc::ptr_eq`);
+  child-scope writes stay in the child; off-scope spawns get isolated fresh
+  scopes (one construction per spawn). API snapshot: +1 path
+  (`nestrs_core::spawn_with_request_scope`).
+
 ### Fixed — production/security audit: unbounded in-memory cache, silent "unknown" rate-limit bucket, and trusted client-supplied request ids
 
 Three hardening fixes from one audit finding cluster:

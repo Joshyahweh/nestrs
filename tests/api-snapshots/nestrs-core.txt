@@ -71,6 +71,7 @@ nestrs_core::route_registry::OpenApiResponseDesc
 nestrs_core::route_registry::OpenApiRouteSpec
 nestrs_core::route_registry::RouteInfo
 nestrs_core::route_registry::RouteRegistry
+nestrs_core::spawn_with_request_scope
 nestrs_core::strategy::AuthError
 nestrs_core::strategy::AuthStrategy
 nestrs_core::strategy::AuthStrategy::validate

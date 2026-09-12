@@ -898,11 +898,29 @@ tokio::task_local! {
     static REQUEST_SCOPE_CACHE: std::cell::RefCell<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>;
 }
 
-/// Runs `future` with an empty request-scoped provider cache (used by request middleware).
+/// Runs `future` inside the request-scoped provider cache (used by request
+/// middleware and the transport scope installers).
+///
+/// **Nesting layers; it never replaces.** When a request scope is already
+/// active on this task, `future` joins it: values inserted by outer
+/// middleware (e.g. a `RequestScoped` provider already constructed by a
+/// guard) stay visible, and anything inserted here lands in the same scope.
+/// Only when no scope is active does this open a fresh one for `future`.
+///
+/// Without the join, every nested installer — `install_transactional_middleware`
+/// under `request_scope_middleware`, or the GraphQL/WS/MCP scope wrappers on
+/// an in-request transport — would fork the cache: request-scoped providers
+/// resolved by outer middleware would be invisible (and re-constructed a
+/// second time) inside, breaking the one-instance-per-request DI contract.
 pub async fn with_request_scope<Fut, T>(future: Fut) -> T
 where
     Fut: std::future::Future<Output = T>,
 {
+    // `try_with` succeeds only while a `scope(...)` future is being polled
+    // on this task — i.e. precisely "a request scope is active".
+    if REQUEST_SCOPE_CACHE.try_with(|_| ()).is_ok() {
+        return future.await;
+    }
     REQUEST_SCOPE_CACHE
         .scope(std::cell::RefCell::new(HashMap::new()), future)
         .await
@@ -1127,4 +1145,113 @@ pub fn clear_module_cache_for_tests() {
         .write()
         .expect("module build cache")
         .clear();
+}
+
+#[cfg(test)]
+mod request_scope_tests {
+    // The request scope must NEST, never fork: `with_request_scope` called
+    // inside an active scope joins it. Pre-fix it installed a fresh map,
+    // so the transactional middleware (and the GraphQL/WS/MCP scope
+    // wrappers on in-request transports) hid every value the outer
+    // middleware had stashed — and, worse, `ProviderScope::Request`
+    // resolution would construct a SECOND instance of a provider the
+    // outer scope already built.
+
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Marker;
+    struct OtherMarker;
+
+    #[tokio::test]
+    async fn nested_with_request_scope_joins_the_outer_scope() {
+        with_request_scope(async {
+            request_scope_insert(
+                TypeId::of::<Marker>(),
+                Arc::new(Marker) as Arc<dyn Any + Send + Sync>,
+            );
+
+            // A nested scope opener (transactional middleware, transport
+            // wrapper) must see the outer value — pre-fix this was None.
+            with_request_scope(async {
+                assert!(
+                    request_scope_get(TypeId::of::<Marker>()).is_some(),
+                    "nested with_request_scope must not hide outer values"
+                );
+                // ...and its inserts land in the SAME scope...
+                request_scope_insert(
+                    TypeId::of::<OtherMarker>(),
+                    Arc::new(OtherMarker) as Arc<dyn Any + Send + Sync>,
+                );
+            })
+            .await;
+
+            // ...which the outer block still sees once the nested one ends.
+            assert!(
+                request_scope_get(TypeId::of::<OtherMarker>()).is_some(),
+                "nested inserts must land in the active (outer) scope"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn with_request_scope_opens_a_fresh_scope_when_none_is_active() {
+        // Sanity both ways: outside any scope, get is None (insert is a
+        // documented no-op)...
+        assert!(request_scope_get(TypeId::of::<Marker>()).is_none());
+        // ...and a top-level with_request_scope establishes one.
+        with_request_scope(async {
+            request_scope_insert(
+                TypeId::of::<Marker>(),
+                Arc::new(Marker) as Arc<dyn Any + Send + Sync>,
+            );
+            assert!(request_scope_get(TypeId::of::<Marker>()).is_some());
+        })
+        .await;
+    }
+
+    static REQUEST_PROVIDER_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
+
+    struct CountedRequestService;
+
+    impl Injectable for CountedRequestService {
+        fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
+            REQUEST_PROVIDER_CONSTRUCTIONS.fetch_add(1, Ordering::SeqCst);
+            Arc::new(Self)
+        }
+
+        fn scope() -> ProviderScope {
+            ProviderScope::Request
+        }
+    }
+
+    #[tokio::test]
+    async fn nested_scope_does_not_rebuild_request_providers() {
+        // The DI-contract regression: a Request-scoped provider resolved
+        // before a nested scope opener (guard → transactional middleware)
+        // must be the SAME instance when re-resolved inside it — one
+        // construction per request, not one per nested wrapper.
+        REQUEST_PROVIDER_CONSTRUCTIONS.store(0, Ordering::SeqCst);
+        let mut registry = ProviderRegistry::new();
+        registry.register::<CountedRequestService>();
+
+        with_request_scope(async {
+            let outer: Arc<CountedRequestService> = registry.get();
+
+            let inner: Arc<CountedRequestService> =
+                with_request_scope(async { registry.get::<CountedRequestService>() }).await;
+
+            assert!(
+                Arc::ptr_eq(&outer, &inner),
+                "nested with_request_scope must reuse the request-scoped instance"
+            );
+            assert_eq!(
+                REQUEST_PROVIDER_CONSTRUCTIONS.load(Ordering::SeqCst),
+                1,
+                "one construction per request, not one per nested scope"
+            );
+        })
+        .await;
+    }
 }

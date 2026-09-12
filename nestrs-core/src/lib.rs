@@ -303,27 +303,42 @@ impl ProviderRegistry {
         self.insert_entry(TypeId::of::<T>(), entry);
     }
 
-    fn produce_any(&self, type_id: TypeId, entry: &ProviderEntry) -> Arc<dyn Any + Send + Sync> {
+    /// Produce an instance for `entry`, or `None` when it cannot be resolved
+    /// here — a `Request`-scoped provider resolved outside any request scope
+    /// (e.g. from a bare `tokio::spawn` background task). This is what makes
+    /// [`Self::try_get`] honor its "returns `None` instead of panicking"
+    /// contract for the scope case as well as the not-registered case.
+    fn produce_any(
+        &self,
+        type_id: TypeId,
+        entry: &ProviderEntry,
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
         match entry.scope {
             ProviderScope::Singleton => {
                 let _guard = ConstructionGuard::push(type_id, entry.type_name);
-                entry
-                    .instance
-                    .get_or_init(|| match &entry.factory {
-                        ProviderFactory::InjectableFn(f) => f(self),
-                        ProviderFactory::Custom(f) => f(self),
-                    })
-                    .clone()
+                Some(
+                    entry
+                        .instance
+                        .get_or_init(|| match &entry.factory {
+                            ProviderFactory::InjectableFn(f) => f(self),
+                            ProviderFactory::Custom(f) => f(self),
+                        })
+                        .clone(),
+                )
             }
             ProviderScope::Transient => {
                 let _guard = ConstructionGuard::push(type_id, entry.type_name);
-                match &entry.factory {
+                Some(match &entry.factory {
                     ProviderFactory::InjectableFn(f) => f(self),
                     ProviderFactory::Custom(f) => f(self),
-                }
+                })
             }
             ProviderScope::Request => {
                 let _guard = ConstructionGuard::push(type_id, entry.type_name);
+                // No scope on this task (bare `tokio::spawn`, a standalone
+                // runtime, lifecycle-hook runners): resolution is impossible,
+                // not a construction failure — surface `None` and let the
+                // caller decide (`try_get`) or name the fix (`get`).
                 REQUEST_SCOPE_CACHE
                     .try_with(|cell| {
                         if let Some(existing) = cell.borrow().get(&type_id).cloned() {
@@ -336,18 +351,18 @@ impl ProviderRegistry {
                         cell.borrow_mut().insert(type_id, value.clone());
                         value
                     })
-                    .unwrap_or_else(|_| {
-                        panic!(
-                            "Request-scoped provider `{}` requested outside request scope; enable request scope middleware",
-                            entry.type_name
-                        )
-                    })
+                    .ok()
             }
         }
     }
 
-    /// Resolves a provider, panicking when it is not registered. Prefer
+    /// Resolves a provider, panicking when it cannot be resolved. Prefer
     /// [`Self::try_get`] at call sites that can handle absence.
+    ///
+    /// Panics with a distinct, actionable message when a `Request`-scoped
+    /// provider is resolved outside a request scope (e.g. from a background
+    /// task spawned with bare `tokio::spawn`) — run such work through
+    /// [`spawn_with_request_scope`] instead.
     ///
     /// When called **during** another provider's construction (inside `construct` or a
     /// `useFactory` closure), the edge `constructor -> requested` is recorded so lifecycle
@@ -356,11 +371,28 @@ impl ProviderRegistry {
     where
         T: Send + Sync + 'static,
     {
-        self.try_get::<T>()
-            .unwrap_or_else(|| panic!("Provider `{}` not registered", std::any::type_name::<T>()))
+        self.try_get::<T>().unwrap_or_else(|| {
+            // try_get yields None for two distinct reasons; name the right one.
+            if let Some(entry) = self.entries.get(&TypeId::of::<T>()) {
+                if matches!(entry.scope, ProviderScope::Request) {
+                    panic!(
+                        "Request-scoped provider `{}` requested outside a request scope; \
+                         enable request scope middleware (`use_request_scope`), spawn \
+                         background work with `spawn_with_request_scope`, or use \
+                         `try_get` to handle absence gracefully",
+                        entry.type_name
+                    );
+                }
+            }
+            panic!("Provider `{}` not registered", std::any::type_name::<T>())
+        })
     }
 
-    /// Fallible resolution: returns `None` instead of panicking when the provider is missing.
+    /// Fallible resolution: returns `None` instead of panicking when the
+    /// provider cannot be resolved — either it is not registered, or it is
+    /// `Request`-scoped and this task has no request scope (a bare
+    /// `tokio::spawn` background task, a standalone runtime context). Use
+    /// [`spawn_with_request_scope`] to give background work a scope.
     pub fn try_get<T>(&self) -> Option<Arc<T>>
     where
         T: Send + Sync + 'static,
@@ -374,7 +406,7 @@ impl ProviderRegistry {
             record_provider_dependency(parent, type_id);
         }
 
-        let any = self.produce_any(type_id, entry);
+        let any = self.produce_any(type_id, entry)?;
 
         any.downcast::<T>().ok()
     }
@@ -1079,6 +1111,52 @@ where
         .await
 }
 
+/// Spawns `future` on the ambient tokio runtime with the request scope
+/// carried over — the supported way to run background work that resolves
+/// `Request`-scoped providers.
+///
+/// **Snapshot semantics.** Task-locals do not cross `tokio::spawn`, so the
+/// child task cannot share the parent's cache. Instead, the request-scoped
+/// instances already constructed at spawn time are snapshotted (the `Arc`s
+/// are cloned; the maps are independent) and installed as the child's
+/// scope:
+///
+/// - The child resolves the **same instances** the request had — including
+///   any in-flight `TransactionSlot` (nestrs) — so spawned work is a
+///   continuation of the request, not a new one.
+/// - Values constructed or inserted **after** the spawn are private to
+///   whichever side constructed them: the parent does not see the child's
+///   inserts, and the child does not see providers the parent constructs
+///   later.
+/// - Spawned **outside** any request scope (a scheduler, a startup job),
+///   the child simply gets a fresh empty scope — request-scoped providers
+///   construct per spawned task and are isolated from every other task.
+///
+/// **Not carried:** the ability / principal slots. Row-level authz stays
+/// deny-closed in the spawned task unless the caller explicitly wraps the
+/// future with the ability helpers — background work inheriting the
+/// request's authority should be an explicit decision, not a side effect
+/// of spawning.
+pub fn spawn_with_request_scope<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let snapshot = REQUEST_SCOPE_CACHE
+        .try_with(|cell| cell.borrow().clone())
+        .ok();
+    tokio::spawn(async move {
+        match snapshot {
+            Some(map) => {
+                REQUEST_SCOPE_CACHE
+                    .scope(std::cell::RefCell::new(map), future)
+                    .await
+            }
+            None => with_request_scope(future).await,
+        }
+    })
+}
+
 /// Look up a value previously inserted into the request scope via
 /// `request_scope_insert` or by the `RequestScoped<T>` provider. Returns
 /// `None` outside of a request scope.
@@ -1392,6 +1470,39 @@ mod request_scope_tests {
         }
     }
 
+    // Per-test counted types: the tests below run concurrently on the
+    // multi-thread test harness, and a shared counter would let one test's
+    // `store(0)` reset another's in-flight construction count.
+    static SNAPSHOT_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
+
+    struct SnapshottedService;
+
+    impl Injectable for SnapshottedService {
+        fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
+            SNAPSHOT_CONSTRUCTIONS.fetch_add(1, Ordering::SeqCst);
+            Arc::new(Self)
+        }
+
+        fn scope() -> ProviderScope {
+            ProviderScope::Request
+        }
+    }
+
+    static OFF_SCOPE_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
+
+    struct OffScopeService;
+
+    impl Injectable for OffScopeService {
+        fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
+            OFF_SCOPE_CONSTRUCTIONS.fetch_add(1, Ordering::SeqCst);
+            Arc::new(Self)
+        }
+
+        fn scope() -> ProviderScope {
+            ProviderScope::Request
+        }
+    }
+
     #[tokio::test]
     async fn nested_scope_does_not_rebuild_request_providers() {
         // The DI-contract regression: a Request-scoped provider resolved
@@ -1419,6 +1530,116 @@ mod request_scope_tests {
             );
         })
         .await;
+    }
+
+    // --- request scope across spawn (audit #47, v2-review item 2) -----------
+    //
+    // A handler that `tokio::spawn`s background work ran that child with NO
+    // request scope; resolving a Request-scoped provider there panicked —
+    // and panicked through `try_get` too, violating its documented
+    // "returns None instead of panicking" contract.
+
+    #[tokio::test]
+    async fn try_get_returns_none_off_scope_instead_of_panicking() {
+        let mut registry = ProviderRegistry::new();
+        registry.register::<CountedRequestService>();
+
+        // Off-scope: registered, but unresolvable here. `try_get` must honor
+        // its graceful contract (pre-fix: panic).
+        assert!(
+            registry.try_get::<CountedRequestService>().is_none(),
+            "off-scope Request-scoped resolution is absence, not a panic"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "spawn_with_request_scope")]
+    fn get_off_scope_panics_with_the_fix_in_the_message() {
+        let mut registry = ProviderRegistry::new();
+        registry.register::<CountedRequestService>();
+
+        let _ = registry.get::<CountedRequestService>();
+    }
+
+    #[tokio::test]
+    async fn spawned_task_sees_the_request_snapshot() {
+        SNAPSHOT_CONSTRUCTIONS.store(0, Ordering::SeqCst);
+        let mut registry = ProviderRegistry::new();
+        registry.register::<SnapshottedService>();
+
+        with_request_scope(async {
+            let outer: Arc<SnapshottedService> = registry.get();
+
+            let registry = registry.clone();
+            let handle = spawn_with_request_scope(async move {
+                let child: Arc<SnapshottedService> = registry.get();
+                Arc::ptr_eq(&outer, &child)
+            });
+
+            assert!(
+                handle.await.unwrap(),
+                "spawned task must resolve the instance the request had at spawn time"
+            );
+            assert_eq!(
+                SNAPSHOT_CONSTRUCTIONS.load(Ordering::SeqCst),
+                1,
+                "snapshot must carry the instance, not re-construct it"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn spawned_task_writes_stay_in_the_child() {
+        with_request_scope(async {
+            let handle = spawn_with_request_scope(async {
+                request_scope_insert(
+                    TypeId::of::<OtherMarker>(),
+                    Arc::new(OtherMarker) as Arc<dyn Any + Send + Sync>,
+                );
+                assert!(
+                    request_scope_get(TypeId::of::<OtherMarker>()).is_some(),
+                    "the child sees its own inserts"
+                );
+            });
+            handle.await.unwrap();
+
+            assert!(
+                request_scope_get(TypeId::of::<OtherMarker>()).is_none(),
+                "child-scope writes must not leak into the parent request scope"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn spawning_off_scope_gives_each_child_a_fresh_scope() {
+        OFF_SCOPE_CONSTRUCTIONS.store(0, Ordering::SeqCst);
+        let mut registry = ProviderRegistry::new();
+        registry.register::<OffScopeService>();
+
+        // Off-scope spawn (a scheduler, a startup job): each spawned task is
+        // its own unit of work — fresh scope, isolated instances.
+        let a = {
+            let registry = registry.clone();
+            spawn_with_request_scope(async move { registry.get::<OffScopeService>() })
+        };
+        let b = {
+            let registry = registry.clone();
+            spawn_with_request_scope(async move { registry.get::<OffScopeService>() })
+        };
+
+        let a = a.await.unwrap();
+        let b = b.await.unwrap();
+        assert!(
+            !Arc::ptr_eq(&a, &b),
+            "off-scope spawns must not share request-scoped instances"
+        );
+        assert_eq!(
+            OFF_SCOPE_CONSTRUCTIONS.load(Ordering::SeqCst),
+            2,
+            "one construction per spawned scope"
+        );
     }
 }
 

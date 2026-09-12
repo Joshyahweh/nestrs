@@ -14,7 +14,7 @@ description: "nestrs-openapi serves an OpenAPI 3.1 JSON document and Swagger UI 
 | `summary` | Humanized handler name; override with `#[openapi(summary = "...")]` |
 | `tags` | Inferred from the first path segment; override with `#[openapi(tag = "...")]` |
 | `responses` | Default `200 OK`; extend with `#[openapi(responses = ((404, "..."), ...))]` |
-| Request/response schemas | **Not auto-generated** — hand-author `components.schemas` or merge from `utoipa` |
+| Request/response schemas | Via **`#[dto]`** types — they derive `schemars::JsonSchema`; land them under `components.schemas` with `schema_entry` / `with_schemas` (not auto-linked to individual operations) |
 
 ## Step-by-step setup
 
@@ -24,7 +24,7 @@ description: "nestrs-openapi serves an OpenAPI 3.1 JSON document and Swagger UI 
 
     ```toml
     [dependencies]
-    nestrs = { version = "0.3.8", features = ["openapi"] }
+    nestrs = { version = "1.0.0", features = ["openapi"] }
     tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
     ```
   </Step>
@@ -117,7 +117,43 @@ All fields on `OpenApiOptions` have defaults — use `..Default::default()` and 
 
 ## Add schemas to components
 
-nestrs-openapi does not derive request/response schemas from Rust types. Provide them manually under `components.schemas`. The `#[openapi(responses = ...)]` attribute on handlers sets status codes and descriptions but not `content` or `$ref` links.
+Schemas are **not inferred from handler signatures** — the `#[openapi(responses = ...)]` attribute on handlers sets status codes and descriptions but never `content` or `$ref` links. However, Rust types **do** generate schemas: every `#[dto]` struct derives `schemars::JsonSchema` in the same decorator that gives it serde and `validator` derives. Feed those schemas to nestrs-openapi with two helpers:
+
+- `schema_entry::<T>("T")` — builds one `(name, schema)` pair from any `JsonSchema` type (the `schemars::schema_for!` output, serialized as JSON Schema).
+- `OpenApiOptions::with_schemas([...])` — merges those entries into `components.schemas`.
+
+OpenAPI 3.1 `components.schemas` values are JSON Schema documents, so the reflected schema drops in unchanged — including `#[serde(rename)]` renames and nested `#[dto]` fields (which arrive as `$ref` + `$defs` chains).
+
+```rust
+use nestrs_openapi::{OpenApiOptions, schema_entry};
+
+#[dto]
+pub struct CreateUserDto {
+    #[IsEmail]
+    pub email: String,
+    #[MinLength(1)]
+    pub name: String,
+}
+
+let options = OpenApiOptions::default()
+    .with_schemas([
+        schema_entry::<CreateUserDto>("CreateUserDto"),
+        schema_entry::<UserRowDto>("UserRowDto"),
+    ]);
+
+NestFactory::create::<AppModule>()
+    .enable_openapi_with_options(options)
+    .listen(3000)
+    .await;
+```
+
+<Note>
+Because the `#[dto]` derive expansion references the `schemars` (and `validator`) crate paths directly, your crate needs `schemars = "1"` as a direct dependency. `nestrs` re-exports it as `nestrs::schemars`.
+</Note>
+
+Schemas are still **not linked to individual operations** — `schema_entry` / `with_schemas` populate `components.schemas` for tooling, codegen, and client generation; attaching `content.application/json.schema.$ref` to specific operations is on you (post-process the JSON, or merge external fragments as below).
+
+For types outside `#[dto]`, or schemas you want to author by hand, pass them under `OpenApiOptions.components`:
 
 ```rust
 use nestrs_openapi::OpenApiOptions;
@@ -141,7 +177,7 @@ OpenApiOptions {
 ```
 
 <Tip>
-If you want schemas derived from Rust types, add `utoipa` with its `ToSchema` and `IntoParams` derives, build a small `utoipa::OpenApi` fragment, serialize it to `serde_json::Value`, and merge it into `OpenApiOptions.components`. One OpenAPI document is served from nestrs; utoipa supplies the schema fragments.
+For schema derives on types you don't want to mark `#[dto]`, add `utoipa` with its `ToSchema` and `IntoParams` derives, build a small `utoipa::OpenApi` fragment, serialize it to `serde_json::Value`, and merge it into `OpenApiOptions.components`. One OpenAPI document is served from nestrs; utoipa supplies the schema fragments.
 </Tip>
 
 ## Global security scheme
@@ -227,6 +263,6 @@ Set `api_prefix` so the documented paths in `openapi.json` match the actual URLs
 |---------|---------------|
 | `/docs` or `/openapi.json` returns 404 | Confirm `features = ["openapi"]` on `nestrs` and that `enable_openapi()` is called before `listen`. |
 | Routes missing from the document | Handlers must use `#[routes]` or `impl_routes!` to register in `RouteRegistry`. |
-| Schemas are empty | nestrs does not infer schemas from Rust types — populate `OpenApiOptions.components` manually or merge a `utoipa` fragment. |
+| Schemas are empty | Schemas aren't picked up automatically — pass `#[dto]` types via `schema_entry` / `with_schemas`, hand-author `OpenApiOptions.components`, or merge a `utoipa` fragment. |
 | Security not shown per-route | Set `infer_route_security_from_roles: true` and `roles_security_scheme`; add `#[roles(...)]` to the handler. |
 | Paths have wrong prefix | Set `api_prefix` on `OpenApiOptions` to match your `set_global_prefix` and controller `version`. |

@@ -14,21 +14,21 @@
 | Tags | **Heuristic** from the path; override with **`#[openapi(tag = "...")]`**. |
 | Document `tags`, `servers`, `components`, `security` | **Optional** — set on [`OpenApiOptions`](https://docs.rs/nestrs-openapi/latest/nestrs_openapi/struct.OpenApiOptions.html). |
 | Per-route **security** (heuristic) | **Optional** — [`OpenApiOptions::infer_route_security_from_roles`](https://docs.rs/nestrs-openapi/latest/nestrs_openapi/struct.OpenApiOptions.html#structfield.infer_route_security_from_roles) + `roles_security_scheme` when handlers use **`#[roles]`** (metadata); still define `components.securitySchemes`. |
-| Request/response **schemas** from DTOs | **No** in-core — hand-write **`components.schemas`** or merge fragments from **`utoipa`** / **`okapi`** / codegen; see repo mdBook [**OpenAPI & HTTP**](../docs/src/openapi-http.md). |
+| Request/response **schemas** from DTOs | **Yes** — `#[dto]` derives `schemars::JsonSchema`; feed [`schema_entry`](https://docs.rs/nestrs-openapi/latest/nestrs_openapi/fn.schema_entry.html) outputs to [`OpenApiOptions::with_schemas`](https://docs.rs/nestrs-openapi/latest/nestrs_openapi/struct.OpenApiOptions.html). Hand-written `components.schemas` / `utoipa` / `okapi` fragments remain available for non-DTO types; see repo mdBook [**OpenAPI & HTTP**](../docs/src/openapi-http.md). |
 | Per-route `@ApiOperation` / `@ApiResponse` | **Partial** — `#[openapi(summary = \"...\", tag = \"...\", responses = ((404, \"...\"), ...))]`; otherwise default `200 OK`. |
 
 ## Install
 
 ```toml
 [dependencies]
-nestrs-openapi = "0.3.8"
+nestrs-openapi = "1.0.0"
 axum = "0.7"
 ```
 
 Or:
 
 ```toml
-nestrs = { version = "0.3.8", features = ["openapi"] }
+nestrs = { version = "1.0.0", features = ["openapi"] }
 ```
 
 Use `NestFactory::create(..).enable_openapi()` or `enable_openapi_with_options(..)`; **`api_prefix`** is filled from your global prefix + URI version when applicable.

@@ -16,17 +16,26 @@ NestJS-like API framework for Rust built on Axum and Tower.
 
 - Module-oriented architecture (`module`, `controller`, `injectable` macros)
 - HTTP route macros (`get`, `post`, `put`, `patch`, `delete`, `options`, `head`, `all`)
-- DI + application context
-- DTO validation pipeline and class-validator-style ergonomics
+- DI + application context — request scopes, lifecycle hooks, `useValue`/`useFactory` providers with opt-in lifecycles
+- DTO validation pipeline, class-validator-style ergonomics, and extraction-time pipe chains (`#[use_pipes]` — `ValidationPipe`, `ParseIntPipe`, `TrimPipe`, custom pipes)
 - Cross-cutting pipeline: guards, pipes, interceptors, exception filters, strategies
-- Production controls: backpressure, metrics, request tracing, security runbooks
+- Row-level authorization (`authz-row-level`): deny-closed `CrudService`, module-qualified principals, masking subjects
+- `#[crud]` generated controllers with paginated list endpoints (limit/offset)
+- Microservice transports via `nestrs-microservices`: NATS, Redis, Kafka, RabbitMQ (AMQP 0.9), MQTT, TCP (length-prefixed, bounded frames), gRPC
+- GraphQL (async-graphql) incl. **federation gateway** (`EntityResolver`, `_service`/`_entities`), data loaders, WebSocket subscriptions
+- OAuth2 via `nestrs-oauth2`: 4 grant types incl. PKCE, JWKS-backed resource server, social providers (Google/GitHub/Microsoft/Apple), `OAuth2Guard`
+- Multi-cloud object storage via `nestrs-storage` (S3 / GCS / Azure / Local, built on `object_store`)
+- DB migrations + seeding: `nestrs-cli db migrate add|run|revert|info` and `db seed --bin|--seed-file`
+- OpenAPI/Swagger via `nestrs-openapi`, with `#[dto]` schemars reflection
+- CQRS (`nestrs-cqrs`) and in-process events (`nestrs-events`)
+- Production controls: backpressure, bounded caches, rate limiting with proxy-topology awareness, metrics, request tracing, security runbooks
 - **Model Context Protocol server** (`nestrs-mcp`) for Claude Code, Cursor, VS Code, Codex CLI — project introspection, live runtime, scaffolding, docs search ([guide](docs/src/mcp.md))
 - Performance hardening workflows: benchmark gating (HTTP, DI, validated JSON), history tracking, dashboard artifacts; scheduled libFuzzer smoke runs
 
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `0.3.8` (from `VERSION` and workspace package settings)
+- Current workspace version: `1.0.0` (from `VERSION` and workspace package settings) — the first stable release; the public API is now covered by full semver (see `STABILITY.md`)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
@@ -48,9 +57,13 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs/` - main framework crate (public runtime API)
 - `nestrs-core/` - runtime primitives (context, traits, metadata, strategy)
 - `nestrs-macros/` - proc macros and helper attributes
-- `nestrs-cli/` - scaffold/generate CLI (crates.io package name: **`nestrs-scaffold`**, binary: `nestrs-cli`)
+- `nestrs-cli/` - scaffold/generate CLI + `db` migrations/seeding (crates.io package name: **`nestrs-scaffold`**, binary: `nestrs-cli`)
 - `nestrs-prisma/` - Prisma integration crate
-- `nestrs-microservices/` - transport/client/event primitives
+- `nestrs-microservices/` - transport/client/event primitives (NATS, Redis, Kafka, RabbitMQ, MQTT, TCP, gRPC)
+- `nestrs-cqrs/` - CQRS command/query bus primitives
+- `nestrs-events/` - in-process event bus (Nest-style `@OnEvent` analogue)
+- `nestrs-oauth2/` - OAuth2 client, JWKS-backed resource server, social providers, `OAuth2Guard`
+- `nestrs-storage/` - multi-cloud object storage (S3 / GCS / Azure / Local)
 - `nestrs-openapi/`, `nestrs-graphql/`, `nestrs-ws/` - parity extension crates
 - `nestrs-mcp/` - Model Context Protocol server (stdio + Streamable HTTP)
 - `website/` - landing page + docs hub (light/dark theme)

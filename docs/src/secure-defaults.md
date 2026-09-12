@@ -14,7 +14,7 @@ Adapt names and policies to your threat model—this is a **memory aid**, not a 
 4. **`use_body_limit`** and **`use_request_timeout`** on public endpoints.  
 5. **`use_rate_limit`** (or enforce limits at the edge) for anonymous traffic.  
 6. If you use **cookies** or **sessions**, enable **`csrf`** and **`use_csrf_protection`** for unsafe methods.  
-7. **`enable_production_errors_from_env`** (or equivalent) so clients never see raw stack traces.  
+7. Production error sanitization is **on by default** when the environment is production — clients never see raw stack traces. `enable_production_errors()` additionally forces it on in staging.  
 
 Cross-check each row against the tables below when something behaves differently in `production` vs `development`.
 
@@ -39,6 +39,18 @@ Cross-check each row against the tables below when something behaves differently
 - **Cookie sessions in browsers** need a **CSRF token** pattern (or SameSite-only flows you have modeled explicitly).
 - nestrs ships **double-submit CSRF** behind the **`csrf`** feature; see `SECURITY.md` in the repo root.
 
+## Authorization defaults
+
+Authorization is opt-in (`authz`, `authz-row-level` features), but once enabled it fails **closed**:
+
+- An **empty `Ability` denies everything** — grants are additive only.
+- No `Ability` in request scope makes `PoliciesGuard` return **403**, and makes authorized repository / `CrudService` calls return an **error**, not a fallback to unfiltered queries.
+- A row-level predicate with no `Principal` in scope returns an **error** rather than leaking rows.
+- Unauthorized reads are invisible (`Ok(None)` / empty lists); unauthorized writes never silently succeed.
+- `PolicyMaskingInterceptor` passes bodies through **unchanged** — rather than failing or buffering without bound — when there is no ability on the request, the body is non-JSON or unparseable, or it reaches the 1 MiB cap.
+
+The full model — abilities, guards, row predicates, SQL pushdown, masking — is covered in [Authorization](authorization.md).
+
 ## Secure-by-default matrix
 
 | Control | Default in nestrs | Recommended for public web APIs |
@@ -51,11 +63,15 @@ Cross-check each row against the tables below when something behaves differently
 | Body size | Off until `use_body_limit` | Set per route class / deployment |
 | Request timeout | Off until `use_request_timeout` | Set for public endpoints |
 | Rate limit | Off until `use_rate_limit` | Set at edge + optionally in-app |
-| Production error sanitization | Off until `enable_production_errors` / `..._from_env` | Enable in prod |
+| Production error sanitization | **On by default when the runtime environment is production** (`NESTRS_ENV`/`APP_ENV`/`RUST_ENV` ∈ {`production`, `prod`}): 5xx `message` → generic string, `errors` dropped. `enable_production_errors()` forces on; `disable_production_errors()` opts out | On (default) — opt out only behind a trusted boundary |
+| Route policies (`authz`) | Off until feature + middleware; when enabled, an **empty `Ability` denies everything** and `PoliciesGuard` fails closed (403) | Enable for non-public routes |
+| Row-level authorization (`authz-row-level`) | **Deny-closed when enabled**: missing `Ability` / `Principal` errors rather than falling back; unauthorized reads invisible, writes denied | Enable for per-user / multi-tenant data |
+| Response masking (`PolicyMaskingInterceptor`) | Off until layered; no-ability, non-JSON, and ≥ 1 MiB bodies pass through unmasked | Layer for field-level visibility |
 | JSON unknown keys on `#[dto]` | **Denied by default** | Use `#[dto(allow_unknown_fields)]` only when needed |
 
 ## Further reading
 
 - [Security](security.md) (includes `SECURITY.md`)
+- [Authorization](authorization.md) — deny-closed abilities, guards, row-level policies, masking
 - [OpenAPI & HTTP](openapi-http.md) for documented routes and optional security schemes
 - `PRODUCTION_RUNBOOK.md` (repository root)

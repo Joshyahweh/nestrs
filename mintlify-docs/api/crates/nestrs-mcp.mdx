@@ -1,32 +1,67 @@
 ---
 title: "nestrs-mcp: Model Context Protocol server"
-description: "Reference for nestrs-mcp: the NestrsMcpServer tool surface, CLI transport flags, admin-port client, and feature flags."
+description: "Reference for nestrs-mcp: NestrsMcpServer, the four tool handlers, McpSurfaces (prompts, resources, completion, subscriptions, cache hints), elicitation, tasks, authz, the AdminClient, the source parser, and the setup wizard."
 ---
 
-`nestrs-mcp` is the [Model Context Protocol](https://modelcontextprotocol.io/) server for the nestrs framework. It exposes project structure, live runtime state, scaffolding actions, and docs search to MCP-aware clients (Claude Code, Cursor, VS Code, Codex CLI).
+`nestrs-mcp` is the [Model Context Protocol](https://modelcontextprotocol.io/) server for the nestrs framework. It exposes project structure, live runtime state, scaffolding actions, and docs search to MCP-aware clients (Claude Code, Cursor, VS Code, Codex CLI), plus the protocol surfaces beyond tools — prompts, resources, completion, elicitation, and tasks.
 
-The full narrative guide — install, client wiring for each editor, live-runtime setup — lives on the [Connect an AI editor to your nestrs project](/guides/mcp) page. This page is the API reference.
+The narrative guide — install, client wiring for each editor, live-runtime setup, embedding recipes — lives on the [Connect an AI editor to your nestrs project](/guides/mcp) page. This page is the API reference.
 
 ## Features
 
 | Feature | What it does | Pulls in |
 |---|---|---|
-| `stdio` (default) | stdio transport — the client spawns the binary and speaks JSON-RPC over its stdin/stdout | `rmcp/transport-io` |
-| `http` | Streamable HTTP transport at `/mcp` | `rmcp/transport-streamable-http-server`, `axum` |
-| `admin` | `nestrs-mcp::runtime::AdminClient` and the live-runtime tools (`get_app_health`, `get_app_routes`, `get_app_providers`) that talk to a running nestrs app's `__nestrs/*` sidecar | `nestrs`, `nestrs/admin` |
+| `stdio` (default) | Marker flag — stdio support (`rmcp/transport-io`) is always compiled in | — |
+| `http` | Streamable HTTP transport at `/mcp` | `rmcp/transport-streamable-http-server` |
+| `admin` | Re-exports `nestrs::admin::{AdminHandle, AdminOptions}` so an embedder can configure the app side from one crate. The `AdminClient` and the live-runtime tools are **always** available — no feature needed | `nestrs`, `nestrs/admin` |
+| `authz` | Per-tool-call ambient ability + principal + transaction + outbound masking on `NestrsMcpServer` (overrides `ServerHandler::call_tool`) | `nestrs`, `sqlx`, `nestrs/authz`, `nestrs/database-sqlx` |
+| `authz-row-level` | Row-level authorization enforcement on top of `authz` (mirrors the main crate's feature of the same name) | `authz`, `nestrs/authz-row-level` |
+| `elicitation` | Server→client elicitation (SEP-1034): the `McpSurfaces::register_elicitation` builder, `NestrsMcpServer::elicit`, and rmcp's elicitation support (adds the `url` crate for `ElicitRequestParams::Url*`) | `rmcp/elicitation` |
 
 ```toml
 # Cargo.toml
 [dependencies]
-nestrs-mcp = "*"
+nestrs-mcp = "1.0"
 
 # Or pull in the optional features:
-# nestrs-mcp = { version = "*", features = ["http", "admin"] }
+# nestrs-mcp = { version = "1.0", features = ["http", "admin", "authz", "elicitation"] }
+```
+
+## Crate layout
+
+```rust
+pub mod docs;            // local-file docs search (CHANGELOG, mdBook, READMEs)
+pub mod error;           // crate Error + Result
+pub mod introspection;   // source-level + live-registry snapshot
+#[cfg(feature = "authz")]
+pub mod mcp_data_context; // McpDataContext + per-tool-call authz scopes
+pub mod runtime;         // HTTP client for the live admin port (AdminClient)
+pub mod scaffold;        // new_project / create_module / create_resource / create_dto / generate_crud
+pub mod server;          // NestrsMcpServer + SubServers
+pub mod surfaces;        // McpSurfaces: prompts, resources, templates, completion, subscriptions
+pub mod tools;           // IntrospectionTools / RuntimeTools / ScaffoldTools / DocsTools
+pub mod wizard;          // init/setup editor config writer
+```
+
+Root re-exports (note the paths that are **not** at the root):
+
+```rust
+use nestrs_mcp::{assistant_text, elicit_input, input_responses, text_contents,
+                 user_text, CacheHints, Error, McpSurfaces, Result};
+// server::NestrsMcpServer is NOT re-exported at the root:
+use nestrs_mcp::server::NestrsMcpServer;
+
+#[cfg(feature = "admin")]       // re-export from the nestrs crate
+use nestrs_mcp::{AdminHandle, AdminOptions};
+#[cfg(feature = "authz")]
+use nestrs_mcp::{current_mcp_ability, current_mcp_transaction, McpDataContext};
+#[cfg(feature = "elicitation")]
+use nestrs_mcp::ElicitationHandler;
 ```
 
 ## CLI
 
-The `nestrs-mcp` binary runs as either a server (no subcommand, with a `--transport` flag) or as a setup wizard (`init` / `setup` subcommand). `--transport` defaults to `stdio`; `--http-addr` is required when `--transport http` is set on the server path.
+The `nestrs-mcp` binary runs as either a server (no subcommand, with a `--transport` flag) or as a setup wizard (`init` / `setup` subcommand). `--transport` defaults to `stdio`; `--http-addr` defaults to `127.0.0.1:7777`.
 
 ```bash
 nestrs-mcp --help
@@ -59,63 +94,369 @@ Options:
           Print version
 ```
 
-The wizard's own flags are documented in the [setup wizard section](/guides/mcp#setup-wizard) of the guide.
+The wizard's own flags (`--yes`, `--no-interactive`, `--transport`, `--http-addr`, `--start-http-server`) are documented in the [setup wizard section](/guides/mcp#setup-wizard) of the guide.
+
+## `NestrsMcpServer`
+
+The top-level `rmcp` `ServerHandler`. The binary serves this type; embedders construct it directly.
+
+```rust
+use nestrs_mcp::server::{NestrsMcpServer, SubServers};
+use rmcp::task_manager::{TaskContext, TaskFuture, TaskManager, TaskOptions};
+use rmcp::model::{ElicitRequestParams, ElicitResult, Task};
+use rmcp::service::{RequestContext, RoleServer};
+
+pub struct NestrsMcpServer {
+    pub tool_router: ToolRouter<Self>,
+    #[cfg(feature = "authz")]
+    pub data_context: McpDataContext,
+    pub surfaces: McpSurfaces,
+    // private: tasks (TaskManager), task_support (bool)
+}
+
+impl NestrsMcpServer {
+    pub fn new() -> Self;
+
+    /// Attach prompts / resources / templates / completion. The server clones
+    /// the inner Arc, so registrations added to the same McpSurfaces after
+    /// with_surfaces are visible on the server.
+    pub fn with_surfaces(mut self, surfaces: McpSurfaces) -> Self;
+
+    /// Advertise the SEP-2663 tasks extension (tasks/get, tasks/update,
+    /// tasks/cancel) in get_info. The TaskManager exists either way.
+    pub fn with_task_support(mut self) -> Self;
+
+    /// The task store backing the SEP-2663 extension.
+    pub fn tasks(&self) -> &TaskManager;
+
+    /// Spawn an operation as a task and return its seed Task state for a
+    /// CreateTaskResult. The future must be 'static — move owned data in.
+    pub fn spawn_task(
+        &self,
+        options: TaskOptions,
+        make_future: impl FnOnce(TaskContext) -> TaskFuture,
+    ) -> Task;
+
+    #[cfg(feature = "authz")]
+    pub fn with_data_context(mut self, ctx: McpDataContext) -> Self;
+
+    #[cfg(feature = "elicitation")]
+    pub async fn elicit(
+        &self,
+        request: ElicitRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ElicitResult, rmcp::ErrorData>;
+
+    /// All four area handlers, each a full ServerHandler.
+    pub fn sub_servers() -> SubServers;
+}
+```
+
+The `ServerHandler` impl provides `get_info` (server name `nestrs-mcp`, version from Cargo), the full surface set (`list_prompts`, `get_prompt`, `list_resources`, `list_resource_templates`, `read_resource`, `complete`), subscriptions (`accepted_subscription_filter`, `listen`), and the task RPCs (`get_task`, `update_task`, `cancel_task`).
+
+<Warning>
+The wrapper declares **no tools** — its `#[tool_router]` impl block is empty, so a `tools/list` against the stock binary returns `[]`. The tools live on the four area handlers below; serve one of those (or your own) from your binary. See [Embedding in another binary](#embedding-in-another-binary).
+</Warning>
+
+`SubServers` bundles the four handlers:
+
+```rust
+pub struct SubServers {
+    pub introspection: IntrospectionTools, // nestrs_mcp::tools::introspection
+    pub runtime: RuntimeTools,              // nestrs_mcp::tools::runtime
+    pub scaffold: ScaffoldTools,           // nestrs_mcp::tools::scaffold
+    pub docs: DocsTools,                   // nestrs_mcp::tools::docs
+}
+```
 
 ## Tool surface
 
-The server is a `rmcp` `ServerHandler` with a `#[tool_router]` macro that declares each tool. Tools are aggregated into a single `NestrsMcpServer` struct.
+Tools are declared with rmcp's `#[tool_router]` / `#[tool]` macros — there is no manual registration API. The pattern every built-in handler follows:
 
-### Introspection (read-only, `read_only_hint = true`)
+```rust
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::{tool, tool_handler, tool_router, ErrorData, Json};
 
-Every tool takes `workspace_path: String` as its first argument so one server instance can serve multiple projects over a long session.
+#[derive(Debug)]
+pub struct MyTools;
+
+#[tool_router]
+impl MyTools {
+    #[tool(
+        name = "get_widget",
+        description = "Fetch one widget.",
+        annotations(read_only_hint = true)
+    )]
+    pub async fn get_widget(
+        &self,
+        Parameters(args): Parameters<WidgetArgs>, // WidgetArgs: Deserialize + JsonSchema
+    ) -> Result<Json<serde_json::Value>, ErrorData> {
+        Ok(Json(serde_json::json!({ "id": args.id })))
+    }
+}
+
+#[tool_handler]
+impl MyTools {}
+```
+
+A `Json<T>` return (where `T: Serialize + schemars::JsonSchema`) stamps an `outputSchema` on the tool declaration and lands the typed value in `structuredContent` — plus a text fallback block for clients that only render text.
+
+### Introspection (read-only, `read_only_hint = true`) — `IntrospectionTools`
+
+Every tool takes `workspace_path: String` (absolute path to the workspace root — the directory containing `Cargo.toml`) so one server instance can serve multiple projects over a long session.
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `list_modules` | `{workspace_path}` | `Vec<ModuleSummary>` |
+| `get_module` | `{workspace_path, name}` | `ModuleSummary` — providers, controllers, imports, exports |
+| `list_controllers` | `{workspace_path, module?}` | `Vec<ControllerSummary>` |
+| `get_controller` | `{workspace_path, name}` | `ControllerSummary` — routes, guards, interceptors, body type, response type |
+| `list_providers` | `{workspace_path, module?}` | `Vec<ProviderSummary>` |
+| `get_provider` | `{workspace_path, name}` | `ProviderSummary` — scope, file, `is_injectable` |
+| `list_routes` | `{workspace_path, module?, controller?}` | `Vec<{controller, method, path, handler}>` |
+| `get_route` | `{workspace_path, method, path}` | `{controller, method, path, handler, version, guards, interceptors, pipes, filters, metadata, body_type, response_type}` |
+| `list_dtos` | `{workspace_path}` | `Vec<DtoSummary>` |
+| `get_dto` | `{workspace_path, name}` | `DtoSummary` — fields, types, validators from the `#[dto]` field attrs |
+| `list_schedules` | `{workspace_path}` | `Vec<String>` — `#[interval]` / `#[cron]` jobs |
+| `list_event_handlers` | `{workspace_path}` | `Vec<String>` — `#[on_event]` handlers |
+| `list_queue_processors` | `{workspace_path}` | `Vec<String>` — `#[process]` handlers |
+
+### Runtime — `RuntimeTools`
+
+Each tool takes an `AdminEndpoint`: `{base_url: String, token: Option<String>}` (e.g. `"http://127.0.0.1:7777"`). No Cargo feature required — but the target app must have the `admin` feature and `use_admin(...)` enabled. Backed by the [`AdminClient`](#adminclient).
 
 | Tool | Returns |
 |---|---|
-| `list_modules({workspace_path})` | `Vec<ModuleSummary>` |
-| `get_module({workspace_path, name})` | `ModuleDetail` — providers, controllers, imports, exports |
-| `list_controllers({workspace_path, module?})` | `Vec<ControllerSummary>` |
-| `get_controller({workspace_path, name})` | `ControllerDetail` — routes, guards, interceptors, body type, response type |
-| `list_providers({workspace_path, module?})` | `Vec<ProviderSummary>` |
-| `get_provider({workspace_path, name})` | `ProviderDetail` — constructor args, scope, deps |
-| `list_routes({workspace_path, controller?})` | `Vec<RouteSummary>` — method, path, handler, guards |
-| `get_route({workspace_path, method, path})` | `RouteDetail` — handler sig, all middlewares, OpenAPI op |
-| `list_dtos({workspace_path})` | `Vec<DtoSummary>` |
-| `get_dto({workspace_path, name})` | `DtoDetail` — fields, types, validators from `#[validate(...)]` |
-| `list_schedules({workspace_path})` | `Vec<ScheduleSummary>` |
-| `list_event_handlers({workspace_path})` | `Vec<EventHandlerSummary>` |
-| `list_queue_processors({workspace_path})` | `Vec<QueueProcessorSummary>` |
+| `get_app_health` | `AdminHealth` — `{status, uptime_ms, version}` |
+| `get_app_routes` | `Vec<LiveRouteSummary>` — what's actually mounted |
+| `get_app_providers` | `Vec<LiveProviderSummary>` — live DI graph |
 
-### Runtime (requires a running app with `admin` feature)
+### Scaffolding (write actions, `destructive_hint = true`) — `ScaffoldTools`
 
-| Tool | Returns |
-|---|---|
-| `get_app_health({base_url, token?})` | `HealthStatus` — liveness, readiness, uptime |
-| `get_app_routes({base_url, token?})` | `Vec<LiveRoute>` — what's actually mounted |
-| `get_app_providers({base_url, token?})` | `Vec<LiveProvider>` — live DI graph |
+| Tool | Arguments | Action |
+|---|---|---|
+| `new_project` | `{path, name, transports?}` | Full crate: `Cargo.toml`, `src/main.rs`, `src/app.rs`, `.gitignore`, `README.md` |
+| `create_module` | `{path, name, transports?}` | `src/<name>/{mod.rs, controller.rs, service.rs}` + `pub mod <name>;` in the parent. (`transports` is accepted but currently unused by the renderer.) |
+| `create_resource` | `{path, name, fields, transport}` | DTO + controller + service + module, wired up. `transport`: `"http" \| "graphql" \| "ws" \| "tcp"` |
+| `create_dto` | `{path, name, fields}` | `#[derive(FromRow, Serialize, Deserialize, Validate)] struct` |
+| `generate_crud` | `{path, resource, fields, transports}` | Full resource across multiple transports |
 
-Backed by an `AdminClient` (reqwest + rustls-tls) hitting the app's localhost-only admin port. Token auth via `Authorization: Bearer <token>`.
+`fields` is `Vec<DtoFieldSpec>` — `{name, ty, optional?, validators?}` per field (see [Scaffold API](#scaffold-api)). All write actions return a `ScaffoldReport` — `{files_created: [..], files_modified: [..]}` — so the model can show the user exactly what changed. Guards: module and DTO names must be valid Rust idents (`is_safe_ident`), and project names must be valid crate names; there is no workspace-containment check on `path`, so treat tool output paths as trusted input.
 
-### Scaffolding (write actions, `destructive_hint = true`)
+### Docs search (read-only, `read_only_hint = true`) — `DocsTools`
 
-| Tool | Action |
-|---|---|
-| `new_project({path, name, transports?})` | Full crate: `Cargo.toml`, `src/main.rs`, `src/app.rs`, `.gitignore`, `README.md` |
-| `create_module({path, name, transports?})` | `src/<name>/{mod.rs, controller.rs, service.rs}` + `pub mod <name>;` in the parent file |
-| `create_resource({path, name, dto_fields, transport})` | DTO + controller + service + module, wired up. Transport: `"http" \| "graphql" \| "ws" \| "tcp"` |
-| `create_dto({path, name, fields, validators?})` | `#[derive(FromRow, Serialize, Deserialize, Validate)] struct` |
-| `generate_crud({path, resource, transports})` | Full resource across multiple transports |
+| Tool | Arguments | Action |
+|---|---|---|
+| `search_docs` | `{workspace_path, query, scope?, limit?}` | Substring + token-weighted scoring over `CHANGELOG.md`, `docs/src/**/*.md`, and `**/README.md`. `scope`: `"changelog" \| "book" \| "readme" \| "all"` (default `"all"`); `limit` default 20 |
+| `get_changelog` | `{workspace_path}` | `Vec<ChangelogEntry>` — version/date headings |
+| `get_doc` | `{workspace_path, path}` | One doc's content by workspace-relative path |
 
-All write actions return `{ files_created: [..], files_modified: [..] }` so the model can show the user exactly what changed before any irreversible step. Scaffolding actions check that the target path is inside a `Cargo.toml` workspace before any write to defend against `path = "../../"` footguns.
+The index is built lazily on first use per `workspace_path` and cached for the process lifetime.
 
-### Docs search (read-only, `read_only_hint = true`)
+## Protocol surfaces: `McpSurfaces`
 
-| Tool | Action |
-|---|---|
-| `search_docs({query, scope, limit?})` | Substring + token-weighted scoring over `CHANGELOG.md`, `docs/src/**/*.md`, and `**/README.md`. Scope: `"changelog" \| "book" \| "readme" \| "all"` |
-| `get_changelog({limit?})` | `Vec<ReleaseEntry>` |
-| `get_doc({path})` | `DocContent` — fetch one doc by path |
+Clone-cheap bundle of the non-tool protocol surfaces, carried by `NestrsMcpServer` (attach with `.with_surfaces(...)`).
+
+```rust
+use nestrs_mcp::McpSurfaces;
+
+impl McpSurfaces {
+    pub fn new() -> Self;
+
+    pub fn register_prompt<H>(
+        self,
+        name: impl Into<String>,
+        description: Option<String>,
+        arguments: Vec<PromptArgument>,
+        handler: H,
+    ) -> Self
+    where
+        H: Fn(serde_json::Map<String, serde_json::Value>)
+                -> Result<Vec<PromptMessage>, String>
+            + Send + Sync + 'static;
+
+    pub fn register_resource<H>(self, resource: Resource, handler: H) -> Self
+    where
+        H: Fn(&str) -> Result<Vec<ResourceContents>, String> + Send + Sync + 'static;
+
+    /// The handler receives the *expanded* URI (the client expands the
+    /// RFC 6570 template itself, then calls resources/read).
+    pub fn register_resource_template<H>(self, template: ResourceTemplate, handler: H) -> Self
+    where
+        H: Fn(&str) -> Result<Vec<ResourceContents>, String> + Send + Sync + 'static;
+
+    /// One completion handler for the whole server (the protocol has a
+    /// single completion/complete endpoint; the handler reads the
+    /// request's `ref` to disambiguate).
+    pub fn register_complete<H>(self, handler: H) -> Self
+    where
+        H: Fn(&str, &CompleteRequestParams) -> Result<Vec<String>, String>
+            + Send + Sync + 'static;
+
+    /// Mark a URI eligible for subscription. Only then does get_info
+    /// advertise `resources.subscribe`.
+    pub fn register_subscribable_resource(self, uri: impl Into<String>) -> Self;
+
+    #[cfg(feature = "elicitation")]
+    pub fn register_elicitation<H>(self, handler: H) -> Self
+    where
+        H: Fn(
+                ElicitRequestParams,
+                RequestContext<RoleServer>,
+            ) -> Result<ElicitResult, String>
+            + Send + Sync + 'static;
+
+    /// SEP-2549 cache hints on every list/read result — emitted only to
+    /// peers on protocol >= 2026-07-28.
+    pub fn with_cache_hints(self, hints: CacheHints) -> Self;
+}
+```
+
+Handler type aliases (for annotation or building your own):
+
+```rust
+pub type PromptHandler =
+    Box<dyn Fn(serde_json::Map<String, serde_json::Value>)
+        -> Result<Vec<PromptMessage>, String> + Send + Sync + 'static>;
+pub type ResourceHandler =
+    Box<dyn Fn(&str) -> Result<Vec<ResourceContents>, String> + Send + Sync + 'static>;
+pub type ResourceTemplateHandler =
+    Box<dyn Fn(&str) -> Result<Vec<ResourceContents>, String> + Send + Sync + 'static>;
+pub type CompleteHandler =
+    Box<dyn Fn(&str, &CompleteRequestParams) -> Result<Vec<String>, String>
+        + Send + Sync + 'static>;
+#[cfg(feature = "elicitation")]
+pub type ElicitationHandler =
+    Arc<dyn Fn(ElicitRequestParams, RequestContext<RoleServer>)
+        -> Result<ElicitResult, String> + Send + Sync + 'static>;
+```
+
+Matching rules: `resources/read` checks the static resource map first (a static resource beats a matching template); templates match on their static prefix (everything before the first `{`, trailing `/` trimmed). Subscriptions use `subscriptions/listen` on protocol ≥ 2026-07-28 with the legacy `subscribe`/`unsubscribe` kept for older peers.
+
+### `CacheHints` (SEP-2549)
+
+```rust
+use rmcp::model::CacheScope; // Public (default) | Private
+
+pub struct CacheHints {
+    pub ttl_ms: u64,             // how long the client may cache, in ms
+    pub cache_scope: CacheScope,
+}
+impl CacheHints {
+    pub fn new(ttl_ms: u64, cache_scope: CacheScope) -> Self;
+}
+```
+
+Hints are stamped as top-level `ttlMs` / `cacheScope` fields on `list_prompts`, `list_resources`, `list_resource_templates`, and `read_resource` results — suppressed for peers below protocol 2026-07-28.
+
+### Message helpers
+
+```rust
+pub fn user_text(text: impl Into<String>) -> PromptMessage;        // Role::User
+pub fn assistant_text(text: impl Into<String>) -> PromptMessage;  // Role::Assistant
+pub fn text_contents(
+    uri: impl Into<String>,
+    mime_type: Option<impl Into<String>>,  // e.g. Some("text/markdown")
+    text: impl Into<String>,
+) -> ResourceContents;
+```
+
+## Elicitation
+
+**MRTR for tools (SEP-2322)** — available without any feature. A tool returns an `InputRequired` result instead of an error:
+
+```rust
+pub fn elicit_input(
+    message: impl Into<String>,
+    schema: ElicitationSchema,
+    request_state: Option<String>,   // opaque state carried across rounds
+) -> InputRequiredResult;
+
+/// Extract the `inputResponses` the client echoed back on the retried
+/// tools/call. None means "no prior round."
+pub fn input_responses(
+    request: &CallToolRequestParams,
+) -> Option<BTreeMap<String, serde_json::Value>>;
+```
+
+The elicitation rides under a single server-assigned key (`"input"`); the client echoes its response back under the same key.
+
+**Server→client elicitation (SEP-1034)** — behind the `elicitation` feature. Register one handler via `McpSurfaces::register_elicitation`, then call the wrapper from a tool body:
+
+```rust
+#[cfg(feature = "elicitation")]
+pub async fn elicit(
+    &self,
+    request: ElicitRequestParams,
+    context: RequestContext<RoleServer>,
+) -> Result<ElicitResult, rmcp::ErrorData>;
+```
+
+`elicit` probes the client's capabilities first and returns `ElicitationAction::Cancel` (rather than an error) if the client didn't advertise elicitation.
+
+## Tasks (SEP-2663)
+
+`io.modelcontextprotocol/tasks`. The `TaskManager` store always exists; `.with_task_support()` only advertises the extension (undeclared, the SDK rejects `tasks/get|update|cancel` with `-32601` before the handler runs). Inside a tool body, spawn an operation and return `CallToolResponse::Task(CreateTaskResult::new(task))`:
+
+```rust
+let task = server.spawn_task(TaskOptions::default(), |ctx| {
+    Box::pin(async move {
+        // ctx.cancelled() -> cooperative cancel (return Err(TaskExit::Cancelled))
+        // ctx.request_input(key, request).await -> mid-flight MRTR round
+        Ok(CallToolResult::success(vec![ContentBlock::text("done")]))
+    })
+});
+```
+
+## Per-tool-call authorization (`authz`)
+
+```rust
+pub struct McpDataContext {
+    pub ability: Option<Arc<nestrs::Ability>>,
+    pub pool: Option<Arc<sqlx::AnyPool>>,
+    pub principal: Option<Arc<nestrs::policies::Principal>>,
+}
+
+impl McpDataContext {
+    pub fn new() -> Self;
+    pub fn with_ability(mut self, a: Arc<Ability>) -> Self;
+    pub fn with_pool(mut self, p: Arc<sqlx::AnyPool>) -> Self;
+    pub fn with_principal(mut self, p: Arc<nestrs::policies::Principal>) -> Self;
+}
+```
+
+With a data context attached, `NestrsMcpServer`'s `call_tool` override opens a `TransactionSlot` per call, installs the ability + principal + request scope, dispatches, post-masks the response with `nestrs::mask_value` (the same walker HTTP/WS/GraphQL use; error results are never masked), then commits on success / rolls back on tool error.
+
+Task-local accessors for tool bodies:
+
+```rust
+pub fn current_mcp_ability() -> Option<Arc<Ability>>;              // re-exported at root
+pub fn current_mcp_transaction() -> Option<Arc<TransactionSlot>>; // re-exported at root
+// module path only (not re-exported at the root):
+pub fn nestrs_mcp::mcp_data_context::current_mcp_principal()
+    -> Option<Arc<nestrs::policies::Principal>>;
+```
+
+Pipeline helpers (what the override calls; also usable directly in tests):
+
+```rust
+pub async fn run_with_mcp_scopes<F, T>(
+    data_context: &McpDataContext,
+    slot: Option<Arc<TransactionSlot>>,
+    dispatch: F,
+) -> T
+where
+    F: Future<Output = T>;
+
+pub fn mask_response(resp: &mut CallToolResponse, ability: &Ability);
+pub fn is_tool_error(resp: &CallToolResponse) -> bool;
+pub async fn commit_or_rollback(slot: Option<Arc<TransactionSlot>>, resp: &CallToolResponse);
+pub fn install_tx_slot_in_scope(slot: Arc<TransactionSlot>);
+```
 
 ## `AdminClient`
+
+HTTP client for a running nestrs app's admin sidecar (reqwest + rustls-tls, 5-second timeout, no retries).
 
 ```rust
 use nestrs_mcp::runtime::AdminClient;
@@ -126,22 +467,360 @@ let routes = client.routes().await?;
 let providers = client.providers().await?;
 ```
 
-Construct with a `base_url` (no trailing `/__nestrs/*`) and an optional bearer token. All three methods apply the token if present. Request timeout is 5 seconds; no retries — the model decides whether to re-invoke.
+Wire types (`nestrs_mcp::runtime`):
+
+```rust
+pub struct AdminHealth { pub status: String, pub uptime_ms: u64, pub version: String }
+pub struct AdminProviders(pub Vec<LiveProviderSummary>);  // transparent serde
+pub struct AdminRoutes(pub Vec<LiveRouteSummary>);        // transparent serde
+
+// nestrs_mcp::introspection::registry
+pub struct LiveRouteSummary {
+    pub method: String,
+    pub path: String,
+    pub handler: String,              // module_path::handler
+    pub openapi_summary: Option<String>,
+}
+pub struct LiveProviderSummary {
+    pub type_name: String,
+    pub scope: String,                // "singleton" | "transient" | "request"
+}
+
+pub enum SnapshotError {
+    Http { status: u16, body: String },
+    Parse(serde_json::Error),
+    MissingField(&'static str),
+}
+```
+
+The app side: `nestrs = { features = ["admin"] }` + `NestApplication::use_admin(AdminOptions { addr, token })`, then `tokio::spawn(handle.serve())`. Token auth is `Authorization: Bearer <token>` header-only (query-string tokens are rejected); with no token the listener is loopback-only and 401s everything.
+
+## Introspection API
+
+Source-level parsing, independent of a running app:
+
+```rust
+// nestrs_mcp::introspection
+pub fn parse_workspace(path: &Path) -> Result<ParsedWorkspace>;
+
+pub struct SourceParser { /* root: PathBuf */ }
+impl SourceParser {
+    /// Errors if the path doesn't exist, isn't a directory,
+    /// or has no Cargo.toml.
+    pub fn new(root: impl AsRef<Path>) -> Result<Self, SourceParserError>;
+    pub fn parse(&self) -> Result<ParsedWorkspace, SourceParserError>;
+}
+
+pub struct ParsedWorkspace {
+    pub root: PathBuf,
+    pub modules: Vec<ModuleSummary>,
+    pub controllers: Vec<ControllerSummary>,
+    pub providers: Vec<ProviderSummary>,
+    pub dtos: Vec<DtoSummary>,
+    pub schedules: Vec<String>,
+    pub event_handlers: Vec<String>,
+    pub queue_processors: Vec<String>,
+    pub stats: WorkspaceStats,
+    pub warnings: Vec<ParserWarning>,
+}
+```
+
+Summary types (`introspection::source`):
+
+```rust
+pub struct ModuleSummary {
+    pub name: String,
+    pub file: String,
+    pub imports: Vec<String>,
+    pub controllers: Vec<String>,
+    pub providers: Vec<String>,
+    pub microservices: Vec<String>,
+    pub exports: Vec<String>,
+    pub re_exports: Vec<String>,
+}
+
+pub struct ControllerSummary {
+    pub name: String,
+    pub module_path: String,          // e.g. "myapp::users", inferred from the file
+    pub file: String,
+    pub prefix: Option<String>,        // from #[controller("/users")]
+    pub version: Option<String>,
+    pub host: Option<String>,
+    pub routes: Vec<RouteSummary>,
+    pub controller_guards: Vec<String>, // from #[routes(controller_guards = (...))]
+    pub state: Option<String>,         // from #[routes(state = T)]
+}
+
+pub struct ProviderSummary {
+    pub type_name: String,
+    pub file: String,
+    pub scope: Option<String>,        // "singleton" | "transient" | "request"
+    pub is_injectable: bool,
+}
+
+pub struct RouteSummary {
+    pub method: String,
+    pub path: String,
+    pub handler: String,
+    pub version: Option<String>,
+    pub guards: Vec<String>,
+    pub interceptors: Vec<String>,
+    pub pipes: Vec<String>,
+    pub filters: Vec<String>,
+    pub metadata: BTreeMap<String, String>,
+    pub body_type: Option<String>,      // e.g. "ValidatedBody<CreateUserDto>"
+    pub response_type: Option<String>,  // inferred from the handler's return type
+}
+
+pub struct WorkspaceStats {
+    pub files_scanned: usize,
+    pub modules: usize,
+    pub controllers: usize,
+    pub providers: usize,
+    pub routes: usize,
+    pub dtos: usize,
+    pub warnings: usize,
+}
+
+pub struct ParserWarning {
+    pub file: String,
+    pub line: usize,
+    pub kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SourceParserError {
+    WorkspaceNotFound(PathBuf),
+    NotADirectory(PathBuf),
+    NoCargoToml(PathBuf),
+    Io { path: PathBuf, source: std::io::Error },
+    Syn { file: String, message: String },
+}
+```
+
+DTO metadata (`introspection::metadata`):
+
+```rust
+pub struct DtoSummary {
+    pub name: String,
+    pub module_path: String,
+    pub file: String,
+    pub field_count: usize,
+    pub allow_unknown_fields: bool, // #[dto(allow_unknown_fields)]
+    pub expose_only: bool,          // #[dto(expose_only)]
+}
+
+pub struct DtoField {
+    pub name: String,
+    pub ty: String,       // e.g. "String", "Option<i64>" — generics kept as one string
+    pub optional: bool,
+    pub validators: Vec<Validator>,
+}
+
+// Serde shape: {"kind": "min_length", "value": 3} etc. (tag = "kind", snake_case)
+pub enum Validator {
+    IsString, IsEmail, IsNotEmpty, IsUuid, IsPositive, IsNegative, IsInt,
+    IsNumber, IsBoolean, IsUrl, IsOptional, ValidateNested, Expose, Exclude,
+    MinLength { value: u64 },
+    MaxLength { value: u64 },
+    Length { min: u64, max: u64 },
+    Min { value: String },
+    Max { value: String },
+    Matches { pattern: String },
+    Contains { substring: String },
+    Unknown { name: String, args: String }, // surfaced, never silently dropped
+}
+```
+
+The parser is strictly additive: unknown attributes become `ParserWarning`s, never parse failures.
+
+## Scaffold API
+
+```rust
+// nestrs_mcp::scaffold
+pub fn new_project(path: &Path, name: &str, transports: &[String]) -> Result<ScaffoldReport>;
+pub fn create_module(path: &Path, name: &str, _transports: &[String]) -> Result<ScaffoldReport>;
+pub fn create_resource(
+    path: &Path,
+    name: &str,
+    dto_fields: &[DtoFieldSpec],
+    transport: ResourceTransport,
+) -> Result<ScaffoldReport>;
+pub fn create_dto(path: &Path, name: &str, fields: &[DtoFieldSpec]) -> Result<ScaffoldReport>;
+pub fn generate_crud(path: &Path, spec: &CrudSpec) -> Result<ScaffoldReport>;
+
+pub struct ScaffoldReport {
+    pub files_created: Vec<String>,
+    pub files_modified: Vec<String>,
+}
+
+pub struct DtoFieldSpec {
+    pub name: String,
+    pub ty: String,           // e.g. "String", "Option<i64>"
+    pub optional: bool,
+    pub validators: Vec<String>,
+}
+
+#[serde(rename_all = "snake_case")]  // "http" | "graphql" | "ws" | "tcp" on the wire
+pub enum ResourceTransport { Http, Graphql, Ws, Tcp }
+
+pub struct CrudSpec {
+    pub resource: String,
+    pub fields: Vec<DtoFieldSpec>,
+    pub transports: Vec<ResourceTransport>,
+}
+```
+
+## Docs search API
+
+```rust
+// nestrs_mcp::docs
+pub struct DocStore { /* RwLock inner */ }
+impl DocStore {
+    pub fn new() -> Self;
+    /// Index CHANGELOG.md + docs/src/**/*.md + **/README.md under root.
+    /// Returns the number of files indexed.
+    pub fn build(&self, root: &Path) -> crate::Result<usize>;
+    pub fn sources(&self) -> Vec<DocSource>;
+    pub fn file_count(&self) -> usize;
+}
+
+pub struct DocSource {
+    pub path: PathBuf,
+    pub kind: DocKind,     // Changelog | Book | Readme | Other
+    pub bytes: usize,
+    pub content: String,
+}
+
+pub fn changelog_entries(source: &DocSource) -> Vec<ChangelogEntry>;
+pub struct ChangelogEntry { pub version: String, pub date: String }
+
+pub struct DocSearcher;
+impl DocSearcher {
+    pub fn search(
+        sources: &[DocSource],
+        query: &str,
+        scope: SearchScope,   // Changelog | Book | Readme | All
+        limit: usize,
+    ) -> Vec<DocHit>;
+}
+
+pub struct DocHit {
+    pub path: String,
+    pub kind: String,
+    pub score: f64,
+    pub context: Vec<String>, // up to 3 lines: match + one before + one after
+}
+```
+
+## Wizard API
+
+```rust
+// nestrs_mcp::wizard
+pub const DEFAULT_HTTP_ADDR: &str = "127.0.0.1:7777";
+
+pub struct InitArgs {
+    pub yes: bool,
+    pub no_interactive: bool,
+    pub transport: WizardTransport,   // Stdio | Http
+    pub http_addr: Option<String>,
+    pub start_http_server: bool,
+}
+
+pub fn run(args: InitArgs) -> anyhow::Result<WizardOutcome>;
+
+impl WizardTransport {
+    /// The JSON value for the nestrs server entry, given the HTTP URL
+    /// (used only when self == Http).
+    pub fn server_value(self, http_url: &str) -> ServerValue;
+}
+
+/// Either a JSON object (Claude Code / Cursor / VS Code) or a TOML
+/// inline table (Codex).
+pub enum ServerValue { Json(serde_json::Value), Toml(toml::Value) }
+
+pub struct WizardOutcome {
+    pub selected: Vec<Editor>,
+    pub written: Vec<WriteResult>,
+    pub transport: WizardTransport,
+    pub server_pid: Option<u32>,
+    pub server_url: Option<String>,     // http://<addr>/mcp when spawned
+    /// The spawned server's child handle, kept alive for the wizard's
+    /// lifetime (None unless --start-http-server was given).
+    pub _server: Option<spawn::SpawnedServer>,
+    pub dry_run: bool,
+}
+
+pub struct WriteResult {
+    pub editor: Editor,
+    pub path: PathBuf,
+    pub outcome: WriteOutcome,          // Created | Added | Updated | NoChange
+}
+
+pub enum Editor {
+    ClaudeCodeProject,  // ./.mcp.json            (mcpServers)
+    ClaudeCodeGlobal,   // ~/.claude.json         (mcpServers)
+    Cursor,             // ~/.cursor/mcp.json     (mcpServers)
+    VsCodeCopilot,      // ./.vscode/mcp.json     (servers)
+    Codex,              // ~/.codex/config.toml  ([mcp_servers])
+}
+impl Editor {
+    pub const fn all() -> [Editor; 5];
+    pub fn path(self, cwd: &Path) -> anyhow::Result<PathBuf>;
+    pub fn top_level_key(self) -> &'static str;
+    pub fn toml_table(self) -> &'static str;
+    pub fn is_toml(self) -> bool;
+    pub fn label(self) -> &'static str;
+}
+```
+
+## Error type
+
+```rust
+pub enum Error {
+    Io(std::io::Error),
+    Parse(String),
+    WorkspaceNotFound(String),
+    FileNotFound(String),
+    InvalidArgument(String),
+    Scaffold(String),
+    Docs(String),
+    Network(String),
+    Admin(String),
+    Other(anyhow::Error),
+}
+pub type Result<T> = std::result::Result<T, Error>;
+```
 
 ## Error conventions
 
-- **Tool-level failure** (operation ran but failed): the tool returns a `CallToolResult::error` so the model can see the message and recover. Examples: file not found, parse error, app not reachable.
-- **Protocol-level failure** (bad params, server can't process): the tool returns `Err(McpError::invalid_params(...))`.
+Tool bodies return `Result<Json<...>, rmcp::ErrorData>`:
+
+- **Operational failure** (operation ran but failed — file not found, parse error, app not reachable, scaffold failure): `Err(ErrorData::internal_error(msg))` — the message is visible to the model, which can read it and recover.
+- **Bad parameters** (unknown module / controller / provider / DTO / route name): `Err(ErrorData::invalid_params("module `x` not found"))`.
+- **Success**: a `Json<T>` payload — typed value in `structuredContent` (with an `outputSchema` stamped from the return type) plus a text fallback block.
 
 ## Embedding in another binary
 
-`nestrs-mcp` is a library as well as a binary. Embedders (e.g. a future `nestrs mcp` subcommand in the CLI) can mount `NestrsMcpServer` directly without spawning a subprocess:
+`nestrs-mcp` is a library as well as a binary. Each area handler is a standalone `ServerHandler`, so you can serve any subset without spawning a subprocess:
 
 ```rust
 use nestrs_mcp::server::NestrsMcpServer;
+use nestrs_mcp::tools::introspection::IntrospectionTools;
+use rmcp::service::serve_server;
+use rmcp::transport::stdio;
 
-let server = NestrsMcpServer::default();
-serve_server(server, transport).await?;
+// Option A: one area's tools on stdio
+let running = serve_server(IntrospectionTools, stdio()).await?;
+
+// Option B: the wrapper (surfaces / tasks / authz; no tools)
+let server = NestrsMcpServer::new()
+    .with_surfaces(surfaces)
+    .with_task_support();
+let running = serve_server(server, stdio()).await?;
 ```
 
-The `nestrs-cli` Cargo manifest already has `nestrs-mcp` as an optional dep behind an `mcp` feature so the subcommand is a one-file follow-up.
+`rmcp` is not re-exported — depend on it directly (`rmcp = { version = "3.1", default-features = false, features = ["server", "transport-io"] }`, plus `transport-streamable-http-server` for HTTP).
+
+The `nestrs-cli` Cargo manifest carries `nestrs-mcp` as an optional dependency behind its `mcp` feature (`mcp = ["dep:nestrs-mcp", "nestrs-mcp/admin"]`) so a future `nestrs-cli mcp` subcommand can serve the full tool set in-process — the dependency is stubbed (off by default, no subcommand yet), so existing CLI builds are unaffected.

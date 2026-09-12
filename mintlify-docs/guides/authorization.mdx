@@ -1,0 +1,802 @@
+---
+title: "Authorization: abilities, guards, and row-level policies"
+description: "Deny-by-default, CASL-style authorization for nestrs: build Abilities with AbilityBuilder, guard routes with PoliciesGuard and #[check_policies], enforce per-row rules with RowPredicate and the authorized repository methods, and strip unauthorized fields from responses with the masking interceptor."
+---
+
+Authorization answers a different question than authentication. `authn` (the [security guide](/guides/security)) verifies the JWT and tells you *who* is calling; `authz` decides *what that caller may do* — which routes they can hit, which rows they can see, and which fields survive the response.
+
+nestrs ships a CASL-style authorization model with a deny-by-default posture:
+
+- An **empty `Ability` denies everything** — no rule, no access.
+- **No `Ability` in request scope is an error, not a silent pass.** The authorized repository paths and `CrudService` (under `authz-row-level`) return `sqlx::Error::Protocol` rather than falling back to unfiltered queries.
+- **A row-level predicate with no principal denies** — the runtime fails loud instead of leaking rows.
+- **Reads are invisible, writes are denied.** A row the caller can't read comes back as `Ok(None)` / an empty list; a write the caller can't perform comes back as an error.
+
+## Installation
+
+Authorization is opt-in via Cargo features, scoped so you only pay for the layers you use:
+
+| Feature | What it enables |
+|---|---|
+| `authz` | The core engine: `Ability` / `AbilityBuilder`, `PoliciesGuard`, `#[check_policies(...)]` route metadata, `PoliciesModule::register(PoliciesOptions)`. Pairs with `authn`, which supplies the verified caller identity. |
+| `authz-row-level` | Enables `authz` + `database-sqlx`. The pre-built predicates (`nestrs::predicates`), `Repository::find_many_authorized(FindManyParams)`, and mandatory application of the `Ability`'s row-level rules by every `CrudService` method (deny-closed when no `Ability` is in request scope). |
+| `ws-authz` / `graphql-authz` | The same ability + principal slots for WebSocket and GraphQL transports (see [Beyond HTTP](#beyond-http)). |
+
+```toml
+[dependencies]
+nestrs = { version = "1.0.0", features = ["authn", "authz", "authz-row-level"] }
+```
+
+<Note>
+Custom predicate **closures** only need `authz` — the blanket `RowPredicate` impl lives in the core module. The `authz-row-level` flag gates the *enforcement seam*: the repository methods that push rules into `WHERE` clauses and the `CrudService` methods that apply them to every read and write.
+</Note>
+
+## The ability model
+
+An `Ability` is an ordered list of additive grants (`Rule`s), built with `AbilityBuilder`:
+
+```rust
+use nestrs::prelude::*;
+use serde_json::json;
+
+// A Conditions map is a plain JSON object.
+let tenant_12: Conditions = json!({ "tenant_id": 12 }).as_object().unwrap().clone();
+
+let ability = Ability::builder()
+    // Anyone may read posts, all fields.
+    .can(Action::Read, "posts")
+    // Anyone may create posts.
+    .can(Action::Create, "posts")
+    // Read documents, but only rows whose tenant_id is 12.
+    .can_with_conditions(Action::Read, "documents", tenant_12)
+    // Read documents, but only these fields (drives response masking).
+    .can_on_fields(Action::Read, "documents", vec!["id".into(), "title".into()])
+    .build();
+```
+
+### The vocabulary
+
+- **`Action`** — `Read`, `Create`, `Update`, `Delete`, `Manage` (a wildcard that satisfies every other action on the same subject, CASL convention), or `Custom(String)` for domain verbs like `"publish"`. The wildcard matches in both directions: a `Manage` rule grants any action, and `can(&Action::Manage, ...)` asks "may the caller do *anything* here".
+- **`Subject`** — `Subject::Type(String)` matches a *type* of resource (`"posts"`); `Subject::Instance(json)` matches one concrete document, which is when `conditions` and row predicates get evaluated. Instances may use the CASL wire shape `{"type": "Post", "attributes": {...}}` — attributes under `"attributes"` — or be a bare row.
+- **`Conditions`** — a `serde_json::Map<String, Value>` of `field: value` equality constraints, checked against the instance's fields with exact JSON equality (`"12"` the string never equals `12` the number; a missing field matches only a `null` condition value).
+- **`Rule`** — one grant: `action` + `subject_type` (`&'static str` in the builder) + optionally `fields` (an allow-list), `conditions`, and a `predicate` (a [`RowPredicate`](#rowpredicate-two-layers)). `None` on each optional slot means "no restriction of that kind".
+
+### Builder methods
+
+| Method | Grants |
+|---|---|
+| `can(action, subject_type)` | The action on every instance of the type, unconditionally. |
+| `can_with_conditions(action, subject_type, conditions)` | The action only on instances whose fields satisfy every `field: value` pair. |
+| `can_on_fields(action, subject_type, fields)` | The action over only the listed field names — this is what the [masking interceptor](#response-masking) enforces. |
+| `can_with_predicate(action, subject_type, fields, predicate)` | The action only on rows the predicate accepts. An empty `fields` vec means no field restriction. |
+
+### Matching semantics: first match wins
+
+`Ability` resolves two different questions, with different semantics:
+
+- **`can(action, subject)`** — *any* matching rule grants the action (`.any()`).
+- **`allowed_fields` / `constraint` / `predicate`** — the *first* matching rule's value is used (`.find()`).
+
+The practical consequences:
+
+1. **Put restrictive rules before broad grants.** If a broad `.can(Action::Read, "posts")` comes first, it is also the first match for fields/conditions/predicate lookups — its `None` values win and the restrictive rule you added later is never consulted for them.
+2. **There is no `cannot`.** Rules are additive grants only — a CASL `cannot()` exception rule has no equivalent. If a broad grant exists, it grants; if you need "read only your own rows", express that with one rule carrying a predicate, not a broad grant plus a restrictive one.
+
+## Registering and installing the ability
+
+Two pieces of wiring make the ability visible to the framework:
+
+1. **`PoliciesModule::register(PoliciesOptions::new(ability))`** — a dynamic module that registers the `Ability` and `PoliciesGuard` in the DI container (so `#[use_guards(PoliciesGuard)]` resolves).
+2. **`install_policies_middleware`** — an axum middleware that takes the `Arc<Ability>` via router state and stashes it in both the request extensions (where the guard and the masking interceptor read it) and a per-task slot (where the authorized repository methods read it).
+
+```rust
+use nestrs::prelude::*;
+
+fn app_ability() -> Ability {
+    Ability::builder().can(Action::Read, "posts").build()
+}
+
+#[module(imports = [PoliciesModule::register(PoliciesOptions::new(app_ability()))])]
+struct AppModule;
+```
+
+To make the same ability available on every request, layer the middleware onto the router (see the [worked example](#worked-examples) for the full picture):
+
+```rust
+let ability: Arc<Ability> = Arc::new(Ability::builder().can(Action::Read, "posts").build());
+
+let app = NestFactory::create::<AppModule>();
+let router: axum::Router = app
+    .into_router()
+    .layer(axum::middleware::from_fn_with_state(
+        ability,
+        install_policies_middleware,
+    ));
+```
+
+The middleware pair is independent — `install_authn_middleware` verifies the bearer token and (when `authz` is enabled) also installs the `policies::Principal` into its per-task slot, and `install_policies_middleware` installs the ability. Both must wrap your routes because guards and handlers run inside them.
+
+Inside a handler you can pull the request-scoped ability explicitly:
+
+```rust
+use nestrs::current_ability;
+
+if let Some(ability) = current_ability() {
+    // Arc<Ability> — same value the middleware installed.
+}
+```
+
+<Note>
+`nestrs::with_ability(ability, future)` and `nestrs::with_principal(principal, future)` are the test-scoped equivalents — they run a future with the slot populated, no router required. Production code should rely on the middlewares.
+</Note>
+
+## Guarding routes
+
+Route-level checks use the `#[check_policies(...)]` attribute plus the `PoliciesGuard`, normally chained behind `AuthnGuard` (which produces the verified identity):
+
+```rust
+use nestrs::prelude::*;
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/api")]
+struct PostsController;
+
+#[routes(state = AppState)]
+impl PostsController {
+    #[get("/posts")]
+    #[use_guards(AuthnGuard, PoliciesGuard)]
+    #[check_policies("read:posts")]
+    async fn list_posts() -> Json<serde_json::Value> {
+        // Reached only if the caller can "read:posts".
+        Json(serde_json::json!({ "ok": true }))
+    }
+}
+```
+
+- Tokens are `"action:Subject"`, comma-separated for multiple checks (`#[check_policies("read:posts", "update:posts")]`). Action names are case-insensitive; anything else parses as `Action::Custom`.
+- The guard fails closed with **403** in every misconfiguration: no ability on the request (middleware missing), no `#[check_policies]` metadata on the route, the action not granted, or conditions that the principal doesn't satisfy.
+
+### Conditions at the guard
+
+When the matched rule carries `conditions`, the guard re-evaluates them against the *principal*, built as `{"type": "User", "attributes": {"sub": ..., "roles": [...]}}`. Exact JSON equality applies, so `{"sub": "alice"}` is the way to express a per-user grant:
+
+```rust
+let only_alice: Conditions = json!({ "sub": "alice" }).as_object().unwrap().clone();
+
+Ability::builder()
+    .can_with_conditions(Action::Read, "admin-panel", only_alice)
+    .build()
+```
+
+<Warning>
+`roles` is compared as a JSON **array**, so a string condition like `{"roles": "admin"}` can never match — the principal's `roles` always serializes as an array. For role gates, prefer `#[roles("admin")]` with `AuthnGuard` (verified against the token's roles, any-of), and reserve `can_with_conditions` for field-equality checks.
+</Warning>
+
+## Row-level authorization
+
+Route guards decide *"may this caller hit this endpoint at all"*. Row-level authorization decides *"which rows may this caller see, and which fields"* — enforced inside the repository, not in handler code.
+
+### The Principal
+
+`nestrs::policies::Principal` is the caller identity row-level rules are evaluated against — `{ subject, roles, claims }`, built from the verified `PrincipalIdentity` when `authn` is enabled:
+
+```rust
+use nestrs::policies::Principal; // module-qualified on purpose
+```
+
+<Note>
+`nestrs::Principal` (root) is the *axum extractor* newtype from `authn`. The row-level value is deliberately module-qualified as `nestrs::policies::Principal` because only one can own the crate-root name.
+</Note>
+
+The principal lives in a per-task slot, installed by `install_authn_middleware` (HTTP), the WebSocket scope (`run_in_ws_scope`), the GraphQL context (`graphql_router_with_context`), or `with_principal` in tests. Handlers read it with `nestrs::current_principal() -> Option<Arc<policies::Principal>>`.
+
+### RowPredicate: two layers
+
+A `RowPredicate` answers *"does this row belong to this principal?"* and has two layers:
+
+```rust
+use nestrs::RowPredicate; // also in nestrs::policies
+use nestrs::policies::Principal;
+use nestrs::Conditions;
+
+pub trait RowPredicate: Send + Sync {
+    // Layer 1 — always on: evaluated post-load against every candidate row.
+    fn check(&self, row: &serde_json::Value, principal: &Principal) -> bool;
+
+    // Layer 2 — optimization: a per-request pushdown hint the repository
+    // compiles into the WHERE clause. None (default) = post-filter only.
+    fn sql_conditions(&self, principal: &Principal) -> Option<Conditions> { None }
+}
+```
+
+- **`check` is the enforcement.** Every authorized read filters its rows through it (post-load), every authorized write requires the candidate row to pass it. It cannot be skipped by a missing pushdown.
+- **`sql_conditions` is the optimization.** When it returns a non-empty conditions map, the repository compiles it into `WHERE json_extract(data, '$.field') = $N` so the database filters before rows are loaded. The closure re-check stays as defense in depth.
+
+Any closure `Fn(&serde_json::Value, &Principal) -> bool + Send + Sync` implements `RowPredicate` through a blanket impl. The signature is the leak-prevention guarantee: a predicate sees the row and the principal, nothing else — no headers, no environment, no ambient state.
+
+```rust
+use nestrs::policies::Principal;
+use nestrs::{Ability, AbilityBuilder, Action};
+
+let ability = Ability::builder()
+    .can_with_predicate(
+        Action::Read,
+        "posts",
+        vec![], // no field restriction
+        |row: &serde_json::Value, p: &Principal| row["author"] == p.subject,
+    )
+    .build();
+```
+
+Custom closures always take the post-load path — they can't be compiled to SQL. For pushdown, use a pre-built predicate or implement `sql_conditions` yourself.
+
+<Note>
+The pushdown renders `json_extract(...)`, which is SQLite-flavored. On Postgres/MySQL the `database-sqlx` `AnyPool` JSON-blob path needs a dialect-aware renderer — a known limitation, so the post-load closure re-check is what guarantees correctness regardless of backend.
+</Note>
+
+### Pre-built predicates
+
+`nestrs::predicates` (under `authz-row-level`) ships ten ready predicates, each a small struct with defaulted column names and builder methods:
+
+| Predicate | Grants when | SQL pushdown |
+|---|---|---|
+| `AuthorIsCurrentUser` | `row["author"] == principal.subject` | `{author: subject}` |
+| `BelongsToUser` | `row["user_id"] == principal.subject` | `{user_id: subject}` |
+| `WithinTenant` | `row[row_field] == claims[claim_field]` | when the claim is present; else post-filter |
+| `OwnerOrAdmin` | `row[field] == subject` **or** admin role | admins get no pushdown (closure allows all); others the collapsed equality |
+| `TenantOrAdmin` | tenant claim matches **or** admin role | same conditional strategy |
+| `SelfOrAdmin` | the row *is* the caller (`row["id"] == subject`) **or** admin | same conditional strategy |
+| `PublishedOnly` | `row[field] == true` | static `{field: true}` — works without a principal |
+| `NotDeleted` | the field is absent or `null` | static `IS NULL` |
+| `PublicOrOwner` | `row[visibility] == public_value` **or** owned by caller | none — post-filter only |
+| `HasRole` | the principal holds the role | none — see note below |
+
+Realistic examples:
+
+```rust
+use nestrs::predicates::*;
+
+// Posts and articles authored by the caller (column defaults to "author").
+AuthorIsCurrentUser::new()
+AuthorIsCurrentUser::with_field("creator")
+
+// Orders/uploads that belong to the caller (column defaults to "user_id").
+BelongsToUser::new()
+BelongsToUser::with_field("owner_id")
+
+// Multi-tenant rows: the row's "tenant_id" must equal the principal's
+// "tenant_id" claim. No claim => the closure denies tenant rows.
+WithinTenant::new()
+WithinTenant::with_row_field("org_id").with_claim_field("org_id")
+
+// Owner-only with an admin override (roles contain "admin").
+OwnerOrAdmin::new()
+OwnerOrAdmin::with_admin_role("moderator")
+
+// Tenant scope with an admin override.
+TenantOrAdmin::new()
+
+// User-shaped tables: the row IS the caller (row["id"] == subject), or admin.
+SelfOrAdmin::new()
+
+// Drafts stay invisible — flag column, no principal needed.
+PublishedOnly::new()
+PublishedOnly::with_field("is_live")
+
+// Soft-deleted rows (deleted_at set) never come back from authorized reads.
+NotDeleted::new()
+NotDeleted::with_field("removed_at")
+
+// visibility == "public" or owner == caller; post-filter only, so combine
+// with a declarative condition or paginate carefully on large tables.
+PublicOrOwner::new()
+PublicOrOwner::with_public_value("open")
+
+// A role gate expressed as a row predicate (composes with the others).
+HasRole::new("auditor")
+```
+
+Attach one with `can_with_predicate` — the rule's subject type is the entity's **table name** (see below):
+
+```rust
+Ability::builder()
+    .can_with_predicate(Action::Read, "posts", vec![], AuthorIsCurrentUser::new())
+    .can_with_predicate(Action::Create, "posts", vec![], AuthorIsCurrentUser::new())
+    .build()
+```
+
+<Note>
+`HasRole` as a *pure* role gate wastes a fetch for principals without the role (the closure denies every row after load). Prefer `#[roles(...)]` with `AuthnGuard` for route-level gates; keep `HasRole` for composing role access with other row predicates.
+</Note>
+
+Comparisons use JSON semantics: `"12"` the string is not `12` the number, and the field values live inside the entity's JSON blob (the `data` column), so type your JSON consistently when you write rows.
+
+## The authorized repository
+
+Under `authz-row-level`, the repository and `CrudService` enforce the ability for you — handler code stays policy-free.
+
+### Entities and the `(id, data)` shape
+
+Authorized storage works over the `Entity` trait: each entity declares its table, decodes itself from a row, and is persisted as a JSON blob in a `data TEXT` column, so the same code works on every SQL backend:
+
+```rust
+use nestrs::Entity;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Post {
+    id: Option<i64>,
+    author: String,
+    body: String,
+}
+
+impl Entity for Post {
+    const TABLE: &'static str = "posts";
+    // ID_COLUMN defaults to "id", JSON_COLUMN to "data".
+
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+
+    fn from_row(row: &sqlx::any::AnyRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        let id: i64 = row.try_get("id")?;
+        let data: String = row.try_get("data")?;
+        let parsed: serde_json::Value = serde_json::from_str(&data)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        let field = |k: &str| {
+            parsed.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string()
+        };
+        Ok(Post { id: Some(id), author: field("author"), body: field("body") })
+    }
+}
+```
+
+The table needs the matching shape (create it with your usual migration tooling):
+
+```sql
+CREATE TABLE IF NOT EXISTS posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data TEXT NOT NULL
+);
+```
+
+The rule's subject type is the entity's **table name** — `find_*_authorized` evaluates every check against `Subject::Type(T::TABLE)`. A rule for `"Post"` never matches a `Post` entity whose `TABLE` is `"posts"`.
+
+### Authorized reads
+
+`Repository<T>` (root-exported under `database-sqlx`) offers plain methods (`find_one`, `find_all`, `find_all_paged`, `find_where`, `delete`, `count`) plus the authorized variants (requiring `authz-row-level`):
+
+| Method | Behavior |
+|---|---|
+| `find_one_authorized(action, id)` | Deny → `Ok(None)`; rule conditions → compiled into the `WHERE`; predicate → post-load check, invisible rows return `Ok(None)`. |
+| `find_all_authorized(action)` | Deny → `Ok(vec![])`; conditions pushed down; predicate post-filters survivors. |
+| `find_all_authorized_paged(action, limit, offset)` | Pagination with an exactness gate (below). |
+| `find_many_authorized(action, params)` | The flexible one: rule conditions + predicate pushdown + your own extra `WHERE` fragment, with `FindManyParams` pagination. |
+
+All four read the ability and principal from the request scope — call them behind `install_policies_middleware` and `install_authn_middleware`.
+
+**Pagination semantics.** `find_all_authorized_paged` only pushes `LIMIT/OFFSET` into SQL when the result would be exact — either no predicate, or the predicate's `sql_conditions` render non-empty for the current principal. When a predicate can't be pushed down (custom closures, `PublicOrOwner`, an admin under `OwnerOrAdmin`), it transparently falls back to `find_all_authorized` + a Rust-side window slice: the page is always identical to filtering the full set and slicing, at the cost of loading the filtered set.
+
+<Warning>
+The `FindManyParams::limit` field applies to **fetched** rows: a predicate without SQL pushdown filters *after* the limit, so pages can come back short even when more matches exist past the boundary. Pre-built predicates that push down paginate exactly; with closure predicates, fetch and filter yourself or expect short pages.
+</Warning>
+
+`find_many_authorized` composes your own filter with the policy:
+
+```rust
+use nestrs::{Action, FindManyParams};
+use serde_json::json;
+
+let params = FindManyParams {
+    limit: Some(10),
+    offset: None,
+    // Your fragment uses $1..$k; the policy-derived binds continue at $k+1.
+    extra_where: Some("json_extract(data, '$.status') = $1".into()),
+    extra_binds: vec![json!("draft")],
+};
+let rows: Vec<Post> = repo.find_many_authorized(Action::Read, params).await?;
+```
+
+### Seeding: repo_crud_create
+
+`Repository::repo_crud_create(&entity)` inserts through the same JSON-blob path *without* consulting an ability. It exists for seeding, factories, and tests — under `authz-row-level` every `CrudService::create` is deny-closed, so this is the deliberate escape hatch for rows nobody has asked to create yet (use it in request paths never, in `main`/fixtures freely).
+
+### CrudService: mandatory enforcement
+
+With `authz-row-level` enabled, `CrudService<T>` (also root-exported under `database-sqlx`) applies the request-scoped ability in *every* method — there is no opt-out, no `skip_auth`:
+
+| Method | Enforcement |
+|---|---|
+| `create(value)` | `Create` must be granted **and** the predicate must accept the *candidate* row — `AuthorIsCurrentUser` rejects rows authored as someone else before they exist. |
+| `read(id)` | Delegates to `find_one_authorized(Read, id)` — deny/invisible → `Ok(None)`. |
+| `update(id, value)` | The current row is fetched through the **update** action's own visibility rule (invisible → `Ok(None)`), and both the current and the replacement rows must satisfy the predicate — a row can't be moved out of the caller's scope. |
+| `delete(id)` | Invisible → `Ok(false)`; predicate-rejected → error. |
+| `list()` / `list_page(limit, offset)` | `find_all_authorized(Read)` and its paged twin. |
+
+### Deny semantics summary
+
+| Situation | Reads | Writes (`CrudService`) |
+|---|---|---|
+| No `Ability` in request scope | `Err(Protocol("find_*_authorized requires install_policies_middleware ...")` / `"CrudService::{op} requires an Ability in request scope ...")` | Same error — deny-closed, not a fallback |
+| Action not granted | `Ok(None)` / `Ok(vec![])` — invisible | `Err(Protocol("policy denied: {op} on {table}"))` |
+| Row filtered by conditions (pushdown) | Invisible | Update → `Ok(None)`, delete → `Ok(false)` |
+| Row rejected by predicate | `Ok(None)` / filtered from lists | `Err(Protocol("policy denied: {op} on {table} (row predicate)"))` |
+| Predicate in scope, no principal | `Err(Protocol("row-level predicate requires a Principal in request scope ..."))` | Same — fail loud |
+
+## Response masking
+
+Field restrictions from `can_on_fields` are enforced on the way *out* by `PolicyMaskingInterceptor`, applied with the `interceptor_layer!` macro:
+
+```rust
+use nestrs::prelude::*; // brings interceptor_layer!
+use nestrs::{Action, PolicyMaskingInterceptor};
+use std::sync::Arc;
+
+let ability: Arc<Ability> = Arc::new(
+    Ability::builder()
+        .can_on_fields(
+            Action::Read,
+            "Post",
+            vec!["type".into(), "id".into(), "title".into()],
+        )
+        .build(),
+);
+
+let app = NestFactory::create::<AppModule>();
+let router: axum::Router = app
+    .into_router()
+    .layer(interceptor_layer!(PolicyMaskingInterceptor))
+    .layer(axum::middleware::from_fn_with_state(
+        ability,
+        install_policies_middleware,
+    ));
+```
+
+**Layer order matters.** The interceptor reads the `Arc<Ability>` from the request extensions, so it must run *inside* `install_policies_middleware`. With axum, the last `.layer()` is the outermost — so add the interceptor layer *before* the policies layer, as above. Reversed, the interceptor sees no ability and passes responses through untouched.
+
+What it does to a JSON response:
+
+- Looks for a top-level `"type": "Post"` string field — the subject marker. Any JSON object (at any nesting depth, including inside arrays) carrying it is treated as that subject type.
+- Asks `allowed_fields(Read, Subject::Type(name))` — the first matching rule's field allow-list. Fields not in the list are removed; the `"type"` field itself must be allow-listed to survive.
+- Recurses into nested objects and arrays of objects.
+
+What passes through unchanged:
+
+- Responses with no ability on the request (authz middleware not installed) — never mask blindly.
+- Non-JSON responses (content-type check) and unparseable JSON.
+- Bodies without a `"type"` string marker — a no-op rather than a hard fail.
+- Bodies at or above the size cap: 1 MiB by default, configurable via `MaskingConfig::max_body_bytes` (over-cap bodies pass through unmasked with a `tracing` warning, so a hostile or accidental giant body can't OOM the server).
+
+For transports that build payloads directly, the walker is public: `nestrs::mask_value(&mut value, &ability)` masks a `serde_json::Value` in place, and `nestrs::mask_response(response, &ability, cfg)` masks a constructed response. `nestrs::json_response(status, body)` builds a JSON response in one call.
+
+<Warning>
+Masking keys off the response's `"type"` field, which is your **wire type** — it is not automatically your entity's table name. A rule for `"posts"` (row-level) and a rule for `"Post"` (masking) are different namespaces: keep them deliberately aligned or distinct, but be aware they are matched against different strings.
+</Warning>
+
+## Worked examples
+
+<AccordionGroup>
+  <Accordion title="Full stack: posts with author-only access">
+
+Entity, service, controller, module, and wiring — one runnable picture. Reads and creates are predicate-filtered end-to-end; the guard also requires `read:posts` before the handler runs.
+
+```rust
+use nestrs::policies::Principal;
+use nestrs::predicates::AuthorIsCurrentUser;
+use nestrs::prelude::*;
+use nestrs::{CrudService, Entity, Repository};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::sync::Arc;
+
+// ---- Entity (JSON-blob storage) ----
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Post {
+    id: Option<i64>,
+    author: String,
+    body: String,
+}
+
+impl Entity for Post {
+    const TABLE: &'static str = "posts";
+
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+
+    fn from_row(row: &sqlx::any::AnyRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        let id: i64 = row.try_get("id")?;
+        let data: String = row.try_get("data")?;
+        let parsed: serde_json::Value = serde_json::from_str(&data)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        let field = |k: &str| {
+            parsed.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string()
+        };
+        Ok(Post { id: Some(id), author: field("author"), body: field("body") })
+    }
+}
+
+// ---- Service: thin wrapper over the enforcing CrudService ----
+
+#[injectable]
+pub struct PostsService {
+    db: Arc<SqlxDatabaseService>,
+}
+
+impl PostsService {
+    async fn crud(&self) -> Result<CrudService<Post>, HttpException> {
+        let pool = self
+            .db
+            .pool_arc()
+            .await
+            .map_err(InternalServerErrorException::new)?;
+        Ok(CrudService::new(pool))
+    }
+
+    pub async fn list(&self) -> Result<Vec<Post>, HttpException> {
+        self.crud()
+            .await?
+            .list()
+            .await
+            .map_err(|e| InternalServerErrorException::new(e.to_string()))
+    }
+
+    pub async fn create(&self, value: serde_json::Value) -> Result<Post, HttpException> {
+        self.crud()
+            .await?
+            .create(value)
+            .await
+            .map_err(|e| InternalServerErrorException::new(e.to_string()))
+    }
+}
+
+// ---- Controller: route guard + delegate to the service ----
+
+#[controller(prefix = "/api")]
+struct PostsController;
+
+#[routes(state = PostsService)]
+impl PostsController {
+    #[get("/posts")]
+    #[use_guards(AuthnGuard, PoliciesGuard)]
+    #[check_policies("read:posts")]
+    async fn list(State(s): State<Arc<PostsService>>) -> Result<Json<Vec<Post>>, HttpException> {
+        Ok(Json(s.list().await?))
+    }
+
+    #[post("/posts")]
+    #[use_guards(AuthnGuard, PoliciesGuard)]
+    #[check_policies("create:posts")]
+    async fn create(
+        State(s): State<Arc<PostsService>>,
+        Json(mut payload): Json<serde_json::Value>,
+    ) -> Result<Json<Post>, HttpException> {
+        // The caller's own subject — the predicate would reject any other
+        // author anyway; setting it server-side makes that explicit.
+        let p: Arc<Principal> = nestrs::current_principal()
+            .ok_or(UnauthorizedException::new("no principal on request"))?;
+        let Some(obj) = payload.as_object_mut() else {
+            return Err(BadRequestException::new("expected a JSON object body"));
+        };
+        obj.insert("author".into(), json!(p.subject));
+        Ok(Json(s.create(payload).await?))
+    }
+}
+
+// ---- Module + wiring ----
+
+const JWT_PUBLIC_PEM: &str = "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n";
+
+fn posts_ability() -> Ability {
+    Ability::builder()
+        .can_with_predicate(Action::Create, "posts", vec![], AuthorIsCurrentUser::new())
+        .can_with_predicate(Action::Read, "posts", vec![], AuthorIsCurrentUser::new())
+        .build()
+}
+
+#[module(
+    imports = [
+        SqlxDatabaseModule,
+        AuthnModule::register(
+            AuthnOptions::new(JWT_PUBLIC_PEM).with_issuer("https://auth.example.com")
+        ),
+        PoliciesModule::register(PoliciesOptions::new(posts_ability())),
+    ],
+    providers = [PostsService],
+    controllers = [PostsController],
+)]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    nestrs::install_default_drivers();
+
+    // Call before NestFactory::create, then import the module (as above).
+    let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let _ = SqlxDatabaseModule::for_root(db_url);
+
+    let authn_options = AuthnOptions::new(JWT_PUBLIC_PEM);
+    let jwt_svc: Arc<JwtService> = build_jwt_service(&authn_options);
+    let ability: Arc<Ability> = Arc::new(posts_ability());
+
+    let app = NestFactory::create::<AppModule>();
+    let router: axum::Router = app
+        .into_router()
+        .layer(axum::middleware::from_fn_with_state(
+            jwt_svc,
+            install_authn_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            ability,
+            install_policies_middleware,
+        ));
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    axum::serve(listener, router).await.unwrap();
+}
+```
+
+Behavior, end to end:
+
+- No token → `AuthnGuard` 401s before the policy is even consulted.
+- A token whose ability lacks `read:posts` → 403 from `PoliciesGuard`.
+- A valid caller listing → only their own posts (`AuthorIsCurrentUser` post-filter + pushdown).
+- A create naming someone else as author → `policy denied: create on posts (row predicate)` — the candidate row is judged before it exists.
+- Migration table shape: `posts (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)`; seed initial rows with `Repository::<Post>::new(pool).repo_crud_create(&post)`.
+
+  </Accordion>
+  <Accordion title="Field masking on the way out">
+
+Restrict a wire subject to `type`, `id`, and `title`, and let the interceptor strip everything else from JSON responses:
+
+```rust
+use nestrs::prelude::*;
+use nestrs::{Action, PolicyMaskingInterceptor};
+use std::sync::Arc;
+
+let ability: Arc<Ability> = Arc::new(
+    Ability::builder()
+        .can_on_fields(
+            Action::Read,
+            "Post",
+            vec!["type".into(), "id".into(), "title".into()],
+        )
+        .build(),
+);
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/api")]
+struct PostsController;
+
+#[routes(state = AppState)]
+impl PostsController {
+    #[get("/post")]
+    async fn get_post() -> Json<serde_json::Value> {
+        // The "type" field marks the subject; "body" is not allow-listed.
+        Json(serde_json::json!({
+            "type": "Post",
+            "id": 1,
+            "title": "hello",
+            "body": "secret draft text"
+        }))
+    }
+}
+
+#[module(controllers = [PostsController], providers = [AppState])]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let app = NestFactory::create::<AppModule>();
+    let router: axum::Router = app
+        .into_router()
+        .layer(interceptor_layer!(PolicyMaskingInterceptor))
+        .layer(axum::middleware::from_fn_with_state(
+            ability,
+            install_policies_middleware,
+        ));
+    // ... serve the router ...
+}
+```
+
+The response body leaves as `{"type": "Post", "id": 1, "title": "hello"}` — `body` is stripped. The caller with a full `.can(Action::Read, "Post")` grant instead of `can_on_fields` sees the unchanged body, because an unrestricted rule yields no field allow-list.
+
+  </Accordion>
+  <Accordion title="Querying with find_many_authorized (and unit-test style scopes)">
+
+`FindManyParams` composes your own filter with the policy pushdown; `with_ability` / `with_principal` install the slots without a router, which is exactly how tests drive the authorized paths:
+
+```rust
+use nestrs::policies::Principal;
+use nestrs::predicates::PublishedOnly;
+use nestrs::prelude::*;
+use nestrs::{with_ability, with_principal, Action, FindManyParams, Repository};
+use serde_json::json;
+use std::sync::Arc;
+
+// Post is the entity from the example above (TABLE = "posts").
+
+#[tokio::test]
+async fn only_published_rows_reach_the_caller() {
+    nestrs::install_default_drivers();
+    let pool: Arc<sqlx::AnyPool> = /* connect + create the (id, data) table */ unimplemented!();
+
+    // Seed without an ability — the deliberate seeding primitive.
+    let repo = Repository::<Post>::new(pool.clone());
+    repo.repo_crud_create(&Post { id: None, author: "bob".into(), body: "draft".into() })
+        .await
+        .unwrap();
+
+    let ability: Arc<Ability> = Arc::new(
+        Ability::builder()
+            .can_with_predicate(Action::Read, "posts", vec![], PublishedOnly::new())
+            .build(),
+    );
+    let principal: Arc<Principal> = Arc::new(Principal {
+        subject: "bob".into(),
+        roles: vec!["user".into()],
+        claims: json!({}),
+    });
+
+    // with_ability / with_principal populate the per-task slots.
+    with_ability(ability, with_principal(principal, async {
+        let params = FindManyParams {
+            limit: Some(10),
+            offset: None,
+            extra_where: Some("json_extract(data, '$.author') = $1".into()),
+            extra_binds: vec![json!("bob")],
+        };
+        let rows: Vec<Post> = repo.find_many_authorized(Action::Read, params).await.unwrap();
+        assert!(rows.is_empty()); // the draft is not published
+    }))
+    .await;
+}
+```
+
+Outside tests, the slots come from `install_policies_middleware` and `install_authn_middleware` — call `find_many_authorized` straight from a handler.
+
+  </Accordion>
+</AccordionGroup>
+
+## Migrating from 0.x
+
+`Subject::Type` owns its name as of 1.0:
+
+```rust
+// 0.x — &'static str
+Subject::Type("Post")
+// 1.0 — String
+Subject::Type("Post".into())
+```
+
+The builder's `subject_type` arguments remain `&'static str`. The change removes two leaks: the masking walker used to `Box::leak` one box per masked object per response for runtime-built type names, and the guard leaked subject names through a dedup set behind a global mutex. Runtime-built names now mask identically and are freed with the subject.
+
+## Coming from NestJS CASL
+
+The model is CASL-shaped — additive `can` rules, subjects, conditions, field restrictions — with deliberate differences:
+
+| CASL | nestrs |
+|---|---|
+| `cannot(...)` exception rules | Not supported — grants are additive only. Order rules so the restrictive one is first, or express restrictions in the single granting rule. |
+| Mongo-like operators (`$in`, `$gt`) and function conditions in `conditions` | Exact JSON equality only (`field: value`); non-empty array values compile to SQL `IN (...)` in the repository pushdown. Anything richer belongs in a `RowPredicate`. |
+| `permittedFieldsOf` / rule-merged field checks | `allowed_fields` uses the **first** matching rule's field list. |
+| `subject` detection via classes/instances | String type names: table names for row-level rules, the response's `"type"` field for masking. |
+| Query integration via `@casl/ability`'s `toMongoQuery` + driver packages | Pushdown is built in: `RowPredicate::sql_conditions` compiles into the repository's `WHERE` clause automatically. |
+
+## Beyond HTTP
+
+The same ability + principal slots power the other transports:
+
+- **`ws-authz`** — wrap each message handler in `run_in_ws_scope(scope, ...)` with a `WsScope` carrying the connection's ability and principal (`WsScope::new().with_ability(a).with_principal(p)`); read the slots with `current_ws_ability()` / `current_ws_principal()`, and emit through `nestrs::emit_masked(&client, event, data, &ability)` — a drop-in for `client.emit(event, data)` that applies the same masking walker to outbound frames.
+- **`graphql-authz`** — mount resolvers through `graphql_router_with_context` with a `GqlDataContext`; per-resolver abilities resolve via `current_gql_ability()` / `current_gql_principal()`, and outbound responses pass through the same masking.
+
+See the WebSocket and GraphQL guides for transport specifics. For the identity side — issuing JWTs, password hashing, `AuthnGuard` — see the [security guide](/guides/security).

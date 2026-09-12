@@ -1217,6 +1217,19 @@ fn provider_dep_graph() -> &'static RwLock<HashMap<TypeId, Vec<TypeId>>> {
 }
 
 fn record_provider_dependency(from: TypeId, to: TypeId) {
+    // Hot path: the edge is almost always already recorded — the first
+    // resolution of a constructor -> dependency pair records it, and every
+    // later resolution (each request-scoped/transient construction on a
+    // warm process) only needs this read-locked check, instead of
+    // contending on the global write lock for every single resolution.
+    {
+        let deps = provider_dep_graph().read().expect("provider dep graph");
+        if let Some(targets) = deps.get(&from) {
+            if targets.contains(&to) {
+                return;
+            }
+        }
+    }
     let mut deps = provider_dep_graph().write().expect("provider dep graph");
     let targets = deps.entry(from).or_default();
     if !targets.contains(&to) {
@@ -1548,5 +1561,57 @@ mod provider_lifecycle_tests {
         registry.run_on_module_destroy().await;
 
         assert_log(&log, &[]);
+    }
+}
+
+#[cfg(test)]
+mod provider_dep_graph_tests {
+    // Dependency recording sits on the hot path of DI resolution: every
+    // `registry.get` inside a provider construction records the
+    // constructor -> dependency edge into the process-global graph. The
+    // write lock is only needed the FIRST time an edge is seen; repeat
+    // resolutions (each request-scoped/transient construction on a warm
+    // process) must take the read-locked fast path instead of contending
+    // on the global write lock.
+
+    use super::*;
+
+    struct FromA;
+    struct ToB;
+
+    #[test]
+    fn record_provider_dependency_is_idempotent_on_repeated_edges() {
+        let from = TypeId::of::<FromA>();
+        let to = TypeId::of::<ToB>();
+        record_provider_dependency(from, to);
+        // Repeated resolutions of the same edge (the read-locked fast
+        // path): must not duplicate the target.
+        record_provider_dependency(from, to);
+        record_provider_dependency(from, to);
+        let deps = provider_dep_graph().read().expect("provider dep graph");
+        let targets = deps.get(&from).expect("edge recorded");
+        assert_eq!(targets.len(), 1, "repeated edges must not duplicate");
+        assert_eq!(targets[0], to);
+    }
+
+    #[test]
+    fn record_provider_dependency_dedupes_racing_first_recordings() {
+        // Threads that miss the fast path simultaneously (edge not yet
+        // committed) must not push the edge twice — the write-locked arm
+        // re-checks before pushing.
+        let from = TypeId::of::<FromA>();
+        let to = TypeId::of::<ToB>();
+        std::thread::scope(|s| {
+            for _ in 0..16 {
+                s.spawn(|| record_provider_dependency(from, to));
+            }
+        });
+        let deps = provider_dep_graph().read().expect("provider dep graph");
+        let targets = deps.get(&from).expect("edge recorded");
+        assert_eq!(
+            targets.len(),
+            1,
+            "racing recorders must not duplicate an edge"
+        );
     }
 }

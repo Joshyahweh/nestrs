@@ -10,6 +10,8 @@ Optional crates and feature flags extend nestrs with **cache**, **scheduled jobs
 | Cron or interval work inside the process | **ScheduleModule** | Replace OS cron for app-local tasks; not a distributed scheduler by itself. |
 | Background work with a baseline in-process queue | **QueuesModule** | Feature `queues`; swap for an external broker when you need durability across nodes. |
 | Locale-aware responses | **I18nModule** | Call `NestApplication::use_i18n()` and plug catalogs/resolvers as documented in the include below. |
+| Social or IdP login, or verifying incoming bearer tokens | **nestrs-oauth2** | Feature `oauth2` (or `authn-oauth2` to combine with the `Principal` extractor); authorization-code + PKCE client, JWKS-backed `JwtVerifier`, `OAuth2Guard`. See [OAuth2](oauth2.md). |
+| Store or serve files on S3 / GCS / Azure / local disk | **nestrs-storage** | Separate crate (features `local`, `s3`, `gcs`, `azure`, `all`); one `Storage` trait with presign helpers and the `#[upload_to]` decorator. |
 
 ## Cargo features (checklist)
 

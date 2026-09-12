@@ -120,7 +120,7 @@ impl AppService {
 
 ## Lifecycle hooks
 
-`Injectable` provides four async hooks (all default to no-ops):
+`Injectable` provides five async hooks (all default to no-ops): `on_module_init`, `on_application_bootstrap`, `on_before_application_shutdown`, `on_application_shutdown`, and `on_module_destroy`.
 
 ```rust
 use nestrs::prelude::*;
@@ -141,11 +141,17 @@ impl Injectable for DatabaseService {
         // Run after all singletons are constructed; safe to do async I/O here.
     }
 
+    async fn on_before_application_shutdown(&self) {
+        // NestJS `beforeApplicationShutdown`: flush caches while dependents are still alive.
+    }
+
     async fn on_application_shutdown(&self) {
         // Close connections, flush buffers.
     }
 }
 ```
+
+On startup, `listen()` first eagerly constructs **all** singleton providers (in registration order), then runs `on_module_init` across all singletons, then `on_application_bootstrap`, and only then binds the listener — hooks run before the server accepts traffic. Within each hook phase, providers run in dependency order (construction dependencies first, ties broken by registration order). On graceful shutdown the phases run in reverse: `on_before_application_shutdown` → `on_application_shutdown` → `on_module_destroy`, each in reverse initialization order so dependencies are torn down after their dependents.
 
 <Warning>
   Lifecycle hooks only run for **singleton** providers. Transient providers are constructed on demand and do not receive hook calls.
@@ -171,10 +177,12 @@ fn register_heavy(registry: &mut ProviderRegistry) {
 
 | Method | NestJS analogue | Notes |
 |---|---|---|
-| `register_use_value::<T>(Arc<T>)` | `useValue` | Pre-built singleton; no lifecycle hooks |
-| `register_use_factory::<T>(scope, \|reg\| Arc<T>)` | `useFactory` | Sync closure; call `reg.get()` for dependencies |
+| `register_use_value::<T>(Arc<T>)` | `useValue` | Pre-built singleton; lifecycle hooks are **not** run — any `T` is accepted, so there is no hook impl to call |
+| `register_use_value_with_lifecycle::<T>(Arc<T>)` | `useValue` + `OnModuleInit` & friends | Requires `T: ProviderLifecycle`; the framework drives `T`'s five hooks like an `Injectable` |
+| `register_use_factory::<T>(scope, \|reg\| Arc<T>)` | `useFactory` | Sync closure; call `reg.get()` for dependencies; lifecycle hooks are **not** run |
+| `register_use_factory_with_lifecycle::<T>(scope, \|reg\| Arc<T>)` | `useFactory` + lifecycle | Requires `T: ProviderLifecycle`; hooks run while `T` is singleton-scoped |
 | `register_use_class::<T>()` | `useClass` | Same as `register::<T>()` for normal `#[injectable]` types |
 
 <Tip>
-  Keep factory closures non-async. Defer I/O to `on_module_init` on the produced type, or to `ConfigurableModuleBuilder::for_root_async` for module-level configuration.
+  Keep factory closures non-async. Defer I/O to `on_module_init` on the produced type (which requires a hook-driving registration — the `*_with_lifecycle` variants, or a plain `#[injectable]` type registered with `register`), or to `ConfigurableModuleBuilder::for_root_async` for module-level configuration.
 </Tip>

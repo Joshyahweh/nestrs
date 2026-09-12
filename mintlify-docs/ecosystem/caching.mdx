@@ -9,7 +9,7 @@ description: "CacheModule gives you an injectable CacheService with get, set, de
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["cache"] }
+nestrs = { version = "1.0.0", features = ["cache"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -112,8 +112,12 @@ impl AppController {
 
 | Variant | Method | Description |
 |---------|--------|-------------|
-| `InMemory` | `CacheOptions::in_memory()` | Single-process store backed by a `tokio::sync::RwLock<HashMap>`. Zero dependencies. |
+| `InMemory { max_entries }` | `CacheOptions::in_memory()` / `CacheOptions::in_memory_with_max_entries(n)` | Single-process store backed by a `tokio::sync::RwLock<HashMap>`. Zero dependencies. |
 | `Redis` | `CacheOptions::redis(url)` | Shared store backed by a multiplexed Redis connection. Requires the `cache-redis` feature. |
+
+### Bounded in-memory store
+
+The in-memory backend is **bounded**: the default cap is **10 000 entries**, and when the store is full, inserting a *new* key FIFO-evicts the oldest-inserted entry (updating an existing key never evicts — it refreshes the entry's position). Pass `in_memory_with_max_entries(n)` for a larger working set, or `in_memory_with_max_entries(0)` to disable caching entirely (writes are dropped). The bound prevents a flood of distinct cache keys — including attacker-influenced keys — from growing the map without limit.
 
 ## Redis backend
 
@@ -121,7 +125,7 @@ Enable the `cache-redis` feature alongside `cache`, then pass `CacheOptions::red
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["cache", "cache-redis"] }
+nestrs = { version = "1.0.0", features = ["cache", "cache-redis"] }
 ```
 
 ```rust

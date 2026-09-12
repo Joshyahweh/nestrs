@@ -114,13 +114,48 @@ NestFactory::create::<AppModule>()
 
 When any indicator returns `HealthStatus::Down`, the readiness endpoint returns `503` with a Terminus-style JSON summary containing `status`, `info`, `error`, and `details` keys.
 
+## Probe decorators (`#[liveness]`, `#[readiness]`, `#[startup]`)
+
+Beyond the always-OK liveness route, nestrs can mirror a *real handler* as a probe. Decorating a route handler with one of the probe decorators mounts a fixed endpoint under `/__nestrs/health/*` that calls the handler on each scrape (or once, for startup) and reports up/down from its status code:
+
+| Decorator | Mirrored endpoint | Semantics |
+|-----------|-------------------|-----------|
+| `#[liveness]` | `GET /__nestrs/health/live` | 2xx from the handler ⇒ up, otherwise down. |
+| `#[readiness]` | `GET /__nestrs/health/ready` | 2xx ⇒ up, otherwise down. |
+| `#[startup]` | `GET /__nestrs/health/startup` | Evaluated **once per process** and cached; later probes return the first result. |
+
+```rust
+use nestrs::prelude::*;
+
+#[routes(state = AppState)]
+impl HealthController {
+    /// Real dependency checks — the probe endpoint runs this handler.
+    #[get("/health/deep")]
+    #[readiness]
+    pub async fn deep(State(s): State<AppState>) -> impl IntoResponse {
+        match s.check_deps().await {
+            Ok(_) => (StatusCode::OK, Json(json!({"deps": "ok"}))),
+            Err(_) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"deps": "down"}))),
+        }
+    }
+}
+```
+
+The mirrored endpoints are mounted at the **server root** (not under `set_global_prefix` or URI versioning) so orchestrators can probe them without prefixes. Probe results are cached for 5 seconds per endpoint to prevent probe-storm self-DoS; a panicking handler reports down with a generic message (raw errors go to `tracing` only).
+
+<Note>
+If your own routes already occupy <code>/__nestrs/health/live</code> or <code>/__nestrs/health/ready</code>, your routes win — the framework skips its mirrored endpoint. The builder-level <code>enable_health_check("/health")</code> and <code>enable_readiness_check("/ready", [...])</code> paths above are unaffected and remain the simplest options for most apps.
+</Note>
+
+Use decorator-based probes when liveness should depend on something the app actually does (a warmup pass, a self-check handler), and the builder calls when a constant 200 plus indicator checks is enough. Kubernetes wiring: `livenessProbe` → `/__nestrs/health/live` (or your `enable_health_check` path), `readinessProbe` → `/__nestrs/health/ready` (or your readiness path), `startupProbe` → `/__nestrs/health/startup`.
+
 ## OpenTelemetry (OTLP)
 
 Enable the `otel` feature to export spans to any OTLP-compatible collector (Jaeger, Tempo, Honeycomb, etc.):
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["otel"] }
+nestrs = { version = "1.0.0", features = ["otel"] }
 ```
 
 Replace `configure_tracing` with `configure_tracing_opentelemetry` and supply an `OpenTelemetryConfig`:

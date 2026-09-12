@@ -272,7 +272,11 @@ fn main() {
 
 ## Production errors
 
+5xx JSON bodies are sanitized **by default whenever the runtime environment is production** (first non-empty of `NESTRS_ENV` / `APP_ENV` / `RUST_ENV`, compared case-insensitively against `production` / `prod`): `message` becomes a generic string, the `errors` payload is dropped, and the canonical reason phrase is inserted. No builder call needed in production.
+
 ### `enable_production_errors` / `enable_production_errors_from_env`
+
+Force sanitization on in any environment (e.g. `NESTRS_ENV=staging`), or re-read the environment explicitly:
 
 ```rust,noplayground
 use nestrs::prelude::*;
@@ -286,6 +290,10 @@ fn main() {
         .into_router();
 }
 ```
+
+### `disable_production_errors`
+
+Opt out even in production — only for internal admin services behind a trusted boundary that want detailed error bodies.
 
 ---
 
@@ -355,6 +363,75 @@ fn main() {
         .into_router();
 }
 ```
+
+### Probe decorators (`#[liveness]` / `#[readiness]` / `#[startup]`)
+
+Mirror a real handler as a fixed probe under `/__nestrs/health/*` (server-root mounted, 5 s result cache, panic ⇒ down with generic message; your own routes win on collision):
+
+```rust,noplayground
+use nestrs::prelude::*;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::Json;
+use serde_json::json;
+
+#[routes(state = AppState)]
+impl HealthController {
+    #[get("/health/deep")]
+    #[readiness]
+    pub async fn deep(State(s): State<AppState>) -> impl IntoResponse {
+        match s.check_deps().await {
+            Ok(_) => (StatusCode::OK, Json(json!({"deps": "ok"}))),
+            Err(_) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"deps": "down"}))),
+        }
+    }
+}
+```
+
+`#[liveness]` → `GET /__nestrs/health/live`; `#[startup]` → `GET /__nestrs/health/startup` (evaluated once per process, cached).
+
+---
+
+## Throttling and proxy identity
+
+### `use_throttler` (route-level budgets)
+
+```rust,noplayground
+use nestrs::prelude::*;
+
+#[module]
+struct AppModule;
+
+fn main() {
+    let _router = NestFactory::create::<AppModule>()
+        .use_throttler(
+            ThrottlerOptions::builder()
+                .global(ThrottleSpec::parse("100/minute"))
+                .build(),
+        )
+        .into_router();
+}
+```
+
+Routes declare `#[throttle(5, "minute")]` or `#[skip_throttle]`; rejections are `429` with `Retry-After` and `X-RateLimit-Remaining`.
+
+### `use_trusted_proxy_headers` (client identity behind proxies)
+
+```rust,noplayground
+use nestrs::prelude::*;
+
+#[module]
+struct AppModule;
+
+fn main() {
+    let _router = NestFactory::create::<AppModule>()
+        .use_trusted_proxy_headers(1) // one trusted LB in front
+        .use_rate_limit(RateLimitOptions::builder().max_requests(200).window_secs(60).build())
+        .into_router();
+}
+```
+
+Reads `X-Forwarded-For` right-most-first; the rate limiter and throttler inherit the hop count. Omit the call when directly exposed (default 0 hops).
 
 ---
 

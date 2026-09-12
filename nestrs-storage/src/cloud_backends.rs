@@ -531,9 +531,18 @@ mod debug_redaction_tests {
             secret_key: Some("wJalrXUtnFEMI-DO-NOT-LOG".to_string()),
         };
         let rendered = format!("{config:?}");
-        assert!(!rendered.contains("wJalrXUtnFEMI"), "secret key leaked: {rendered}");
-        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
-        assert!(rendered.contains("AKIAEXAMPLE"), "access key id should stay visible: {rendered}");
+        assert!(
+            !rendered.contains("wJalrXUtnFEMI"),
+            "secret key leaked: {rendered}"
+        );
+        assert!(
+            rendered.contains("<redacted>"),
+            "no redaction marker: {rendered}"
+        );
+        assert!(
+            rendered.contains("AKIAEXAMPLE"),
+            "access key id should stay visible: {rendered}"
+        );
     }
 
     #[cfg(feature = "azure")]
@@ -546,8 +555,17 @@ mod debug_redaction_tests {
             access_key: Some("base64key-DO-NOT-LOG".to_string()),
         };
         let rendered = format!("{config:?}");
-        assert!(!rendered.contains("base64key"), "access key leaked: {rendered}");
-        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
-        assert!(rendered.contains("nestrsmedia"), "account should stay visible: {rendered}");
+        assert!(
+            !rendered.contains("base64key"),
+            "access key leaked: {rendered}"
+        );
+        assert!(
+            rendered.contains("<redacted>"),
+            "no redaction marker: {rendered}"
+        );
+        assert!(
+            rendered.contains("nestrsmedia"),
+            "account should stay visible: {rendered}"
+        );
     }
 }

@@ -107,9 +107,7 @@ struct SharedConns {
 /// one per RPC — the per-RPC variant cost a TCP connect + handshake + teardown
 /// cycle on every call, which under load turns into a connection storm against
 /// the Redis server.
-async fn spawn_pubsub_pump(
-    client: redis::Client,
-) -> Result<mpsc::Sender<PubsubPumpCmd>, String> {
+async fn spawn_pubsub_pump(client: redis::Client) -> Result<mpsc::Sender<PubsubPumpCmd>, String> {
     let pubsub = client
         .get_async_pubsub()
         .await
@@ -211,8 +209,7 @@ impl RedisTransport {
     /// it while other callers queue on the lock.
     async fn shared_conns(
         &self,
-    ) -> Result<(redis::aio::ConnectionManager, mpsc::Sender<PubsubPumpCmd>), TransportError>
-    {
+    ) -> Result<(redis::aio::ConnectionManager, mpsc::Sender<PubsubPumpCmd>), TransportError> {
         let client = self.client()?.clone();
         let mut guard = self.shared.lock().await;
         if let Some(shared) = guard.as_ref() {
@@ -591,12 +588,18 @@ mod connection_tests {
         let transport = RedisTransport::new(fast_opts(dead_url()));
         for _ in 0..2 {
             assert!(
-                transport.send_json("probe", serde_json::json!({})).await.is_err(),
+                transport
+                    .send_json("probe", serde_json::json!({}))
+                    .await
+                    .is_err(),
                 "each call against unreachable redis must error"
             );
         }
         assert!(
-            transport.emit_json("probe", serde_json::json!({})).await.is_err(),
+            transport
+                .emit_json("probe", serde_json::json!({}))
+                .await
+                .is_err(),
             "emit against unreachable redis must error"
         );
     }

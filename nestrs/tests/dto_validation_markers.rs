@@ -66,8 +66,8 @@ fn is_uuid_rejects_non_uuid_string() {
 #[test]
 fn is_uuid_rejects_wrong_group_lengths() {
     for bad in [
-        "550e8400e29b-41d4-a716-446655440000",   // missing hyphen
-        "550e840-e29b-41d4-a716-4466554400000",   // 35 chars
+        "550e8400e29b-41d4-a716-446655440000",     // missing hyphen
+        "550e840-e29b-41d4-a716-4466554400000",    // 35 chars
         "550e8400-e29b-41d4-a716-446655440000\n ", // trailing junk
         "g50e8400-e29b-41d4-a716-446655440000",    // non-hex digit
     ] {
@@ -84,7 +84,8 @@ fn is_uuid_rejects_wrong_group_lengths() {
 fn is_uuid_skips_none_option_field() {
     let mut dto = valid_dto();
     dto.parent_id = None;
-    dto.validate().expect("None optional field skips validation");
+    dto.validate()
+        .expect("None optional field skips validation");
 }
 
 #[test]
@@ -107,5 +108,6 @@ fn nestrs_is_uuid_helper_matches_class_validator_all() {
     assert!(nestrs::is_uuid("6ba7b814-9dad-11d1-80b4-00c04fd430c8").is_ok()); // v1 variant
     assert!(nestrs::is_uuid("").is_err());
     assert!(nestrs::is_uuid("urn:uuid:550e8400-e29b-41d4-a716-446655440000").is_err()); // URN form rejected, like class-validator
-    assert!(nestrs::is_uuid("{550e8400-e29b-41d4-a716-446655440000}").is_err()); // braced form rejected
+    assert!(nestrs::is_uuid("{550e8400-e29b-41d4-a716-446655440000}").is_err());
+    // braced form rejected
 }

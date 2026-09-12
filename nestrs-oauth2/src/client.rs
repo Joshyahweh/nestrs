@@ -814,8 +814,14 @@ mod debug_redaction_tests {
         };
         let rendered = format!("{set:?}");
         assert!(!rendered.contains("DO-NOT-LOG"), "token leaked: {rendered}");
-        assert!(rendered.matches("<redacted>").count() >= 3, "expected redaction markers: {rendered}");
-        assert!(rendered.contains("openid email"), "scope should stay visible: {rendered}");
+        assert!(
+            rendered.matches("<redacted>").count() >= 3,
+            "expected redaction markers: {rendered}"
+        );
+        assert!(
+            rendered.contains("openid email"),
+            "scope should stay visible: {rendered}"
+        );
     }
 
     #[test]
@@ -832,9 +838,18 @@ mod debug_redaction_tests {
             cache: None,
         };
         let rendered = format!("{options:?}");
-        assert!(!rendered.contains("s3cr3t"), "client secret leaked: {rendered}");
-        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
-        assert!(rendered.contains("web-app"), "client id should stay visible: {rendered}");
+        assert!(
+            !rendered.contains("s3cr3t"),
+            "client secret leaked: {rendered}"
+        );
+        assert!(
+            rendered.contains("<redacted>"),
+            "no redaction marker: {rendered}"
+        );
+        assert!(
+            rendered.contains("web-app"),
+            "client id should stay visible: {rendered}"
+        );
     }
 
     #[test]

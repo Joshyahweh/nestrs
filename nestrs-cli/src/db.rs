@@ -77,7 +77,11 @@ pub(crate) fn run(args: &[String]) -> Result<(), String> {
                 opts.backend = match v.as_str() {
                     "sqlx" => Backend::Sqlx,
                     "prisma" => Backend::Prisma,
-                    other => return Err(format!("unknown backend `{other}` (expected `sqlx` or `prisma`)")),
+                    other => {
+                        return Err(format!(
+                            "unknown backend `{other}` (expected `sqlx` or `prisma`)"
+                        ))
+                    }
                 };
             }
             "--path" => {
@@ -123,7 +127,8 @@ pub(crate) fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn missing_subcommand_help() -> String {
-    "missing `db` subcommand (expected `migrate` or `seed`); run `nestrs-cli --help` for usage".to_string()
+    "missing `db` subcommand (expected `migrate` or `seed`); run `nestrs-cli --help` for usage"
+        .to_string()
 }
 
 // Shared helpers used by `db_migrate` and `db_seed`. Kept `pub(crate)`
@@ -142,7 +147,5 @@ pub(crate) fn resolve_database_url(opts: &DbOptions) -> Result<String, String> {
             return Ok(u);
         }
     }
-    Err(
-        "no database URL: pass --database-url, set DATABASE_URL, or set NESTRS_DB__URL".to_string(),
-    )
+    Err("no database URL: pass --database-url, set DATABASE_URL, or set NESTRS_DB__URL".to_string())
 }

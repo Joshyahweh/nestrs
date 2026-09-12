@@ -717,17 +717,23 @@ async fn rate_limit_inherits_trusted_proxy_hops_from_app_topology() {
         )
     };
 
-    let first = request("203.0.113.10").await.expect("router should serve request");
+    let first = request("203.0.113.10")
+        .await
+        .expect("router should serve request");
     assert_eq!(first.status(), StatusCode::OK);
 
-    let second = request("203.0.113.11").await.expect("router should serve request");
+    let second = request("203.0.113.11")
+        .await
+        .expect("router should serve request");
     assert_eq!(
         second.status(),
         StatusCode::OK,
         "inherited hop count keeps proxied clients in separate buckets"
     );
 
-    let third = request("203.0.113.10").await.expect("router should serve request");
+    let third = request("203.0.113.10")
+        .await
+        .expect("router should serve request");
     assert_eq!(
         third.status(),
         StatusCode::TOO_MANY_REQUESTS,
@@ -763,10 +769,14 @@ async fn rate_limit_explicit_zero_hops_overrides_app_topology() {
         )
     };
 
-    let first = request("203.0.113.10").await.expect("router should serve request");
+    let first = request("203.0.113.10")
+        .await
+        .expect("router should serve request");
     assert_eq!(first.status(), StatusCode::OK);
 
-    let second = request("203.0.113.11").await.expect("router should serve request");
+    let second = request("203.0.113.11")
+        .await
+        .expect("router should serve request");
     assert_eq!(
         second.status(),
         StatusCode::TOO_MANY_REQUESTS,

@@ -64,8 +64,7 @@ fn add(args: &[String], opts: &DbOptions) -> Result<(), String> {
     validate_migration_name(name)?;
     let reversible = args.iter().any(|a| a == "--reversible");
 
-    fs::create_dir_all(&opts.migrations_path)
-        .map_err(|e| format!("create migrations dir: {e}"))?;
+    fs::create_dir_all(&opts.migrations_path).map_err(|e| format!("create migrations dir: {e}"))?;
 
     let next_n = next_sequence_number(&opts.migrations_path)?;
     let prefix = format!("{next_n:03}_{name}");
@@ -90,9 +89,7 @@ fn add_prisma(args: &[String]) -> Result<(), String> {
     // file but don't apply it. `npx` is what `nestrs-prisma` already
     // uses internally (`nestrs-prisma/src/lib.rs:81`).
     if args.is_empty() {
-        return Err(
-            "expected `db --backend prisma migrate add <name>`".to_string(),
-        );
+        return Err("expected `db --backend prisma migrate add <name>`".to_string());
     }
     let name = &args[0];
     validate_migration_name(name)?;
@@ -122,7 +119,8 @@ fn validate_migration_name(name: &str) -> Result<(), String> {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     {
         return Err(
-            "migration name must match `[a-z0-9_]+` (lowercase, digits, underscores only)".to_string(),
+            "migration name must match `[a-z0-9_]+` (lowercase, digits, underscores only)"
+                .to_string(),
         );
     }
     Ok(())
@@ -142,9 +140,13 @@ fn next_sequence_number(dir: &Path) -> Result<u32, String> {
     for entry in entries {
         let entry = entry.map_err(|e| format!("read dir entry: {e}"))?;
         let name = entry.file_name();
-        let Some(name_str) = name.to_str() else { continue };
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
         // Match `NNN_*` (3+ digits, underscore, then anything).
-        let Some((prefix, _)) = name_str.split_once('_') else { continue };
+        let Some((prefix, _)) = name_str.split_once('_') else {
+            continue;
+        };
         if let Ok(n) = prefix.parse::<u32>() {
             if n > max_n {
                 max_n = n;
@@ -187,8 +189,7 @@ fn run_sqlx(opts: &DbOptions, direction: MigrateDirection) -> Result<(), String>
     // original `opts` is still usable in the `info` handler later.
     let path = opts.migrations_path.clone();
     let target_version = opts.target_version;
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| format!("create tokio runtime: {e}"))?;
+    let rt = tokio::runtime::Runtime::new().map_err(|e| format!("create tokio runtime: {e}"))?;
     rt.block_on(async move {
         use sqlx::migrate::MigrateError;
         let migrator = match sqlx::migrate::Migrator::new(path).await {
@@ -304,8 +305,7 @@ fn info(opts: &DbOptions) -> Result<(), String> {
     }
     let url = resolve_database_url(opts)?;
     sqlx::any::install_default_drivers();
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| format!("create tokio runtime: {e}"))?;
+    let rt = tokio::runtime::Runtime::new().map_err(|e| format!("create tokio runtime: {e}"))?;
     rt.block_on(async move {
         let pool = match sqlx::AnyPool::connect(&url).await {
             Ok(p) => p,
@@ -361,7 +361,9 @@ fn list_migration_files(dir: &Path) -> Result<Vec<(i64, String)>, String> {
     for entry in entries {
         let entry = entry.map_err(|e| format!("read dir entry: {e}"))?;
         let name = entry.file_name();
-        let Some(name_str) = name.to_str() else { continue };
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
         // Single-shot: `NNN_<name>.sql`; reversible: `NNN_<name>.up.sql`.
         // Skip `.down.sql` — sqlx treats it as the inverse of `.up.sql`.
         if name_str.ends_with(".down.sql") {
@@ -371,7 +373,9 @@ fn list_migration_files(dir: &Path) -> Result<Vec<(i64, String)>, String> {
             .strip_suffix(".up.sql")
             .or_else(|| name_str.strip_suffix(".sql"))
             .unwrap_or(name_str);
-        let Some((prefix, _rest)) = stem.split_once('_') else { continue };
+        let Some((prefix, _rest)) = stem.split_once('_') else {
+            continue;
+        };
         if let Ok(v) = prefix.parse::<i64>() {
             out.push((v, name_str.to_string()));
         }

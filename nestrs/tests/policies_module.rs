@@ -99,7 +99,10 @@ fn ability_can_with_manage_implies_all_actions() {
     assert!(ab.can(&Action::Create, &Subject::Type("Org".into())));
     assert!(ab.can(&Action::Update, &Subject::Type("Org".into())));
     assert!(ab.can(&Action::Delete, &Subject::Type("Org".into())));
-    assert!(ab.can(&Action::Custom("audit".into()), &Subject::Type("Org".into())));
+    assert!(ab.can(
+        &Action::Custom("audit".into()),
+        &Subject::Type("Org".into())
+    ));
 }
 
 #[test]

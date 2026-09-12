@@ -40,9 +40,7 @@ impl WsCanActivate for RegistryBoundGuard {
         if self.resolved {
             Ok(())
         } else {
-            Err(WsGuardError::unauthorized(
-                "guard was not DI-resolved",
-            ))
+            Err(WsGuardError::unauthorized("guard was not DI-resolved"))
         }
     }
 }
@@ -64,11 +62,7 @@ impl WsPipeTransform for RegistryBoundPipe {
         Self { via: "registry" }
     }
 
-    async fn transform(
-        &self,
-        _event: &str,
-        mut payload: Value,
-    ) -> Result<Value, WsPipeError> {
+    async fn transform(&self, _event: &str, mut payload: Value) -> Result<Value, WsPipeError> {
         payload["pipe_via"] = Value::from(self.via);
         Ok(payload)
     }
@@ -91,12 +85,7 @@ impl WsIncomingInterceptor for RegistryBoundInterceptor {
         Self { via: "registry" }
     }
 
-    async fn before_handle(
-        &self,
-        _handshake: &WsHandshake,
-        _event: &str,
-        _payload: &Value,
-    ) {
+    async fn before_handle(&self, _handshake: &WsHandshake, _event: &str, _payload: &Value) {
         *INTERCEPT_VIA.lock().unwrap() = self.via;
     }
 }

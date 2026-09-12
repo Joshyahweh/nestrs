@@ -13,7 +13,7 @@ nestrs gives you two SQL integration paths depending on how much structure you w
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["database-sqlx"] }
+nestrs = { version = "1.0.0", features = ["database-sqlx"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "postgres"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -83,6 +83,37 @@ impl UserService {
 
 ---
 
+## Migrations and seeding (`nestrs-cli db`)
+
+Both SQL paths compose with the built-in migrations CLI (the `db` feature of `nestrs-scaffold`). It works on plain SQL migration files — there is no DDL-diff engine or entity auto-discovery.
+
+```bash
+cargo install nestrs-scaffold --features db
+
+nestrs-cli db migrate add create_posts_table --reversible
+# migrations/001_create_posts_table.up.sql
+# migrations/001_create_posts_table.down.sql
+
+nestrs-cli db migrate run          # apply pending
+nestrs-cli db migrate info        # list applied/pending
+nestrs-cli db migrate revert      # walk down (--target-version 0 for full)
+
+nestrs-cli db seed --bin seed_posts        # cargo run --bin seed_posts
+nestrs-cli db seed --seed-file dev.sql      # transactional raw SQL
+```
+
+Key details:
+
+- **URL resolution** — `--database-url` > `DATABASE_URL` > `NESTRS_DB__URL`.
+- **File naming** — sequence-numbered (`<NNN>_<name>.sql`, zero-padded 3 digits), not timestamped: deterministic, greppable, sortable, hand-writable.
+- **Reversible migrations** — `--reversible` writes paired `.up.sql` / `.down.sql` files; the sqlx backend records history in `_sqlx_migrations` via `sqlx::migrate::Migrator`.
+- **Seeding** — `--bin` passes through to a Cargo seed binary (the common case: a bin that composes with `CrudService<T>`); `--seed-file` runs a SQL file inside an explicit transaction so a mid-file failure rolls back.
+- **Prisma pass-through** — `--backend prisma` shells out to `npx prisma …`. Prisma records its own history and has **no revert**; use the sqlx backend with `--reversible` if you need downgrades.
+
+See the [CLI reference](/cli/overview) for the full flag table.
+
+---
+
 ## Path 2: nestrs-prisma
 
 `nestrs-prisma` ships `PrismaModule` and `PrismaService` with higher-level helpers: `query_all_as` for typed row mapping, `execute` for DDL and DML, and `prisma_model!` for declarative repositories that generate `find_unique`, `find_many`, `create`, `update`, `delete`, and more.
@@ -91,8 +122,8 @@ impl UserService {
 
 ```toml
 [dependencies]
-nestrs = "0.3.8"
-nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+nestrs = "1.0.0"
+nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
 async-trait = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "postgres"] }
 serde = { version = "1", features = ["derive"] }
@@ -104,7 +135,7 @@ Enable exactly one SQLx backend feature: `sqlx-postgres`, `sqlx-mysql`, or `sqlx
 <Tabs>
   <Tab title="PostgreSQL">
     ```toml
-    nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-postgres"] }
+    nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
     ```
     ```bash
     export DATABASE_URL="postgresql://user:password@127.0.0.1:5432/myapp"
@@ -112,7 +143,7 @@ Enable exactly one SQLx backend feature: `sqlx-postgres`, `sqlx-mysql`, or `sqlx
   </Tab>
   <Tab title="MySQL">
     ```toml
-    nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-mysql"] }
+    nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-mysql"] }
     ```
     ```bash
     export DATABASE_URL="mysql://user:password@127.0.0.1:3306/myapp"
@@ -120,7 +151,7 @@ Enable exactly one SQLx backend feature: `sqlx-postgres`, `sqlx-mysql`, or `sqlx
   </Tab>
   <Tab title="SQLite">
     ```toml
-    nestrs-prisma = { version = "0.3.8", features = ["sqlx", "sqlx-sqlite"] }
+    nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-sqlite"] }
     sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "sqlite"] }
     ```
     ```bash
@@ -148,10 +179,10 @@ model User {
 }
 ```
 
-Apply the schema to your database:
+Apply the schema to your database — `nestrs-cli db --backend prisma migrate run` is the nestrs-native pass-through, or use Prisma directly:
 
 ```bash
-npx prisma migrate dev
+nestrs-cli db --backend prisma migrate run   # pass-through to npx prisma
 # or for quick local work:
 npx prisma db push
 ```
@@ -314,7 +345,7 @@ cargo run -p nestrs-prisma --example quickstart --features "sqlx,sqlx-sqlite"
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["mongo"] }
+nestrs = { version = "1.0.0", features = ["mongo"] }
 mongodb = "3"
 bson = "3"
 futures-util = { version = "0.3", features = ["sink"] }

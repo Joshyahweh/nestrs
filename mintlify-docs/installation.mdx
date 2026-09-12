@@ -17,7 +17,7 @@ nestrs depends on tokio for its async runtime. You must enable the `macros` and 
 
 ```toml Cargo.toml
 [dependencies]
-nestrs = "0.3.8"
+nestrs = "1.0.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -53,7 +53,7 @@ async fn main() {
 nestrs has a `default = []` feature set — nothing optional is enabled unless you ask for it. Enable features by adding them to the `features` list on the `nestrs` dependency:
 
 ```toml
-nestrs = { version = "0.3.8", features = ["openapi", "cache-redis"] }
+nestrs = { version = "1.0.0", features = ["openapi", "cache-redis"] }
 ```
 
 The table below lists every available feature flag and what it adds to your project.
@@ -90,6 +90,21 @@ The table below lists every available feature flag and what it adds to your proj
 | `database-sqlx` | SQLx integration for Postgres, SQLite, and other databases |
 | `mongo` | MongoDB integration via the `mongodb` crate |
 
+<Note>
+`nestrs-storage` is a separate crate, not a feature flag on `nestrs`. It provides object storage (Local filesystem, S3, GCS, Azure Blob) behind one `Storage` trait. Add it as its own dependency with one of `local`, `s3`, `gcs`, `azure`, or `all`.
+</Note>
+
+### OAuth2 features
+
+| Feature | What it enables |
+|---|---|
+| `oauth2` | OAuth2 client (authorization code + PKCE, client credentials, refresh), JWKS-backed resource server (`JwtVerifier`), `OAuth2Guard`, the `OAuth2Principal` extractor, and `NestApplication::use_oauth2` via the `nestrs-oauth2` crate |
+| `authn-oauth2` | Compound: `oauth2` + `authn`, so a route can read either a JWT or an OAuth2 token identity through the `Principal` extractor |
+
+<Note>
+`nestrs/oauth2` enables the underlying crate's `client`, `resource-server`, and `guard` features but **not** `social`. For the social provider wrappers (Google, GitHub, Microsoft, Apple), depend on `nestrs-oauth2` directly with its own feature flags — `client`, `resource-server`, `social`, `guard` (implies `client` + `resource-server`), and `all`. See the [OAuth2 guide](/guides/oauth2) for the full walkthrough.
+</Note>
+
 ### HTTP and request handling features
 
 | Feature | What it enables |
@@ -115,13 +130,13 @@ The table below lists every available feature flag and what it adds to your proj
 
 ```toml Minimal API
 [dependencies]
-nestrs = "0.3.8"
+nestrs = "1.0.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```toml REST API with OpenAPI
 [dependencies]
-nestrs = { version = "0.3.8", features = ["openapi"] }
+nestrs = { version = "1.0.0", features = ["openapi"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 validator = { version = "0.20", features = ["derive"] }
@@ -129,7 +144,7 @@ validator = { version = "0.20", features = ["derive"] }
 
 ```toml Full-stack with auth
 [dependencies]
-nestrs = { version = "0.3.8", features = ["openapi", "session", "csrf", "database-sqlx"] }
+nestrs = { version = "1.0.0", features = ["openapi", "session", "csrf", "database-sqlx"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 validator = { version = "0.20", features = ["derive"] }
@@ -137,19 +152,19 @@ validator = { version = "0.20", features = ["derive"] }
 
 ```toml Microservices with NATS
 [dependencies]
-nestrs = { version = "0.3.8", features = ["microservices-nats"] }
+nestrs = { version = "1.0.0", features = ["microservices-nats"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```toml GraphQL with WebSockets
 [dependencies]
-nestrs = { version = "0.3.8", features = ["graphql", "ws"] }
+nestrs = { version = "1.0.0", features = ["graphql", "ws"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```toml Observability with OpenTelemetry
 [dependencies]
-nestrs = { version = "0.3.8", features = ["otel"] }
+nestrs = { version = "1.0.0", features = ["otel"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -183,7 +198,7 @@ RUST_LOG=info
 DATABASE_URL=file:./dev.db
 ```
 
-Set `NESTRS_ENV=production` to activate production error sanitisation when you call `.enable_production_errors_from_env()` in `main`.
+Set `NESTRS_ENV=production` to switch nestrs into production mode: 5xx JSON bodies are sanitized **by default** (generic `message`, `errors` dropped, stack traces never reach clients) — no builder call needed. `.enable_production_errors_from_env()` re-reads the environment explicitly and `.enable_production_errors()` forces sanitization on in any environment.
 
 ## Next steps
 

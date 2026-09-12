@@ -1,0 +1,205 @@
+---
+title: "CRUD controllers with #[crud]"
+description: "Generate a full 5-verb REST or GraphQL CRUD controller from one attribute on a struct holding an Arc<sqlx::AnyPool> — list, read, create, update, delete, with pagination, filter, sort, and search out of the box."
+---
+
+`#[crud]` is nestrs's counterpart of `@nestjsx/crud`: one attribute on a controller struct generates the five REST verbs (or GraphQL operations), the backing service, and the state provider that carries the database pool. Every generated handler is wired through the standard nestrs pipeline — guards, interceptors, exception filters, and OpenAPI metadata all apply — and row-level authorization (`authz-row-level`) is enforced by the same deny-closed `CrudService<T>` the rest of the framework uses.
+
+<Note>
+`#[crud]` requires the <code>database-sqlx</code> feature on <code>nestrs</code>, and `#[crud]` cannot be combined with <code>#[routes(...)]</code> — the macro generates the routes itself.
+</Note>
+
+## What gets generated
+
+Given a controller named `PostController`, the macro emits:
+
+| Generated item | Purpose |
+|---------------|---------|
+| `GET /` list handler | Query-string contract: `?page`, `?per_page`, `?sort`, `?filter[field]=`, `?search` |
+| `GET /:id` read handler | Returns the output DTO or 404 |
+| `POST /` create handler | Deserializes the create DTO, inserts, returns the output DTO |
+| `PATCH /:id` update handler | Partial update from the update DTO |
+| `DELETE /:id` delete handler | Deletes and returns success |
+| `PostService` | The service with `list_query`, `get_one`, `create_one`, `update_one`, `delete_one` |
+| `PostListQuery` DTO | The validated query-string DTO (hidden; parsed by `serde_qs`) |
+| `__PostCrudState` | A hidden injectable state provider carrying the `Arc<sqlx::AnyPool>` |
+
+Handlers translate service results into HTTP: `CrudError::NotFound` becomes 404, validation failures become 422 with field detail, and SQL errors become sanitized 500s in production.
+
+## The moving parts you write
+
+Three types participate, all yours to define:
+
+1. **Entity** — implements `nestrs::Entity` (table name, id access, row mapping). This is the storage layer type.
+2. **Output DTO** — what every handler returns. Derive `Serialize`, `Deserialize`, and `NestDto`.
+3. **Create / Update DTOs** — the accepted request bodies, also `NestDto`.
+
+```rust
+use nestrs::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Post {
+    id: Option<i64>,
+    author: String,
+    body: String,
+}
+
+impl Entity for Post {
+    const TABLE: &'static str = "posts";
+    fn id(&self) -> Option<i64> { self.id }
+    fn from_row(row: &sqlx::any::AnyRow) -> Result<Self, sqlx::Error> {
+        // map your row representation into the entity
+        # unimplemented!("row mapping")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, NestDto)]
+struct PostDto {
+    pub id: i64,
+    pub author: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, NestDto)]
+struct CreatePostDto {
+    pub author: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, NestDto)]
+struct UpdatePostDto {
+    pub body: String,
+}
+```
+
+## Defining the controller
+
+The struct needs exactly one `pool: Arc<sqlx::AnyPool>` field and a `#[controller(prefix = "...")]` for the mount path:
+
+```rust
+#[controller(prefix = "/posts")]
+#[crud(
+    entity = Post,
+    output = PostDto,
+    create = CreatePostDto,
+    update = UpdatePostDto,
+)]
+struct PostController {
+    pool: Arc<sqlx::AnyPool>,
+}
+```
+
+Available options:
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `entity = <Type>` | Yes | The `Entity` implementation (storage layer). |
+| `output = <Type>` | Yes | DTO returned by every handler. |
+| `create = <Type>` | Yes | DTO accepted by the create handler. |
+| `update = <Type>` | Yes | DTO accepted by the update handler. |
+| `transport = "http" \| "graphql"` | No | Transport for the generated operations; defaults to `"http"`. |
+
+## Wiring the pool and module
+
+The macro cannot see your database URL, so the generated `__PostCrudState` provider defaults to *no pool* — you must override it with the real one before the app starts. `DynamicModuleBuilder` is the canonical way:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[module(controllers = [PostController], providers = [__PostCrudState])]
+struct PostsModule;
+
+#[tokio::main]
+async fn main() {
+    nestrs::install_default_drivers(); // once per process for sqlx::any
+
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let pool = Arc::new(
+        sqlx::any::AnyPoolOptions::new()
+            .max_connections(8)
+            .connect(&url)
+            .await
+            .expect("connect"),
+    );
+
+    let dynamic = nestrs::core::DynamicModuleBuilder::<PostsModule>::new()
+        .override_provider::<__PostCrudState>(Arc::new(__PostCrudState::from_pool(pool)))
+        .build();
+
+    let app = NestApplication::from_registry_and_router(
+        Arc::new(dynamic.registry),
+        dynamic.router,
+    );
+    app.listen_graceful(3000).await;
+}
+```
+
+<Warning>
+If the override is missing, every request fails with a 500 naming <code>__PostCrudState</code> — the default-constructed state has no pool. The override must happen <b>before</b> controllers are registered (the <code>DynamicModuleBuilder</code> sequence above does this correctly).
+</Warning>
+
+## The list endpoint query contract
+
+The list handler parses the query string with `serde_qs`, so bracketed keys survive. The contract mirrors `@nestjsx/crud`:
+
+| Query | Example | Behavior |
+|-------|---------|----------|
+| `page` | `?page=2` | 1-indexed; default 1; `page=0` → 422. |
+| `per_page` | `?per_page=50` | Default 20; must be 1–1000 (out of range → 422). |
+| `sort` | `?sort=author:DESC` | Comma-separated `field:ASC\|DESC` pairs; ASCII field names only. |
+| `filter[field]` | `?filter[author]=alice` | Case-insensitive substring match on the field's JSON value. |
+| `search` | `?search=hello` | Case-insensitive substring match across every string field. |
+
+Two evaluation tiers keep paging cheap:
+
+- **Plain paging** (`page`/`per_page` only): the window is pushed into SQL as `LIMIT … OFFSET …`, so the database materializes one page, not the whole table.
+- **`sort` / `filter` / `search` present**: the full set is fetched and evaluated in memory before slicing (the exact `@nestjsx/crud` contract), so expect these queries to cost proportionally to table size.
+
+### Examples
+
+```bash
+# First 20 posts (defaults)
+GET /posts/
+
+# Second page of 50, newest first
+GET /posts/?page=2&per_page=50&sort=id:DESC
+
+# Alice's published posts
+GET /posts/?filter[author]=alice&filter[status]=published
+
+# Free-text search, then paginate
+GET /posts/?search=hello&page=3&per_page=10
+```
+
+Invalid query strings return the framework's standard error shapes: malformed bracket syntax → 400 with the parse error; validation failures (`page=0`, `per_page=10000`, bad `sort` syntax) → 422 with field-level detail.
+
+## Authorization
+
+With the `authz` feature, generated routes compose with `#[roles]`, guards, and policies like any hand-written route. With `authz-row-level` on, every generated handler flows through `CrudService<T>`'s deny-closed checks: no matching allow rule (or no `Principal` installed) means empty results on list/reads and 403/404 on writes — never a leaked row.
+
+```rust
+use nestrs::{Action, Ability};
+
+let ability = Arc::new(
+    Ability::builder()
+        .can(Action::Read, "posts")
+        .can(Action::Create, "posts")
+        .can(Action::Update, "posts")
+        .can(Action::Delete, "posts")
+        .build(),
+);
+// install_policies_middleware carries the ability into generated handlers
+```
+
+See the [authorization guide](/guides/authorization) for abilities, row predicates, and deny-closed semantics.
+
+## Transport variants
+
+`transport = "graphql"` emits GraphQL mutations and queries instead of REST routes, following the same service and state wiring. The default `transport = "http"` (omit the option for REST).
+
+## Relation to hand-written controllers
+
+`#[crud]` is a convenience for the standard 5-verb shape. When you need custom search joins, projections, or anything beyond the contract above, write the controller by hand with `#[routes(...)]` and call `CrudService<T>` — the generated service methods (`list_query`, `get_one`, `create_one`, `update_one`, `delete_one`) are the same ones you would call yourself.

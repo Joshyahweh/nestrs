@@ -35,11 +35,11 @@ Keys are plain **strings**; values are **strings**. There is no nested JSON obje
 
 Guards run with access to **`axum::http::request::Parts`**. nestrs inserts **`HandlerKey(&'static str)`** into request extensions before your route handler runs. Built-in helpers such as **`route_roles_csv`** read the **`roles`** metadata for the current handler.
 
-See `nestrs::security` (e.g. `AuthStrategyGuard`, `XRoleMetadataGuard`) and `nestrs/tests/cross_cutting_extended.rs` for examples.
+See `nestrs::security` (e.g. `AuthStrategyGuard`, `DemoXRoleMetadataGuard`; both are re-exported at the `nestrs` crate root) and `nestrs/tests/cross_cutting_extended.rs` for examples.
 
-### Worked example: `#[roles]` + `XRoleMetadataGuard`
+### Worked example: `#[roles]` + `DemoXRoleMetadataGuard`
 
-[`XRoleMetadataGuard`](https://docs.rs/nestrs/latest/nestrs/security/struct.XRoleMetadataGuard.html) is a small reference guard: it reads **`HandlerKey`** from the request, loads the **`roles`** string from [`MetadataRegistry`](https://docs.rs/nestrs-core/latest/nestrs_core/struct.MetadataRegistry.html) (populated by `#[roles(...)]`), and compares it to the **`x-role`** header (comma-split allow list on the handler side, single role from the client in this demo).
+[`DemoXRoleMetadataGuard`](https://docs.rs/nestrs/latest/nestrs/struct.DemoXRoleMetadataGuard.html) is a small **demo-only** reference guard: it reads **`HandlerKey`** from the request, loads the **`roles`** string from [`MetadataRegistry`](https://docs.rs/nestrs-core/latest/nestrs_core/struct.MetadataRegistry.html) (populated by `#[roles(...)]`), and compares it to the **`x-role`** header (comma-split allow list on the handler side, single role from the client in this demo). The role comes from a header anyone can set — never use it in production. (`XRoleMetadataGuard` still exists as a deprecated alias.)
 
 **Application code** (no test-only reset guards—use real auth in production):
 
@@ -58,7 +58,7 @@ impl DocsController {
     /// `#[roles("admin")]` registers metadata; the guard enforces it.
     #[get("/admin-only")]
     #[roles("admin")]
-    #[use_guards(XRoleMetadataGuard)]
+    #[use_guards(DemoXRoleMetadataGuard)]
     async fn admin_only() -> &'static str {
         "ok"
     }
@@ -68,11 +68,11 @@ impl DocsController {
 struct AppModule;
 ```
 
-Call the route with `x-role: admin` to receive **200**; `x-role: user` yields **403**. In real services, replace the header check with a JWT claim, session, or [`AuthStrategy`](https://docs.rs/nestrs/latest/nestrs/security/trait.AuthStrategy.html) implementation—keep **`#[roles]`** + OpenAPI inference ([OpenAPI & HTTP](openapi-http.md)) as **documentation** of intent even when enforcement lives in a different guard.
+Call the route with `x-role: admin` to receive **200**; `x-role: user` yields **403**. In real services, replace the header check with a JWT claim, session, or [`AuthStrategy`](https://docs.rs/nestrs/latest/nestrs/trait.AuthStrategy.html) implementation—keep **`#[roles]`** + OpenAPI inference ([OpenAPI & HTTP](openapi-http.md)) as **documentation** of intent even when enforcement lives in a different guard.
 
 ### Worked example: validation + `ValidationPipe` (closest to `@Body()` + `ValidationPipe`)
 
-On **`#[routes]`**, add **`#[use_pipes(ValidationPipe)]`** on the handler (or controller) and use **`#[param::body]`**, **`#[param::query]`**, or **`#[param::param]`** with a **`#[dto]`** type. Field constraints use the nestrs DTO attributes (for example **`#[IsEmail]`**, **`#[Length(...)]`**, **`#[validate(...)]`**)—see **`nestrs/tests/param_decorators_and_pipes.rs`** for query, path, and body coverage.
+On **`#[routes]`**, add **`#[use_pipes(ValidationPipe)]`** on the handler method (pipes are per-handler — there is no controller-level pipe attribute) and use **`#[param::body]`**, **`#[param::query]`**, or **`#[param::param]`** with a **`#[dto]`** type. Field constraints use the nestrs DTO attributes (for example **`#[IsEmail]`**, **`#[Length(...)]`**, **`#[validate(...)]`**)—see **`nestrs/tests/param_decorators_and_pipes.rs`** for query, path, and body coverage.
 
 ```rust
 use nestrs::prelude::*;
@@ -108,20 +108,28 @@ Some code paths also accept **`ValidatedBody<SignupDto>`** tuple extractors (see
 
 ### Worked example: `TrimPipe` on a body string (non-`ValidationPipe` chain)
 
-`TrimPipe` runs at extraction time via the per-arity `PipedBody*` extractors. Write the extractor explicitly — the macro today only auto-rewrites the `ValidationPipe` fast path.
+`TrimPipe` runs at extraction time via the per-arity **`PipedBody*`** / **`PipedQuery*`** / **`PipedPath*`** extractors (`PipedBody1`–`PipedBody4`, etc., one struct per chain length up to four). Write the extractor explicitly — the macro today only auto-rewrites the `ValidationPipe` fast path, and for other chains the **`Piped*`** type itself is the Axum extractor, so declare it bare (no `#[param::…]` decorator, which would wrap it in a raw `Json`/`Query`/`Path` extractor that cannot deserialize it):
 
 ```rust
 use nestrs::prelude::*;
 
-#[post("/echo")]
-async fn echo(
-    #[param::body] raw: PipedBody1<String, TrimPipe>,
-) -> String {
-    raw.0  // leading + trailing whitespace stripped
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/api", version = "v1")]
+struct ExampleController;
+
+#[routes(state = AppState)]
+impl ExampleController {
+    #[post("/echo")]
+    async fn echo(raw: PipedBody1<String, TrimPipe>) -> String {
+        raw.0  // leading + trailing whitespace stripped at extraction time
+    }
 }
 ```
 
-Invalid input (e.g. non-JSON body) returns **400** with the per-pipe status code preserved.
+Pipes run in declaration order (each pipe transforms the previous pipe's output), the first failure short-circuits, and the pipe's own status code is preserved — **`400`** from `ParseIntPipe`, **`422`** from `ValidationPipe`; a non-`HttpException` pipe error becomes **400**. Non-JSON bodies are also **400** (rejected by the JSON extractor before the chain runs).
 
 ## 2) Parameter “decorators” (closest to `createParamDecorator`)
 

@@ -13,7 +13,7 @@ Add the `graphql` feature to your `nestrs` dependency and add `async-graphql` an
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["graphql"] }
+nestrs = { version = "1.0.0", features = ["graphql"] }
 async-graphql = "7"
 ```
 
@@ -113,11 +113,137 @@ let schema = Schema::build(QueryRoot, MutationRoot, EmptySubscription)
 ```
 
 <Note>
-Federation, schema stitching, and codegen are outside the nestrs core. Use async-graphql's federation support and Apollo Router or GraphOS to compose subgraphs. nestrs exposes a single `/graphql` endpoint — treat it as one subgraph in your platform.
+A full query planner, the Apollo Router wire protocol, and automatic type merging are outside nestrs — compose subgraphs with Apollo Router / GraphOS when you need those. For stitching subgraph SDLs behind a single Axum endpoint, nestrs ships a lightweight federation gateway; see the next section.
 </Note>
 
+### Federation gateway
+
+The `graphql-federation-gateway` feature enables a lightweight Apollo Federation gateway in `nestrs-graphql`. It stitches subgraph SDLs behind one Axum endpoint and exposes two fields:
+
+- `_service { sdl }` — the merged federation SDL, so a router in front of the gateway can introspect the stitched shape.
+- entity resolution — dispatches each representation's `__typename` to the subgraph-specific resolver you supply (see below).
+
+<Warning>
+async-graphql 7 registers the federation entity field as **`entities`** (no underscore prefix) on the gateway schema, even though the federation-v2 SDL names it `_entities` per the Apollo spec. Clients calling the gateway directly must query `entities(representations: [...])`. The exported SDL still says `_entities`, so an Apollo Router in front of the gateway resolves via the spec-correct name.
+</Warning>
+
+```toml
+[dependencies]
+nestrs = { version = "1.0.0", features = ["graphql-federation-gateway"] }
+```
+
+The feature implies `graphql-authz`, and the gateway types are re-exported under `nestrs::graphql::federation`: `federation_router`, `federation_router_with_options`, `federation_router_with_hook`, `FederationConfig`, `SubgraphSpec`, `EntityResolver`, and `FederationError`.
+
+#### What it is — and isn't
+
+The gateway validates, emits, and routes — it does not plan queries:
+
+1. **Validate** every `SubgraphSpec.sdl` at gateway-construction time. A malformed SDL refuses with `FederationError::Parse` — no partially-built gateway.
+2. **Emit** the merged SDL with the same federation-v2 flags async-graphql uses for individual subgraphs (`@link` directive, `_Entity` / `_Any` / `_service` plumbing).
+3. **Route** cross-subgraph entity queries by `__typename` to a resolver you supply. Concurrency, batching, and transport (HTTP vs in-process) are the caller's choice.
+
+There is no query planner and no automatic stitching of type fields across subgraphs — types are concatenated as-is.
+
+#### Exporting a subgraph's federation SDL
+
+Each subgraph contributes a federation-shaped SDL. Export one from an async-graphql `Schema` with `SDLExportOptions::default().federation()`:
+
+```rust
+use nestrs::graphql::{export_schema_sdl_with_options, SDLExportOptions};
+
+let sdl = export_schema_sdl_with_options(
+    &schema,
+    SDLExportOptions::default().federation(),
+);
+```
+
+Hand-rolled federation v2 SDL with `@link` / `@key` directives also works — the gateway only parses it, it does not re-derive it.
+
+#### Wiring the gateway
+
+Build a `SubgraphSpec` per subgraph (name + SDL + entity resolver) and pass them to `federation_router`:
+
+```rust
+use std::sync::Arc;
+use nestrs::graphql::federation::{
+    federation_router, EntityResolver, FederationConfig, SubgraphSpec,
+};
+
+fn user_resolver() -> Arc<dyn EntityResolver> {
+    Arc::new(
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+            // one DB round-trip for the whole batch — see below
+            Ok(reps
+                .iter()
+                .map(|rep| {
+                    let id = rep.get("id")?.as_str()?;
+                    Some(serde_json::json!({ "id": id, "name": "Ada" }))
+                })
+                .collect())
+        },
+    )
+}
+
+let config = FederationConfig {
+    subgraphs: vec![
+        SubgraphSpec {
+            name: "User".to_string(),
+            sdl: users_sdl,
+            entity_resolver: user_resolver(),
+        },
+        SubgraphSpec {
+            name: "Product".to_string(),
+            sdl: products_sdl,
+            entity_resolver: product_resolver(),
+        },
+    ],
+    ..Default::default()
+};
+
+let gateway = federation_router(config, "/graphql")
+    .expect("subgraph SDLs parse");
+```
+
+Merge the gateway's `Router` into your `NestApplication` with `use_global_layer`, keeping `listen` and all built-in middleware:
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_global_layer(|router| router.merge(gateway))
+    .listen(3000)
+    .await;
+```
+
+Dispatch is keyed by `SubgraphSpec.name` matching the representation's `__typename`. Two subgraphs with the same name fail at construction with `FederationError::Merge` (the last-writer-wins alternative would silently mask config bugs), and an empty `subgraphs` list fails with `FederationError::NoSubgraphs`.
+
+#### The batched `EntityResolver`
+
+`EntityResolver` is **batched**, not one-representation-at-a-time. The gateway groups all representations in one `entities` call by `__typename` and hands each group to its owning resolver as a single slice:
+
+```rust
+pub trait EntityResolver: Send + Sync + 'static {
+    fn resolve(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        representations: &[&serde_json::Value],
+    ) -> async_graphql::Result<Vec<Option<serde_json::Value>>>;
+}
+```
+
+- Each element of `representations` is the parsed JSON object the client sent (for example `{ "__typename": "User", "id": "1" }`).
+- Return **one entry per input representation, in the same order** — `Ok(None)` maps to JSON `null` in the `entities` list.
+- Unknown `__typename` values (no matching subgraph) resolve to `null`; a resolver error nulls that whole group and is logged.
+- The gateway re-interleaves batched results back into input order before responding.
+
+The batch signature exists so DataLoader-style batching lives in the resolver — one DB round-trip per typename per request instead of one per representation. Forcing per-representation dispatch in the gateway would reintroduce the N+1 problem. Any closure with the matching `Fn(&Context, &[&Value]) -> Result<Vec<Option<Value>>>` signature implements the trait via `Arc::new(closure)` — no manual `impl` block needed. To batch at the SQL level, pair the resolver with the `graphql-dataloader` feature's `#[dataloader]` / `DataLoader` (1 ms batch window, one `SELECT ... WHERE id IN (...)` per request).
+
+#### Entity resolution with authz
+
+`federation_router_with_hook(cfg, path, hook)` installs a `GqlHandlerHook` (pass an `Arc<GqlDataContext>` for row-level authz). The hook wraps `schema.execute_batch`, so entity resolvers run inside the hook's scope — per-request abilities, transactions, and dataloaders installed by the hook's `prepare` are visible to entity resolvers unchanged.
+
 <Tip>
-For DataLoader / N+1 prevention, use async-graphql's built-in `dataloader` feature or application-level batching in resolvers. The ecosystem is the same as a standalone async-graphql server.
+For DataLoader / N+1 prevention, enable the `graphql-dataloader` feature and use `#[dataloader(key = ..., value = ...)]` structs, or plain application-level batching in resolvers. The ecosystem is the same as a standalone async-graphql server, plus the per-request `DataLoaderRegistry` the hook installs.
 </Tip>
 
 ---
@@ -130,7 +256,7 @@ Add the `ws` feature:
 
 ```toml
 [dependencies]
-nestrs = { version = "0.3.8", features = ["ws"] }
+nestrs = { version = "1.0.0", features = ["ws"] }
 ```
 
 `nestrs-ws` is re-exported as `nestrs::ws` when the feature is enabled.
@@ -222,6 +348,37 @@ pub struct ProtectedGateway;
 WebSocket JSON frames do **not** flow through `NestApplication::use_global_exception_filter` or `HttpException`. Guard and pipe failures are sent to the client on the `"error"` event with `statusCode`, `message`, and `error` fields. There is no separate `WsExceptionFilter` trait in core today — centralize error handling by wrapping `WsGateway::on_message` or using shared guard/pipe types.
 </Warning>
 
+### How WS handlers resolve providers from DI
+
+Gateways are providers themselves, and `#[ws_gateway]` mounts them through the app's `ProviderRegistry`. Register the gateway in both lists of your module:
+
+```rust
+#[module(controllers = [ChatGateway], providers = [ChatGateway])]
+struct AppModule;
+```
+
+The `Controller::register` code generated by `#[ws_gateway]` resolves the gateway with `registry.get::<ChatGateway>()` and mounts it with `ws_route_with_registry`, which wraps it so the shared runtime reaches the registry-aware dispatch generated by `#[ws_routes]`.
+
+The payoff: `#[use_ws_guards(...)]`, `#[use_ws_pipes(...)]`, and `#[use_ws_interceptors(...)]` instances are built **per message** through `resolve` hooks on the traits — the WS mirror of HTTP `CanActivate::resolve`. Override `resolve` to pull injected dependencies; stateless types that only implement `Default` keep working unchanged:
+
+```rust
+#[nestrs::async_trait]
+impl WsCanActivate for WsAuthGuard {
+    fn resolve(registry: &nestrs::core::ProviderRegistry) -> Self {
+        let users: Arc<UserService> = registry.get(); // DI-backed guard
+        Self { users }
+    }
+    // ...
+}
+```
+
+Hand-written gateways mounted via the plain `ws_route` family keep `Default` construction — a guard that expects injected dependencies silently receives an empty `Default` there. Mount registry-aware (via `#[ws_gateway]`) whenever a cross-cutting type needs DI.
+
+Two more runtime hooks round out the picture:
+
+- `WsGateway::message_guards()` — return a `WsGuardChain` and the shared runtime runs it on **every inbound message**, on top of the `#[use_ws_guards]` checks compiled into the dispatch. Rejections emit an `error` frame and close the socket (guard status >= 500 closes with 1011, otherwise 1008).
+- `ws_route_with_guards(gateway, guards)` — upgrade-time `WsUpgradeGuard`s run once on the HTTP upgrade request. A rejection accepts the upgrade and immediately closes the socket with 1008 (Policy Violation) plus the guard's message, so WS clients observe an in-protocol rejection instead of an HTTP error they may not surface.
+
 ### Error frame shapes
 
 | Condition | Frame sent to client |
@@ -233,6 +390,51 @@ WebSocket JSON frames do **not** flow through `NestApplication::use_global_excep
 | Malformed wire frame | `{ "message": "invalid websocket payload (expected {event,data})" }` |
 
 All errors are delivered on `WS_ERROR_EVENT` (`"error"`).
+
+### Origin checks and CSWSH protection
+
+WebSocket upgrades are **not** covered by CORS — browsers send the `Origin` header on the handshake, but nothing stops a malicious page from opening a WebSocket to your gateway and issuing calls as the victim (session cookies ride along automatically). This is **Cross-Site WebSocket Hijacking (CSWSH)**. Defend with an explicit `WsSecurityConfig` origin allowlist.
+
+<Warning>
+`ws_route` and `ws_route_with_guards` do **not** validate the `Origin` header — they accept browsers from any origin. This also applies to gateways mounted by the `#[ws_gateway]` macro, which takes only a `path` argument today. New browser-facing code should either hand-mount with `ws_route_with_security` (below) or sit behind a trusted reverse proxy that already enforces an Origin allowlist.
+</Warning>
+
+Build a config that names every allowed origin and mount with `ws_route_with_security`:
+
+```rust
+use axum::Router;
+use nestrs::ws::{ws_route_with_security, WsSecurityConfig};
+
+let app = Router::new().route(
+    "/ws",
+    ws_route_with_security(
+        gateway,
+        WsSecurityConfig::allow_origins(["https://app.example.com"]),
+    ),
+);
+```
+
+Match semantics, exactly as implemented:
+
+- Allowlist entries are compared against the `Origin` header **verbatim** — pass full origins including the scheme, e.g. `https://app.example.com` (no subdomain wildcards, no trailing-slash normalization).
+- A `null` Origin (sandboxed iframes, `file://`, certain privacy contexts) is **always rejected** when any allowlist entry is configured.
+- An upgrade with **no** `Origin` header (CLI tools, server-to-server clients) is **accepted by default**. Call `.require_origin(true)` on the config to reject bare-origin upgrades with HTTP 403 — useful for browser-only gateways:
+
+```rust
+let security = WsSecurityConfig::allow_origins(["https://app.example.com"])
+    .require_origin(true);
+```
+
+- `WsSecurityConfig::allow_off()` accepts every origin — the behavior of the legacy `ws_route` entry points, intended for gateways behind a trusted reverse proxy that enforces its own allowlist.
+
+Rejection semantics differ by layer:
+
+| Layer | Behavior on failure |
+|---|---|
+| Origin check (`ws_route_with_security`, `ws_route_with_guards_and_security`) | Hard **HTTP 403** before the upgrade — no socket is opened. The reason is logged via `tracing::warn` on target `nestrs::ws`. |
+| Upgrade guard (`ws_route_with_guards*`) | Upgrade is accepted, then the socket is immediately **closed with 1008** (Policy Violation) and the guard's message. |
+
+When both are present (`ws_route_with_guards_and_security(gateway, guards, security)`), the security check runs first: a disallowed origin gets the 403; an allowed origin that fails a guard gets the in-protocol 1008 close.
 
 <AccordionGroup>
   <Accordion title="Full WebSocket example">

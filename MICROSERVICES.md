@@ -77,6 +77,28 @@ There is no separate microservice exception-filter pipeline like Nest’s docs. 
 
 Full narrative: [GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md) in the mdBook (see `docs/src/graphql-ws-micro-dx.md` in the repo).
 
+## TCP transport hardening (fixed bounds)
+
+The TCP listener applies fixed resource bounds so a hostile or misbehaving peer cannot exhaust server memory:
+
+| Bound | Value | Behavior |
+|-------|-------|----------|
+| Max frame size | 1 MiB | Larger frames are rejected before allocation; oversized JSON payloads get an error reply instead of being buffered. |
+| Connection idle timeout | 30 s | Connections with no traffic are closed. |
+| Client request timeout | 30 s | A `send` to an unresponsive peer errors instead of hanging forever. |
+| Max concurrent connections | 1024 | Enforced with a connection semaphore; connections past the cap are refused and the drop is logged (`tracing`). |
+
+These are protocol-level defaults, not knobs — chunk large payloads or move to Kafka/NATS for big messages rather than trying to raise them.
+
+## Broker failure semantics
+
+What happens when a message cannot be processed is transport-specific:
+
+- **RabbitMQ** — malformed (undeserializable) messages are `basic_nack`ed with requeue disabled: dropped, not redelivered. A handler panic is caught (`catch_unwind`); the error is published to the reply queue for RPC patterns and the message is nacked without requeue — poison messages never wedge the consumer's prefetch slots.
+- **Kafka** — the listener keeps its position in memory (rskafka has no offset-commit API). Restarts follow `KafkaConsumerStart::Latest` (default) or `Earliest` (full replay). Delivery across restarts is at-most-once.
+- **NATS core** — messages are ephemeral; an offline subscriber misses them. JetStream adds persistence for integration events you must not lose.
+- **Redis / TCP** — at-least-once on retry; treat every handler as re-executable.
+
 ## JSON wire contract & tests
 
 Transports that carry [`nestrs_microservices::wire::WireRequest`](https://docs.rs/nestrs-microservices/latest/nestrs_microservices/wire/struct.WireRequest.html) / [`WireResponse`](https://docs.rs/nestrs-microservices/latest/nestrs_microservices/wire/struct.WireResponse.html) share one JSON shape (Redis, Kafka, MQTT, RabbitMQ, custom, and the JSON inside gRPC). **Golden tests:** `nestrs-microservices/tests/wire_conformance.rs` + `tests/fixtures/*.json`. Revision: `nestrs_microservices::WIRE_FORMAT_DOC_REVISION`.

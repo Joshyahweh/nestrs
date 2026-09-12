@@ -293,7 +293,7 @@ NestFactory::create::<AppModule>()
 
 ### `use_request_id`
 
-Assigns a stable `x-request-id` UUID to each request (propagated from the client if already present) and echoes it on the response.
+Assigns a stable `x-request-id` to each request and echoes it on the response. When the client supplies an id it is honored — but only if it is plain identifier-ish ASCII (`[A-Za-z0-9._-]`, non-empty, at most 128 bytes, UUID/ULID/hex style); anything else is replaced with a fresh UUID, so unparseable traffic can never forge correlation ids or smuggle log-forging payloads through the request-id channel.
 
 ```rust
 pub fn use_request_id(self) -> Self
@@ -476,7 +476,7 @@ NestFactory::create::<AppModule>()
   </Accordion>
 
   <Accordion title="enable_production_errors — sanitize 5xx bodies">
-    Strips internal detail from JSON 5xx bodies: sets `message` to a generic string and removes the `errors` field. Call `enable_production_errors_from_env()` to activate this automatically when `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV` equals `production` or `prod`.
+    Strips internal detail from JSON 5xx bodies: sets `message` to a generic string and removes the `errors` field. **On by default whenever the runtime environment is production** (first non-empty of `NESTRS_ENV`, `APP_ENV`, or `RUST_ENV` equals `production` or `prod`) — no builder call needed. `enable_production_errors()` forces sanitization on in any environment (e.g. `NESTRS_ENV=staging`); `enable_production_errors_from_env()` re-reads the environment explicitly; `disable_production_errors()` opts out for internal services behind a trusted boundary.
 
     ```rust
     NestFactory::create::<AppModule>()

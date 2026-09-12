@@ -15,7 +15,38 @@ nestrs-cli --help
 |---------|---------|
 | `nestrs-cli new <name>` | Create a new single-crate app with `Cargo.toml`, `src/main.rs`, starter module/controller, `.env.example`, optional git init. |
 | `nestrs-cli generate …` / `nestrs-cli g …` | Generate **resource** (multi-transport scaffold), **service**, **controller**, **module**, **dto**, **guard**, **pipe**, **filter**, **interceptor**, **strategy**, **resolver**, **gateway**, **microservice**, **transport**, or bulk **resources**. |
+| `nestrs-cli db migrate …` | Create, apply, revert, and inspect SQL migrations (`add`, `run`, `revert`, `info`). Default backend `sqlx`; `--backend prisma` passes through to `npx prisma`. |
+| `nestrs-cli db seed …` | Seed the database from a Cargo seed binary (`--bin`) or a transactional SQL file (`--seed-file`). |
 | `nestrs-cli doctor` | Print `rustc` / `cargo` versions, scan `Cargo.toml` for `nestrs` feature hints, and heuristically check `src/**/*.rs` for common misconfigurations (e.g. `enable_openapi()` without the `openapi` feature). Does not replace `cargo check`. |
+
+The `db` family ships behind the `db` Cargo feature (it pulls in `sqlx` and `tokio` as CLI dependencies):
+
+```bash
+cargo install nestrs-scaffold --features db
+```
+
+## db — migrations and seeding
+
+`nestrs-cli db` is the migrations + seeding runner. It works on plain SQL migration files — no DDL-diff engine (`synchronize`) or entity auto-discovery; those belong to full ORMs.
+
+```text
+nestrs-cli db [--backend sqlx|prisma] migrate add <name> [--reversible] [--path <dir>]
+nestrs-cli db [--backend sqlx|prisma] migrate run [--path <dir>] [--target-version V] [--database-url URL]
+nestrs-cli db [--backend sqlx|prisma] migrate revert [--path <dir>] [--target-version V] [--database-url URL]
+nestrs-cli db [--backend sqlx|prisma] migrate info [--path <dir>] [--database-url URL]
+nestrs-cli db [--backend sqlx|prisma] seed --bin <name> [--manifest-path <path>] [--database-url URL]
+nestrs-cli db [--backend sqlx|prisma] seed --seed-file <path> [--database-url URL]
+```
+
+**Global flags:** `--backend sqlx|prisma` (default `sqlx`; `prisma` shells out to `npx prisma …` and cannot revert), `--path <dir>` (default `./migrations`), `--database-url URL` (resolution order: `--database-url` > `DATABASE_URL` > `NESTRS_DB__URL`), `--target-version V`.
+
+**migrate add** writes empty SQL files with sequence-numbered names: `<NNN>_<name>.sql`, or `<NNN>_<name>.up.sql` + `<NNN>_<name>.down.sql` with `--reversible`. `NNN` is a zero-padded 3-digit sequence derived from the largest existing migration (deterministic and hand-writable, unlike timestamped schemes).
+
+**migrate run / revert / info** apply pending migrations up, walk down (`--target-version 0` = full revert), and list applied/pending state. The sqlx backend uses `sqlx::migrate::Migrator` (`_sqlx_migrations` records history).
+
+**seed** has two modes: `--bin <name>` passes through to `cargo run --bin <name>`, forwarding the resolved URL as both `DATABASE_URL` and `NESTRS_DB__URL` (you own the seed binary — the common case composes with `CrudService<T>`); `--seed-file <path>` executes a SQL file via `sqlx::raw_sql` inside an explicit transaction, so a mid-file failure rolls back earlier rows (the `pg_dump` escape hatch).
+
+See [CRUD generation](crud.md) for `#[crud]` controllers over the same pool, and [Ecosystem modules](ecosystem.md) for the database modules.
 
 ### Running from a nestrs git clone (`cargo nestrs`)
 

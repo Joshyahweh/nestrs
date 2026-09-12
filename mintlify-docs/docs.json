@@ -40,6 +40,9 @@
             "group": "Guides",
             "pages": [
               "guides/validation",
+              "guides/authorization",
+              "guides/crud",
+              "guides/oauth2",
               "guides/security",
               "guides/observability",
               "guides/api-versioning",

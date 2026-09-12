@@ -40,7 +40,7 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 
 | Nest (`@nestjs/swagger`) | nestrs | Status | Notes |
 |--------------------------|--------|--------|--------|
-| Automatic DTO schemas from classes | Not generated from Rust types in core | **Partial** | Merge `components` from `utoipa`, manual JSON, or `okapi` fragments—[OpenAPI & HTTP](openapi-http.md). |
+| Automatic DTO schemas from classes | `#[dto]` derives `schemars::JsonSchema`; `schema_entry` / `with_schemas` land it under `components.schemas` | **Partial** | Not auto-linked to operations; non-DTO types via `utoipa`, manual JSON, or `okapi` fragments—[OpenAPI & HTTP](openapi-http.md). |
 | `paths` / operations from controllers | Generated from route registry | **Full** | Summaries, tags, `operationId`, default responses. |
 | Security schemes + `#[roles]` hint | `OpenApiOptions` | **Partial** | Heuristic from metadata—[OpenAPI & HTTP](openapi-http.md). |
 
@@ -48,8 +48,8 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 
 | Nest area | nestrs | Status | Notes |
 |-----------|--------|--------|--------|
-| GraphQL (code-first / schema) | `nestrs-graphql` | **Partial** | async-graphql ecosystem; federation/plugins via external tools—[GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md). |
-| WebSockets gateway | `nestrs-ws` | **Partial** | Error path differs from HTTP filters—same chapter. |
+| GraphQL (code-first / schema) | `nestrs-graphql` | **Partial** | async-graphql ecosystem; lightweight federation gateway in-tree (`graphql-federation-gateway` feature, batched `EntityResolver`); query planning / codegen external—[GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md). |
+| WebSockets gateway | `nestrs-ws` | **Partial** | Guards/pipes/interceptors with DI resolution; origin allowlist via `WsSecurityConfig` (CSWSH); error path differs from HTTP filters—same chapter. |
 | Transport microservices | `nestrs-microservices` | **Partial** | Kafka, NATS, Redis, MQTT, RabbitMQ, gRPC—[Microservices](microservices.md). |
 | Shared JSON wire format | `nestrs_microservices::wire` | **Full** | Golden tests in crate; revision constant for docs. |
 
@@ -96,7 +96,7 @@ The core HTTP engine is **Axum-only** ([ADR-0001](adrs/0001-axum-only.md)). Add 
 See **`STABILITY.md`** and [Fundamentals](fundamentals.md) — global registries may need **`test-hooks`** + clears in parallel test runs.
 
 **Where is Swagger schema generation for my DTOs?**  
-Request/response **schemas** are not derived from Rust types in the core generator; merge **`components`** ([OpenAPI & HTTP](openapi-http.md)).
+`#[dto]` types derive `schemars::JsonSchema` — feed them to `schema_entry` / `OpenApiOptions::with_schemas` to land under `components.schemas` (not auto-linked to operations); merge **`components`** for everything else ([OpenAPI & HTTP](openapi-http.md)).
 
 ## Related
 

@@ -31,7 +31,7 @@ pub struct CreateUserDto {
 `#[dto]` expands to a struct with `#[serde(deny_unknown_fields)]` by default. Any JSON body that contains a key not declared on the struct returns a `400 Bad Request` before your handler runs.
 
 <Note>
-`#[IsString]` is a readability marker only — Rust's type system already enforces that a `String` field is a string. It compiles to no validation code.
+`#[IsString]` is a readability marker only — Rust's type system already enforces that a `String` field is a string. On a `String` (or `Option<String>`) field it compiles to no validation code; on any other field type the `#[dto]` macro rejects the useless marker at compile time. The same compile-time guard applies to `#[IsBoolean]` (non-`bool` fields), `#[IsInt]` / `#[IsNumber]` (non-numeric fields), and `#[IsUUID]` (fields that are neither `String` nor `uuid::Uuid`).
 </Note>
 
 ## Available validation attributes
@@ -40,9 +40,11 @@ pub struct CreateUserDto {
 |---|---|---|
 | `#[IsEmail]` | `validate(email)` | |
 | `#[IsUrl]` | `validate(url)` | |
-| `#[IsUUID]` | `validate(uuid)` | |
-| `#[IsString]` | _(no-op)_ | Readability marker |
-| `#[IsBoolean]` | _(no-op)_ | Readability marker |
+| `#[IsUUID]` | `validate(custom(function = "nestrs::is_uuid"))` | Canonical `8-4-4-4-12` UUID check run at validation time on `String` fields; `uuid::Uuid` fields are serde-enforced and need no marker; any other field type is a compile error |
+| `#[IsString]` | _(no-op)_ | Readability marker; compile error on non-`String` fields |
+| `#[IsBoolean]` | _(no-op)_ | Readability marker; compile error on non-`bool` fields |
+| `#[IsInt]` | _(no-op)_ | Compile-checked: field must be an integer type (`i8`–`i128`, `u8`–`u128`, `isize`/`usize`) |
+| `#[IsNumber]` | _(no-op)_ | Compile-checked: field must be numeric (integers or `f32`/`f64`) |
 | `#[IsNotEmpty]` | `validate(length(min = 1))` | |
 | `#[IsPositive]` | `validate(range(min = 1))` | |
 | `#[IsNegative]` | `validate(range(max = -1))` | |
@@ -185,6 +187,41 @@ impl UsersController {
 
 Both styles produce the same `422` response shape when validation fails.
 
+<Warning>
+The fast path triggers whenever `ValidationPipe` appears **anywhere** in the chain: `#[use_pipes(TrimPipe, ValidationPipe)]` on a `#[param::body]` parameter rewrites it to `ValidatedBody` exactly like the single-pipe form, and `TrimPipe` does not run on that parameter. Put non-`ValidationPipe` pipes on an explicit `Piped*` extractor instead (see below).
+</Warning>
+
+## Other pipes: `TrimPipe`, `ParseIntPipe`, and explicit chains
+
+`#[use_pipes(...)]` auto-rewrites `#[param::body]` / `#[param::query]` / `#[param::param]` parameters only for the `ValidationPipe` fast path above. For any other chain, decorated parameters keep their raw `Json` / `Query` / `Path` extractors — pipes named in the attribute do **not** run on them. To run a real pipe chain at extraction time, type the parameter as one of the `Piped*` extractors directly: `PipedBody1`..`PipedBody4`, `PipedQuery1`..`PipedQuery4`, and `PipedPath1`..`PipedPath4` accept a chain of one to four pipes, run them in declaration order (each pipe transforms the previous pipe's output), and short-circuit on the first failure with that pipe's own status code — a `400` from `ParseIntPipe`, a `422` from `ValidationPipe`. Pipe errors that are not `HttpException`s are wrapped as `400 Bad Request`.
+
+```rust
+use nestrs::prelude::*;
+
+#[routes(state = AppState)]
+impl UsersController {
+    // Trim a raw JSON string body on the way in. `#[use_pipes]` records the
+    // chain; the PipedBody1 extractor is what executes it.
+    #[post("/names")]
+    #[use_pipes(TrimPipe)]
+    pub async fn names(raw: PipedBody1<String, TrimPipe>) -> String {
+        format!("[{}]", raw.0)
+    }
+
+    // Coerce a path segment to i64 — "/users/abc" yields a 400 from ParseIntPipe.
+    #[get("/users/:id")]
+    pub async fn by_id(raw: PipedPath1<String, ParseIntPipe>) -> String {
+        format!("id={}", raw.0)
+    }
+}
+```
+
+<Warning>
+Do not combine `#[param::body]` / `#[param::query]` / `#[param::param]` with a `Piped*` type. `#[routes]` would wrap the parameter in a raw `axum::Json<T>` / `Query<T>` / `Path<T>` extractor that must deserialize the `Piped*` type itself — which it cannot. The `Piped*` extractor *is* the Axum extractor: declare it bare, as above.
+</Warning>
+
+`TrimPipe` (strips leading/trailing whitespace from a `String`) ships with the framework alongside `ParseIntPipe` and `ValidationPipe`, all importable from `nestrs::prelude`. Pipes implement `PipeTransform<Input>` from `nestrs::core`; the HTTP extractors additionally require the marker trait `HttpPipeTransform<Input>`, which adds the `Default` bound the extractors use to instantiate each pipe without going through DI. (WS and microservice transports have their own `WsPipeTransform` / `MicroPipeTransform` sub-traits.) Custom pipes implement both traits for each input type they accept, with an `Error` type that implements `std::error::Error`.
+
 ## Allowing unknown fields
 
 By default `#[dto]` adds `#[serde(deny_unknown_fields)]` so clients cannot send undocumented keys. To opt out:
@@ -209,16 +246,19 @@ A failed validation returns `422 Unprocessable Entity` with a JSON body:
 {
   "statusCode": 422,
   "message": "Validation failed",
+  "error": "Unprocessable Entity",
   "errors": [
     {
       "field": "email",
       "constraints": {
-        "email": "email must be a valid email address"
+        "email": "email"
       }
     }
   ]
 }
 ```
+
+Each `errors` entry pairs the failing field with a `constraints` map of rule code → message. The `validator` crate does not attach a default message to its built-in rules, so the message falls back to the rule code (`"email"`, `"length"`, …) unless the rule sets one explicitly, e.g. `#[validate(email(message = "must be a valid email address"))]` or `#[Length(min = 1, message = "...")]` via `#[dto]` passthrough.
 
 <AccordionGroup>
   <Accordion title="Full example: DTO + controller + module">

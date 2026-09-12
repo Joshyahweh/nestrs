@@ -108,14 +108,39 @@ for route in discovery.get_routes() {
 | `Scope.DEFAULT` | `ProviderScope::Singleton` (default) |
 | `Scope.TRANSIENT` | `ProviderScope::Transient` |
 | `Scope.REQUEST` | `ProviderScope::Request` |
-| `useValue` | `registry.register_use_value::<T>(Arc<T>)` |
-| `useFactory` | `registry.register_use_factory::<T>(scope, \|reg\| Arc<T>)` |
+| `useValue` | `registry.register_use_value::<T>(Arc<T>)` — or `register_use_value_with_lifecycle` to also drive the value's `ProviderLifecycle` hooks |
+| `useFactory` | `registry.register_use_factory::<T>(scope, \|reg\| Arc<T>)` — or `register_use_factory_with_lifecycle` for hook-aware factories |
 | `useClass` | `registry.register_use_class::<T>()` |
 | `ModuleRef` | `ModuleRef` from `nestrs::core` |
 | `DiscoveryService` | `DiscoveryService` from `nestrs::core` |
+| `OnModuleInit` / `OnApplicationBootstrap` / `OnApplicationShutdown` / `OnModuleDestroy` | `#[injectable]` async hooks on `Injectable` — and, for `useValue`/`useFactory` providers, the opt-in `ProviderLifecycle` trait (five default no-op hooks) via the `*_with_lifecycle` registration variants |
 | `forwardRef` | `forward_ref::<T>()` in `#[module(imports = [...])]` |
 | `ConfigModule.forRoot` | `ConfigurableModuleBuilder::for_root::<M>(options)` |
 | `ConfigModule.forRootAsync` | `ConfigurableModuleBuilder::for_root_async::<M, _, _>(async_fn).await` |
+
+## Overriding providers
+
+Two surfaces exist for replacing a provider with a concrete instance, both backed by `ProviderRegistry::override_provider::<T>(instance)`.
+
+**Before controllers register — `DynamicModuleBuilder`.** Overrides apply after the module graph's providers are registered but **before** controllers are registered, so the generated handlers are wired against the overridden instances. This is how tests replace `#[crud]`'s hidden `__PostCrudState` provider with one backed by a real connection pool:
+
+```rust
+use nestrs::core::DynamicModuleBuilder;
+use std::sync::Arc;
+
+let dynamic_module = DynamicModuleBuilder::<PostsModule>::new()
+    .override_provider::<__PostCrudState>(Arc::new(__PostCrudState::from_pool(pool)))
+    .build();
+
+let app = NestApplication::from_registry_and_router(
+    std::sync::Arc::new(dynamic_module.registry),
+    dynamic_module.router,
+);
+```
+
+**After the module graph is built — the application handle.** `NestApplication::registry()` borrows the underlying `Arc<ProviderRegistry>` — the entry point tests use to reach `override_provider` when replacing a macro-generated `#[injectable]` state struct on an application they already hold. `NestApplication::into_registry_and_router()` yields the `(registry, router)` pair and `from_registry_and_router()` re-wraps it, so an application can be rebuilt around an overridden registry (the router is safe to reuse: controllers keep `Clone` `Arc`s of the state they were mounted with).
+
+An override preserves the provider's declared scope (`T::scope()`): a request- or transient-scoped provider keeps its per-request / per-resolution semantics, and every resolution hands out the given instance — a request-scoped override therefore shares that one instance across requests. `T` must implement `Injectable`; the override entry keeps `T`'s lifecycle hooks.
 
 ## Request-scoped providers
 
@@ -164,8 +189,34 @@ impl AppController {
 nestrs stores the request-scoped cache in a `tokio::task_local!` variable. Every request gets a fresh, empty cache; the first call to `registry.get::<T>()` for a `Request`-scoped type within that task constructs and caches the instance for the lifetime of that request.
 
 <Warning>
-  Resolving a `Request`-scoped provider outside a request context (for example, during `eager_init_singletons`) **panics** because no task-local cache exists. Always enable `use_request_scope()` on the application before using the `RequestScoped` extractor.
+  Without a request scope active, resolving a `Request`-scoped provider behaves like any other unresolvable provider: `registry.try_get::<T>()` returns `None`, while `registry.get::<T>()` **panics** with a message naming the fixes. Always enable `use_request_scope()` on the application before using the `RequestScoped` extractor.
 </Warning>
+
+### Background work: `spawn_with_request_scope`
+
+Task-locals do not cross `tokio::spawn`, so a bare `tokio::spawn` inside a handler runs with no request scope. Use `spawn_with_request_scope` for background work that resolves `Request`-scoped providers:
+
+```rust
+use nestrs::core::spawn_with_request_scope;
+
+#[routes(state = AppService)]
+impl AppController {
+    #[get("/later")]
+    pub async fn later(RequestScoped(ctx): RequestScoped<RequestContext>) -> String {
+        let request_id = ctx.request_id.clone();
+        spawn_with_request_scope(async move {
+            // Resolves the same `RequestContext` instance the request had
+            // at spawn time (snapshot semantics).
+            tracing::info!("background job for {request_id}");
+        });
+        "spawned".to_string()
+    }
+}
+```
+
+- Spawned **inside a request**, the child receives a **snapshot** of the request scope: it resolves the same request-scoped instances the request had at spawn time (including any in-flight transaction slot). Values constructed or inserted after the spawn stay private to whichever side created them.
+- Spawned **outside any scope** (scheduler, startup job), the child gets a fresh empty scope — request-scoped providers construct per spawned task and are isolated from every other task.
+- The ability / principal slots are deliberately **not** carried: row-level authz stays deny-closed in the spawned task unless you explicitly wrap the future with the ability helpers.
 
 ## Circular provider dependencies
 

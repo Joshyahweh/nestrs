@@ -1,22 +1,72 @@
 ---
 title: "Connect an AI editor to your nestrs project"
-description: "Install nestrs-mcp, wire it into Claude Code, Cursor, VS Code, or Codex CLI, and let the model query your project structure, scaffold new resources, and ask a running app about its health."
+description: "Install nestrs-mcp, wire it into Claude Code, Cursor, VS Code, or Codex CLI, embed the tool handlers in your own binary, and expose project structure, live runtime, scaffolding, docs search, prompts, resources, elicitation, and tasks to the model."
 ---
 
-`nestrs-mcp` is a Model Context Protocol server for nestrs. Once installed, MCP-aware clients (Claude Code, Cursor, VS Code, Codex CLI, anything that speaks the protocol) gain a structured view of your project — modules, controllers, providers, routes, DTOs, schedules, event handlers — plus live runtime queries against a running app and a set of scaffolding actions.
+`nestrs-mcp` is a Model Context Protocol server for nestrs. MCP-aware clients (Claude Code, Cursor, VS Code, Codex CLI, anything that speaks the protocol) gain a structured view of your project — modules, controllers, providers, routes, DTOs, schedules, event handlers — plus live runtime queries against a running app and a set of scaffolding actions.
 
-The intended outcome: instead of re-parsing the source tree on every turn, the model calls `list_routes`, `get_app_health`, `create_resource`, or `search_docs` and gets a typed answer back.
+The intended outcome: instead of re-parsing the source tree on every turn, the model calls `list_routes`, `get_app_health`, `create_resource`, or `search_docs` and gets a typed answer back. How much of that you get out of the box — and what you serve yourself — is covered in [Server architecture](#server-architecture).
 
 ## What it exposes
 
 | Surface | Example tools | Requires |
 |---|---|---|
-| **Introspection** (source + live registries) | `list_modules`, `get_module`, `list_controllers`, `get_controller`, `list_providers`, `list_routes`, `get_route`, `list_dtos`, `get_dto`, `list_schedules`, `list_event_handlers`, `list_queue_processors` | nothing |
+| **Introspection** (source parser, read-only) | `list_modules`, `get_module`, `list_controllers`, `get_controller`, `list_providers`, `get_provider`, `list_routes`, `get_route`, `list_dtos`, `get_dto`, `list_schedules`, `list_event_handlers`, `list_queue_processors` | nothing |
 | **Live runtime** | `get_app_health`, `get_app_routes`, `get_app_providers` | nestrs app with the `admin` feature on |
 | **Scaffolding** | `new_project`, `create_module`, `create_resource`, `create_dto`, `generate_crud` | write access to a target directory |
 | **Docs search** | `search_docs`, `get_changelog`, `get_doc` | nothing (reads local repo files) |
 
-Introspection reads the workspace's `src/` tree via `syn` (mirroring the attribute shapes from `nestrs-macros`) and fuses that with whatever the `RouteRegistry` and `ProviderRegistry` already hold.
+Introspection tools read the workspace's `src/` tree via `syn` (mirroring the attribute shapes from `nestrs-macros`); the live-runtime tools query a running app's admin port instead. Both live on separate handlers — see below.
+
+## Server architecture
+
+`nestrs-mcp` ships two layers:
+
+- **`NestrsMcpServer`** (`nestrs_mcp::server`) — the top-level `rmcp` `ServerHandler` that the `nestrs-mcp` binary serves. It carries the protocol surfaces **beyond tools** — prompts, resources, resource templates, argument completion, resource subscriptions (SEP-1696), cache hints (SEP-2549), elicitation (SEP-1034), and the task store (SEP-2663) — plus, under the `authz` feature, per-tool-call authorization. It declares **no tools of its own**: its `ToolRouter` is empty.
+- **Four area handlers** (`nestrs_mcp::tools`) — `IntrospectionTools`, `RuntimeTools`, `ScaffoldTools`, `DocsTools`. Each is a complete `ServerHandler` with its own `#[tool_router]`, so each can be served on its own transport. `NestrsMcpServer::sub_servers()` returns all four bundled in a `SubServers` struct.
+
+<Warning>
+**As of 1.0.0 the stock binary registers no tools.** The binary serves the `NestrsMcpServer` wrapper, whose tool router is empty — a fresh `initialize` + `tools/list` round-trip returns `{"tools":[]}`. The 24 tools in the table above live on the four area handlers, which the binary does not mount (the rmcp router type is invariant in the handler type, so the sub-routers can't be merged into the wrapper). The wizard, the transports, and everything else on this page work; you just won't see the tools in the client's tool list until you serve an area handler yourself (next section) or the wiring lands in the planned `nestrs-cli mcp` subcommand.
+</Warning>
+
+### Serving the tools yourself
+
+`nestrs-mcp` is a library as well as a binary. Each area handler is a standalone `ServerHandler`, so you can serve any subset from your own binary:
+
+```rust
+use nestrs_mcp::tools::introspection::IntrospectionTools;
+use rmcp::service::serve_server;
+use rmcp::transport::stdio;
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let running = serve_server(IntrospectionTools, stdio())
+        .await
+        .map_err(|e| std::io::Error::other(format!("stdio init: {e}")))?;
+    running
+        .waiting()
+        .await
+        .map_err(|e| std::io::Error::other(format!("stdio run: {e}")))?;
+    Ok(())
+}
+```
+
+```toml
+[dependencies]
+nestrs-mcp = "1.0"
+# rmcp is not re-exported — depend on it directly with the server +
+# transport features (transport-io = stdio; add transport-streamable-http-server for HTTP).
+rmcp = { version = "3.1", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["full"] }
+```
+
+Register the server in your client config exactly as shown in [Connect from a client](#connect-from-a-client) (the `command` is now your binary instead of `nestrs-mcp`). To serve more than one area, spawn one `serve_server` per handler on separate transports and register each under its own name (`nestrs-introspection`, `nestrs-runtime`, …).
+
+<Tip>
+`NestrsMcpServer::sub_servers()` returns all four handlers in one value — `sub_servers.introspection`, `sub_servers.runtime`, `sub_servers.scaffold`, `sub_servers.docs` — so you don't have to import each module by hand.
+</Tip>
+
+To serve the non-tool surfaces (prompts, resources, elicitation, tasks) plus the `authz` pipeline instead, serve `NestrsMcpServer` and register what you need — see [Protocol surfaces beyond tools](#protocol-surfaces-beyond-tools) and the sections after it. Serving a `NestrsMcpServer` and one or more area handlers side by side is fine; they're independent handlers.
 
 ## Install
 
@@ -29,10 +79,20 @@ cargo install nestrs-mcp
 cargo install nestrs-mcp --features http
 ```
 
-```bash with admin-port client
+```bash with admin re-exports (AdminHandle / AdminOptions)
 cargo install nestrs-mcp --features admin
 ```
+
+```bash everything (HTTP + admin + authz + elicitation)
+cargo install nestrs-mcp --features "http,admin,authz,elicitation"
+```
 </CodeGroup>
+
+<Note>
+The admin-port tools (`get_app_health`, `get_app_routes`, `get_app_providers`) and the `AdminClient` behind them are compiled in unconditionally — no feature needed on `nestrs-mcp`. The `admin` feature only re-exports `nestrs::admin::{AdminHandle, AdminOptions}` for embedders. The feature that matters for the runtime tools is `admin` on the **`nestrs` crate of the target app** (see [Live runtime](#live-runtime)).
+</Note>
+
+As a library dependency, the same features apply — `nestrs-mcp = { version = "1.0", features = ["admin"] }` etc. The full feature list (`stdio`, `http`, `admin`, `authz`, `authz-row-level`, `elicitation`) is on the [API reference](/api/crates/nestrs-mcp).
 
 ## Setup wizard
 
@@ -70,7 +130,7 @@ Detection rules: an editor is "detected" if its config file **or** its parent di
 
 Merge behavior: all four formats (`mcpServers` for Claude Code / Cursor, `servers` for VS Code, `[mcp_servers]` for Codex) are merged round-trip — the wizard preserves every unrelated key and every other server entry. A second run is a no-op (the file is byte-identical, nothing is rewritten).
 
-After the wizard finishes, restart your editor (or click **Refresh** in the MCP servers panel) and the `nestrs` tools (`list_modules`, `get_app_health`, `create_resource`, `search_docs`, …) appear in the model's tool list.
+After the wizard finishes, restart your editor (or click **Refresh** in the MCP servers panel) and the `nestrs` server appears in the MCP panel with a green handshake. Remember the 1.0.0 caveat from [Server architecture](#server-architecture): the stock binary's tool list is empty — serve an area handler from your own binary to make the tools (`list_modules`, `get_app_health`, `create_resource`, `search_docs`, …) visible to the model.
 
 <Tip>
 Codex's `config.toml` may show unrelated diff hunks on the first run — that's `toml::to_string_pretty` re-formatting the existing file. Commit the new file once and you're set; subsequent runs produce no diff.
@@ -109,7 +169,7 @@ The HTTP transport is a `StreamableHttpService` mounted on an `axum::Router` at 
 2. Bind the listener to `127.0.0.1`, never `0.0.0.0`, so the proxy is the only way in.
 3. Set `--http-addr 127.0.0.1:<port>` explicitly; the default is already loopback, but spell it out so a later refactor can't widen the bind by accident.
 
-OAuth PKCE, a first-class bearer-token middleware, and per-tool authorization are tracked as follow-ups; the live admin port on the **app** side already supports bearer auth (see `nestrs::admin::AdminOptions { token: ... }`).
+OAuth PKCE and a first-class bearer-token middleware are tracked as follow-ups; the live admin port on the **app** side already supports bearer auth (see `nestrs::admin::AdminOptions { token: ... }`), and per-tool-call authorization on the MCP side itself is available today via the `authz` feature (see [Per-tool-call authorization](#per-tool-call-authorization-authz)).
 
 ## Connect from a client
 
@@ -182,7 +242,7 @@ args = []
 </Tab>
 </Tabs>
 
-After saving, restart the client (or click "Refresh" in the MCP servers panel). The nestrs tools appear in the model's tool list and the model calls them automatically.
+After saving, restart the client (or click "Refresh" in the MCP servers panel). The handshake succeeds and the server shows up — for the tool list itself, see the 1.0.0 caveat in [Server architecture](#server-architecture): you'll need to point the entry at a binary that serves one of the area handlers.
 
 ### Streamable HTTP (networked / hosted)
 
@@ -300,10 +360,170 @@ If a token is configured, requests must carry `Authorization: Bearer <token>`. W
 
 The MCP `get_app_health` / `get_app_routes` / `get_app_providers` tools take `base_url` + optional `token` per call, so the model can target a running app on the user's machine without restarting the server.
 
+## Protocol surfaces beyond tools
+
+The `NestrsMcpServer` wrapper (through its `McpSurfaces` bundle) implements the MCP surfaces that aren't tools: prompts, resources, resource templates, argument completion, resource subscriptions, and cache hints. Build a `McpSurfaces` value, register what you need, and attach it with `.with_surfaces(...)`:
+
+```rust
+use nestrs_mcp::{user_text, CacheHints, McpSurfaces};
+use rmcp::model::{CacheScope, PromptArgument, Resource, ResourceContents, ResourceTemplate};
+
+let surfaces = McpSurfaces::new()
+    // prompts/list + prompts/get: the handler receives the client's
+    // argument map and returns the prompt messages.
+    .register_prompt(
+        "review",
+        Some("Code review prompt".into()),
+        vec![PromptArgument::new("topic").with_required(true)],
+        |args| Ok(vec![user_text("Review this code")]),
+    )
+    // resources/list + resources/read
+    .register_resource(
+        Resource::new("nestrs://health", "health").with_mime_type("text/plain"),
+        |uri| Ok(vec![ResourceContents::text("ok", uri)]),
+    )
+    // Resource templates: the client expands the RFC 6570 template
+    // itself, then calls resources/read on the resulting URI.
+    .register_resource_template(
+        ResourceTemplate::new("nestrs://docs/{name}", "doc_tmpl"),
+        |uri| Ok(vec![ResourceContents::text("doc body", uri)]),
+    )
+    // completion/complete — one handler; it reads the request's `ref`
+    // to tell which prompt/resource argument is being completed.
+    .register_complete(|partial, _req| Ok(vec![format!("{partial}-alpha")]))
+    // Mark a URI as eligible for subscription (SEP-1696). Only then is
+    // `resources.subscribe` advertised in `initialize`.
+    .register_subscribable_resource("nestrs://health")
+    // SEP-2549 cache hints on every list/read result (protocol >= 2026-07-28 only).
+    .with_cache_hints(CacheHints::new(60_000, CacheScope::Public));
+
+let server = nestrs_mcp::server::NestrsMcpServer::new().with_surfaces(surfaces);
+```
+
+Matching rules worth knowing:
+
+- `resources/read` checks the static resource map first — a static resource always wins over a template that happens to match the same URI.
+- Template matching is a static-prefix match (everything before the first `{`, with a trailing `/` trimmed) — enough for the common `nestrs://docs/{name}` shape.
+- The `resources.subscribe` capability is advertised only when at least one URI is marked subscribable; on protocol ≥ 2026-07-28 the `subscriptions/listen` flow is used, and the server keeps the legacy `subscribe`/`unsubscribe` methods working for older peers.
+- Cache hints travel as top-level `ttlMs` / `cacheScope` fields and are suppressed for peers on protocol versions older than 2026-07-28. `CacheScope::Private` restricts caching to the requesting user's client; `Public` (the default) allows intermediaries.
+
+## Elicitation: asking the user mid-flight
+
+Two mechanisms, both opt-in:
+
+**MRTR for tools (SEP-2322)** — no Cargo feature needed. A tool that needs more input returns `CallToolResponse::InputRequired` instead of an error, using the `elicit_input` helper; on the retry the client echoes the answer back, and `input_responses` reads it:
+
+```rust
+use nestrs_mcp::{elicit_input, input_responses};
+use rmcp::model::{CallToolRequestParams, ElicitationSchema, PrimitiveSchemaDefinition, StringSchema};
+use std::collections::BTreeMap;
+
+// First round — return this from the tool body:
+let mut props = BTreeMap::new();
+props.insert(
+    "colour".to_string(),
+    PrimitiveSchemaDefinition::String(
+        StringSchema::new()
+            .title("Colour")
+            .description("Pick one"),
+    ),
+);
+let result = elicit_input("Pick a colour", ElicitationSchema::new(props), None);
+
+// Retry round — the client answered under the same key:
+if let Some(responses) = input_responses(&request) {
+    let colour = responses.get("input"); // the ElicitResult JSON
+}
+// (`request` is the rmcp CallToolRequestParams for the retried call.)
+```
+
+The `request_state` argument (`Option<String>`) carries opaque server-side state across rounds if the tool needs it.
+
+**Server→client elicitation (SEP-1034)** — behind the `elicitation` feature (it adds rmcp's elicitation support, including the `url` crate for URL-based elicitations). Register one handler on the surfaces bundle, then call `NestrsMcpServer::elicit` from a tool body:
+
+```rust
+use nestrs_mcp::server::NestrsMcpServer;
+use nestrs_mcp::McpSurfaces;
+
+let surfaces = McpSurfaces::new().register_elicitation(|request, context| {
+    // Forward `request` to the client (e.g. via context.peer) or to
+    // another service; return the client's ElicitResult
+    // (Accept / Decline / Cancel) or an error string.
+    todo!()
+});
+
+let server = NestrsMcpServer::new().with_surfaces(surfaces);
+// later, inside a tool body:
+// let answer = server.elicit(elicit_request_params, context).await?;
+```
+
+`NestrsMcpServer::elicit` probes the client's capability first and returns a `Cancel` result (rather than an error) if the client didn't advertise elicitation — the kinder shape for the client's UI.
+
+## Long-running tasks (SEP-2663)
+
+A tool that kicks off slow work can hand the client a task handle instead of blocking the `tools/call` response. The task store always exists; advertise the extension with `.with_task_support()` so clients know they can poll:
+
+```rust
+use nestrs_mcp::server::NestrsMcpServer;
+use rmcp::model::{CallToolResult, ContentBlock, CreateTaskResult};
+use rmcp::task_manager::TaskOptions;
+
+let server = NestrsMcpServer::new().with_task_support();
+
+// Inside a tool body — the future must be 'static (move owned data in):
+let task = server.spawn_task(TaskOptions::default(), |ctx| {
+    Box::pin(async move {
+        // Cooperative cancellation + mid-flight input, both on `ctx`:
+        //   tokio::select! { _ = ctx.cancelled() => Err(TaskExit::Cancelled), ... }
+        //   let answer = ctx.request_input("input", request).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text("done")]))
+    })
+});
+// Return `CallToolResponse::Task(CreateTaskResult::new(task))` from the tool;
+// the client then drives it with tasks/get.
+```
+
+- `tasks/get`, `tasks/update`, `tasks/cancel` are rejected with `-32601` unless `.with_task_support()` advertised the `io.modelcontextprotocol/tasks` extension.
+- An operation can request input mid-flight via `ctx.request_input(key, request)`; the client answers through `tasks/update` and the future resumes — the same MRTR loop as tools, applied to tasks.
+- Cancellation is cooperative: `tasks/cancel` acknowledges immediately; the operation observes `ctx.cancelled()` and exits with `TaskExit::Cancelled`.
+
+## Per-tool-call authorization (`authz`)
+
+Behind the `authz` feature, the wrapper's `ServerHandler::call_tool` override runs every tool call inside the same task-local scopes the HTTP, WebSocket, and GraphQL transports use:
+
+```toml
+nestrs-mcp = { version = "1.0", features = ["authz"] }
+```
+
+```rust
+use nestrs_mcp::server::NestrsMcpServer;
+use nestrs_mcp::McpDataContext;
+
+let ctx = McpDataContext::new()
+    .with_ability(ability)     // Arc<nestrs::Ability> — CASL-style rules
+    .with_principal(principal) // Arc<nestrs::policies::Principal> — row-level predicates
+    .with_pool(pool);          // Arc<sqlx::AnyPool> — per-tool-call transactions
+
+let server = NestrsMcpServer::new().with_data_context(ctx);
+```
+
+On every `tools/call` the override:
+
+1. Opens a `TransactionSlot` on the configured pool (if any) and installs it into the request scope — tool bodies read it via `current_mcp_transaction()`.
+2. Installs the ability and principal — `current_mcp_ability()` / `current_mcp_principal()`.
+3. Dispatches the tool.
+4. Post-masks the response with `nestrs::mask_value` — the same masking walker HTTP/WS/GraphQL use, so the "what gets stripped" rules are identical across transports. Tool-error results are never masked (stripping fields would hide the diagnostic the caller needs).
+5. Commits the transaction on success, rolls back on a tool-level error.
+
+`authz-row-level` additionally wires the row-level predicates (it mirrors the main crate's `authz-row-level` feature). See [Authorization](/guides/authorization) for the `Ability`/masking model itself.
+
 ## Tool error conventions
 
-- **Tool-level failure** (operation ran but failed): the tool returns a `CallToolResult::error` so the model can see the message and recover. Examples: file not found, parse error, app not reachable.
-- **Protocol-level failure** (bad params, server can't process): the tool returns `Err(McpError::invalid_params(...))`.
+Tool bodies return `Result<Json<...>, rmcp::ErrorData>`:
+
+- **Operational failure** (operation ran but failed — file not found, parse error, app not reachable, scaffold failure): the tool returns `Err(ErrorData::internal_error(msg))`. The message is visible to the model, which can read it and recover or retry.
+- **Bad parameters** (unknown module / controller / provider / DTO / route name): `Err(ErrorData::invalid_params("module `x` not found"))`.
+- **Success**: a `Json<T>` payload — the typed value lands in `structuredContent` (the `#[tool]` macro stamps an `outputSchema` from the return type) plus a text fallback block for clients that only render text.
 
 ## Source parser
 
@@ -313,13 +533,15 @@ The MCP `get_app_health` / `get_app_routes` / `get_app_providers` tools take `ba
 - `#[controller("/path"[, version, host])]` — emits `__nestrs_prefix` / `__nestrs_version` / `__nestrs_host` const fns
 - `#[routes(state, controller_guards)]` impls with their per-fn attributes: `#[get/post/put/patch/delete/options/head/all(...)]`, `#[ver(...)]`, `#[use_guards(...)]`, `#[use_interceptors(...)]`, `#[use_pipes(...)]`, `#[use_filters(...)]`, `#[set_metadata(...)]`, `#[roles(...)]`, `#[param::body/query/param/req/headers/ip]`, `#[openapi(...)]`
 - `#[injectable(scope = "singleton|transient|request")]`
-- `#[dto(...)]` and its field-attr translation table (`IsString`, `IsEmail`, `IsNotEmpty`, `IsUUID`, `MinLength`, `MaxLength`, `Min`, `Max`, `IsUrl`, `ValidateNested`, etc.)
+- `#[dto(...)]` and its field-attr translation table (`IsString`, `IsEmail`, `IsNotEmpty`, `IsUuid`, `MinLength`, `MaxLength`, `Min`, `Max`, `IsUrl`, `ValidateNested`, etc.)
 - `#[ws_gateway(path = "/ws")]`, `#[ws_routes]`, `#[micro_routes]`, `#[event_routes]`, `#[schedule_routes]`
 
 The parser is **strictly additive**: missing or unknown attributes are reported as "unrecognized attr" but do not fail the parse. New macros added to `nestrs-macros` will show up as unrecognized in `nestrs-mcp` until the parser is updated — that is the intended maintenance surface.
 
 ## See also
 
+- [API reference: nestrs-mcp](/api/crates/nestrs-mcp) — exact signatures for the server, surfaces, tasks, authz, and client types
+- [Authorization](/guides/authorization) — the `Ability` / masking model the MCP `authz` feature reuses
 - [CLI overview](/cli/overview) — `nestrs-cli new`, `nestrs-cli generate resource`
 - [Observability](/guides/observability) — metrics, tracing, and request logging
 - [API security](/guides/security) — guards, interceptors, CORS, CSRF

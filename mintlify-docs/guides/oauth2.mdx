@@ -1,0 +1,480 @@
+---
+title: "OAuth2: client, resource server, and social login"
+description: "Use nestrs-oauth2 for the authorization-code + PKCE flow, client-credentials and refresh grants, a JWKS-backed resource server, social providers (Google, GitHub, Microsoft, Apple), and route protection with OAuth2Guard and the OAuth2Principal extractor."
+---
+
+`nestrs-oauth2` covers both sides of the OAuth2 conversation. As a **client** it drives the authorization-code grant (with PKCE S256), the client-credentials grant, and the refresh-token grant, plus RFC 7009 token revocation. As a **resource server** it verifies incoming bearer JWTs against your IdP's JWKS endpoint with algorithm pinning and automatic key rotation. Thin **social provider wrappers** pin the endpoints for Google, GitHub, Microsoft, and Apple, and an **`OAuth2Guard`** turns a verified token into route protection.
+
+## Enable the crate
+
+There are two ways to opt in. The main-crate feature is the shortest path when you want the client, the resource server, and the guard together:
+
+<CodeGroup>
+
+```toml Main-crate feature
+[dependencies]
+nestrs = { version = "1.0.0", features = ["oauth2"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```toml Direct dependency
+[dependencies]
+nestrs = "1.0.0"
+nestrs-oauth2 = { version = "1.0.0", features = ["guard"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+</CodeGroup>
+
+The `oauth2` feature on `nestrs` pulls in `nestrs-oauth2` with the `client`, `resource-server`, and `guard` features enabled, re-exports the whole crate as `nestrs::oauth2`, root-exports `OAuth2Principal` / `OAuth2Identity` / `OAuth2PrincipalMissing` / `install_oauth2_middleware`, and adds the [`NestApplication::use_oauth2`](#install-the-middleware) builder. It does **not** enable the social wrappers — for those, depend on `nestrs-oauth2` directly.
+
+Feature flags on `nestrs-oauth2` (all off by default):
+
+| Feature | What it enables |
+|---|---|
+| `client` | `OAuth2Client` with the authorization-code (+ PKCE), client-credentials, and refresh grants |
+| `resource-server` | `JwksCache` + `JwtVerifier` for verifying incoming JWTs against an IdP JWKS |
+| `social` | `Google`, `GitHub`, `Microsoft`, and `Apple` wrappers over `OAuth2Client` |
+| `guard` | `OAuth2Guard`, `install_oauth2_middleware`, and `OAuth2Module` (implies `client` + `resource-server`) |
+| `all` | All of the above |
+
+<Note>
+Two helper types are named through the crates `nestrs-oauth2` builds on. `ValidationConfig::new(...)` takes a `jsonwebtoken::Algorithm`, and `generate_pkce()` returns the `oauth2` v5 crate's challenge/verifier pair — add `jsonwebtoken = "9"` and `oauth2 = "5"` as direct dependencies when your code names those types (for example, when persisting a `PkceCodeVerifier` between requests).
+</Note>
+
+The compound feature `authn-oauth2` (on `nestrs`) enables `oauth2` together with `authn`, so a route can use the `Principal` extractor to read either a first-party JWT or an OAuth2 token identity.
+
+## The OAuth2 client
+
+### Confidential and public clients
+
+`OAuth2Options::new` builds a confidential client from the four values every IdP asks for. `OAuth2Options::public_client` omits the secret entirely for PKCE-only flows (RFC 8252 §7.2 — browser and mobile clients).
+
+```rust
+use nestrs_oauth2::{OAuth2Client, OAuth2Options};
+use url::Url;
+
+let options = OAuth2Options::new(
+    "my-client-id",
+    std::env::var("OAUTH2_CLIENT_SECRET").expect("OAUTH2_CLIENT_SECRET set"),
+    Url::parse("https://idp.example.com/authorize").unwrap(),
+    Url::parse("https://idp.example.com/token").unwrap(),
+    Url::parse("https://app.example.com/auth/callback").unwrap(),
+)
+.with_userinfo_url(Url::parse("https://idp.example.com/userinfo").unwrap())
+.with_revoke_url(Url::parse("https://idp.example.com/revoke").unwrap());
+
+let client = OAuth2Client::new(options)?;
+```
+
+`OAuth2Client::new` validates eagerly — an empty `client_id` or malformed endpoint URLs return `OAuth2Error::InvalidConfig` at construction, not on first use. The client is cheap to clone (all `Arc`s and URLs). Builders: `with_timeout` (default 30 s per token/revoke/userinfo round-trip), `with_revoke_url`, `with_userinfo_url`, and `with_cache` (see [sharing a token cache](#share-a-token-cache)).
+
+### Authorization code + PKCE
+
+<Steps>
+  <Step title="Generate the challenge and verifier">
+
+```rust
+use nestrs_oauth2::client::generate_pkce;
+
+let (challenge, verifier) = generate_pkce();
+```
+
+Both halves come from one call (`PkceCodeChallenge::new_random_sha256()` under the hood — RFC 7636 S256). The **verifier must stay on your server** until step 3; the challenge is public.
+  </Step>
+  <Step title="Redirect the user to the IdP">
+
+```rust
+use std::collections::HashMap;
+
+let auth = client.authorize_url(
+    &["openid", "email", "profile"],  // scopes
+    Some(&challenge),                  // PKCE challenge
+    None,                              // extra params: prompt, login_hint, …
+);
+// Persist auth.state (the CSRF token) and the verifier, keyed to this browser.
+Redirect::to(auth.url.as_str())
+```
+
+`authorize_url` returns an `AuthorizeUrl { url, state }` pair. The `state` is a fresh `CsrfToken` (also written into the URL as the `state` query parameter) — persist it server-side alongside the verifier. Use the `extra` map for provider-specific parameters such as `prompt=consent`.
+  </Step>
+  <Step title="Validate the redirect">
+
+When the IdP redirects back, compare the `state` query parameter with the value you persisted. A mismatch (or an unknown `state`) is a forged redirect — reject it before touching the code.
+  </Step>
+  <Step title="Exchange the code for tokens">
+
+```rust
+let token = client
+    .exchange_code(&query.code, Some(verifier))
+    .await?;
+```
+
+`exchange_code` takes the verifier **by value** (`PkceCodeVerifier` isn't `Clone`), so it can only be spent once — reusing a verifier is a security bug and the signature makes it a compile-time one.
+  </Step>
+</Steps>
+
+### TokenSet
+
+Every grant returns the same `TokenSet` shape:
+
+| Field | Type | Notes |
+|---|---|---|
+| `access_token` | `String` | Bearer credential for the IdP's APIs |
+| `refresh_token` | `Option<String>` | Present when the grant issued one; may rotate on refresh |
+| `id_token` | `Option<String>` | OIDC identity token (Google, Microsoft, Apple) |
+| `expires_at` | `Option<Instant>` | Materialised from the wire's `expires_in` (minus a buffer equal to a quarter of the request timeout). Compare with `Instant::now()` — no arithmetic needed |
+| `scope` | `Option<String>` | Space-separated scopes actually granted |
+| `raw` | `serde_json::Value` | The complete token-endpoint response, for provider-specific fields |
+
+`id_token` and `scope` come from the raw wire JSON — the underlying `oauth2` crate's typed response drops them, `nestrs-oauth2` preserves them.
+
+### Refresh, revoke, and userinfo
+
+```rust
+// Refresh using the refresh token; keeps the old refresh token when
+// the IdP doesn't rotate it (RFC 6749 §6 allows either behaviour).
+let fresh = client.refresh(&token).await?;
+
+// Revoke both tokens (RFC 7009). A no-op that returns Ok(()) when no
+// revoke_url is configured. Sends token_type_hint for refresh, then access.
+client.revoke(&token).await?;
+
+// Fetch the userinfo claims with the access token. Requires
+// with_userinfo_url; returns the raw provider JSON.
+let claims = client.userinfo(&token).await?;
+```
+
+### Client credentials
+
+The machine-to-machine grant authenticates the client itself (no user context). PKCE does not apply. Requires a `client_secret` — `public_client` options return `OAuth2Error::InvalidConfig`.
+
+```rust
+let token = client.client_credentials(&["reports:read"]).await?;
+```
+
+### Share a token cache
+
+`TokenCache` is a process-wide store keyed by access token. Pass one `Arc<TokenCache>` to several `OAuth2Client`s (same IdP, different scopes or redirect URIs) so concurrent refreshes coalesce instead of racing:
+
+```rust
+use std::sync::Arc;
+use nestrs_oauth2::client::TokenCache;
+
+let cache = Arc::new(TokenCache::new());
+let options = OAuth2Options::new(/* … */).with_cache(cache.clone());
+```
+
+Every successful exchange/refresh populates the cache automatically. Look up with `client.cached(access_token)` or `cache.by_refresh(refresh_token)`; inspect size with `len` / `is_empty`. The cache evicts nothing on its own — you decide retention.
+
+### Persist tokens across restarts
+
+`TokenSet` deliberately doesn't implement `Serialize` (`Instant` can't). Use the wire-friendly `TokenSetDto` (`nestrs_oauth2::client::TokenSetDto`), which swaps `expires_at` for `expires_at_unix` (UNIX epoch seconds):
+
+```rust
+let dto = nestrs_oauth2::client::TokenSetDto::from(&token);
+let serialized = serde_json::to_string(&dto)?; // store it in your database
+```
+
+## Resource server: verify incoming tokens
+
+When *your* app is the one being called with a bearer token, `JwtVerifier` checks the token's signature against the IdP's JWKS endpoint (RFC 7517) and validates the claims:
+
+```rust
+use nestrs_oauth2::{JwtVerifier, ValidationConfig};
+use url::Url;
+
+let validation = ValidationConfig::new(jsonwebtoken::Algorithm::RS256)
+    .with_issuer("https://idp.example.com")
+    .with_audience("my-api")
+    .with_leeway(60); // seconds of clock-skew tolerance (default 30)
+
+let verifier = JwtVerifier::from_url(
+    Url::parse("https://idp.example.com/.well-known/jwks.json").unwrap(),
+    validation,
+)
+.await?;
+```
+
+`from_url` builds the JWKS cache and performs the initial fetch eagerly. To control the cache yourself, construct `JwksCache::new(url)` (plus `.with_refresh_window(Duration)`, default 15 minutes) and `JwtVerifier::new(Arc::new(cache), validation)`.
+
+`verify(token)` returns a `TokenData { header, claims }` pair of `serde_json::Value`s (each IdP's claim shape differs, so claims stay generic). It enforces:
+
+- **Algorithm pinning** — the token's `alg` must be in your accepted set *before* any key lookup. The default set is `EdDSA` only; add `RS256` / `ES256` / `PS256` via `ValidationConfig::new(...)` or `with_algorithms`. Pinning blocks the `alg=none` downgrade and cross-algorithm confusion (an `RS256` token replayed as `HS256`).
+- **`exp` and `nbf`** — `nbf` validation is on (RFC 7519 §4.1.5), with your clock-skew leeway.
+- **`iss` / `aud`** — enforced when `with_issuer` / `with_audience` are set. Without an audience configured, `aud` checking is explicitly disabled rather than left to defaults.
+
+Key rotation is handled per `kid`: the cache reads are lock-free on the hot path; a miss triggers a **single-flight** refresh (concurrent misses share one HTTP fetch); a `kid` that's still unknown afterwards returns `OAuth2Error::UnknownKid`. So an IdP that rotates its keys mid-flight doesn't break in-flight requests — the next token with the new `kid` triggers exactly one re-fetch.
+
+Errors are typed: `OAuth2Error::Grant(GrantError)` for RFC 6749 §5.2 codes (`invalid_grant`, `invalid_client`, …), `TokenEndpoint { status, body }` when the endpoint returns something non-standard, `JwksFetch` / `InvalidSignature` / `InvalidClaim` / `Validation` / `UnknownKid` for the resource-server side.
+
+## Protect nestrs routes
+
+### Install the middleware
+
+With the `oauth2` feature on `nestrs`, call `use_oauth2` with a verifier and the middleware is applied to every request:
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+NestFactory::create::<AppModule>()
+    .use_oauth2(Arc::new(verifier))
+    .listen(3000)
+    .await;
+```
+
+### How identity is resolved per request
+
+For each request, `install_oauth2_middleware` (applied by `use_oauth2`) does the following:
+
+1. Reads the `Authorization` header (the `Bearer` scheme is matched case-insensitively).
+2. Verifies the token with the `JwtVerifier`.
+3. On success, reads the `sub` claim and stashes an `OAuth2Identity { subject, claims }` into the request extensions — where guards and extractors find it.
+4. On a **missing** header or a **failed** verification, logs at `tracing::debug!` and proceeds **without** an identity.
+
+The middleware is deliberately not a bouncer — it never rejects a request by itself. Protection is decided by the guard or extractor on each route:
+
+| Route uses | Valid bearer | Invalid/expired bearer or none |
+|---|---|---|
+| `#[use_guards(OAuth2Guard)]` | passes | **401** (`GuardError::unauthorized`) |
+| `OAuth2Principal` extractor | passes | **401** (`OAuth2PrincipalMissing` → `401 OAuth2 principal required`) |
+| `Option<OAuth2Principal>` | passes | passes, yields `None` |
+
+`OAuth2Guard` is stateless — the heavy lifting (verification) already happened in the middleware, and the guard only checks whether an `OAuth2Identity` made it into the request extensions. It rejects with `GuardError::unauthorized("OAuth2 identity required")`, which the framework maps to HTTP 401.
+
+```rust
+use nestrs::{OAuth2Principal, oauth2::OAuth2Guard};
+
+#[controller(prefix = "/me")]
+#[use_guards(OAuth2Guard)]
+struct MeController;
+
+#[routes(state = AppState)]
+impl MeController {
+    #[get("/")]
+    async fn me(principal: OAuth2Principal) -> String {
+        principal.subject
+    }
+}
+```
+
+`OAuth2Principal` (root-exported from `nestrs`) is the extractor form of the same check — use it when the handler wants the identity anyway. `principal.claims` is the full verified claim set as `serde_json::Value`. For routes that serve both anonymous and authenticated callers, take `Option<OAuth2Principal>`.
+
+### Register providers with OAuth2Module
+
+`OAuth2Module::register` wires the client (and, optionally, the verifier) into the DI registry using the `useValue` primitive — pre-built singletons with no `Injectable` impl needed, injectable into any `#[injectable]` provider with an `Arc<OAuth2Client>` field:
+
+```rust
+use nestrs_oauth2::module::OAuth2ModuleOptions;
+use nestrs_oauth2::{OAuth2Module, OAuth2Options};
+
+let module = OAuth2Module::register(OAuth2ModuleOptions {
+    client_options: options,
+    resource_server: Some((jwks_url, validation)), // None = client only
+})
+.await?;
+```
+
+When `resource_server` is `Some`, the module also exports `Arc<JwtVerifier>` and `Arc<JwksCache>`. The initial JWKS fetch is best-effort: a failure logs a warning and the first request retries, rather than failing boot.
+
+<Note>
+`OAuth2Module::register` is `async` (it does the initial JWKS fetch) and returns a `Result`. The `#[module(imports = [...])]` list is evaluated synchronously, so call `register` wherever you assemble registries in async code — for typical apps, the `use_oauth2` + direct-construction wiring shown in the [end-to-end example](#end-to-end-example) is the simpler path.
+</Note>
+
+## Social providers quickstart
+
+Each wrapper is a thin layer over `OAuth2Client` that pins the provider's endpoints and default scopes. The flows are identical to the un-wrapped client — `.client()` gives you the underlying `OAuth2Client`:
+
+| Provider | Constructor | Default scopes | Notes |
+|---|---|---|---|
+| Google | `Google::new(client_id, client_secret, redirect_uri)` | `openid email profile` | OIDC. Userinfo shape: `GoogleUser { sub, email, email_verified, name, picture }` |
+| GitHub | `GitHub::new(client_id, client_secret, redirect_uri)` | `read:user user:email` | OAuth2 only — no `id_token` and no JWKS endpoint, so don't point `JwtVerifier` at GitHub. Userinfo lives on `api.github.com/user` |
+| Microsoft | `Microsoft::new(client_id, client_secret, redirect_uri, tenant)` | `openid email profile offline_access` | Tenant-aware: `common` (multi-tenant), your tenant ID, or `organizations` |
+| Apple | `Apple::new(client_id, client_secret_jwt, redirect_uri)` | `openid email name` | The `client_secret` **is** an ES256 JWT you mint per Apple's spec — the wrapper takes it pre-signed. `name` is only sent on the first sign-in |
+
+```rust
+use nestrs_oauth2::client::generate_pkce;
+use nestrs_oauth2::social::GoogleUser;
+use nestrs_oauth2::Google;
+use url::Url;
+
+let google = Google::new(
+    std::env::var("GOOGLE_CLIENT_ID").unwrap(),
+    std::env::var("GOOGLE_CLIENT_SECRET").unwrap(),
+    Url::parse("https://app.example.com/auth/google/callback").unwrap(),
+)?;
+
+let (challenge, verifier) = generate_pkce();
+let auth = google
+    .client()
+    .authorize_url(Google::default_scopes(), Some(&challenge), None);
+
+// …redirect the user to auth.url, then in the callback handler:
+let token = google.client().exchange_code(&code, Some(verifier)).await?;
+let user: GoogleUser = serde_json::from_value(google.client().userinfo(&token).await?)?;
+```
+
+<Warning>
+Apple requires `response_mode=form_post` on the authorization request — Apple delivers the code as a **POST body** to your redirect URI, not a query parameter. Add it through the `extra` map:
+
+```rust
+use std::collections::HashMap;
+
+let mut extra = HashMap::new();
+extra.insert("response_mode".to_string(), "form_post".to_string());
+let auth = apple
+    .client()
+    .authorize_url(Apple::default_scopes(), None, Some(&extra));
+```
+</Warning>
+
+<Note>
+Social access tokens from GitHub are opaque, not JWTs. The resource-server flow (`JwtVerifier` + `OAuth2Guard`) needs an OIDC provider that publishes a JWKS (Google, Microsoft, Apple, Keycloak, Auth0, …). For GitHub-style providers, validate tokens by calling the provider's API (e.g. `userinfo`) instead.
+</Note>
+
+## End-to-end example
+
+One app with the full loop: `/auth/login` starts a PKCE authorization-code flow, `/auth/callback` validates the CSRF state and exchanges the code, and `/me` is protected — it requires a verified bearer token or answers 401.
+
+```toml
+[dependencies]
+nestrs = { version = "1.0.0", features = ["oauth2"] }
+# Direct dep: needed for the `nestrs_oauth2::` paths below (and later for
+# the `social` wrappers, which the main-crate feature does not enable).
+nestrs-oauth2 = { version = "1.0.0", features = ["guard"] }
+oauth2 = "5"          # to name PkceCodeVerifier in the pending-login map
+jsonwebtoken = "9"    # to name Algorithm in ValidationConfig
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde_json = "1"
+```
+
+```rust
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use axum::extract::Query;
+use axum::http::StatusCode;
+use axum::response::Redirect;
+use nestrs::prelude::*;
+use nestrs::OAuth2Principal;
+use nestrs_oauth2::client::generate_pkce;
+use nestrs_oauth2::resource_server::{JwtVerifier, ValidationConfig};
+use nestrs_oauth2::{OAuth2Client, OAuth2Options, OAuth2Guard};
+use url::Url;
+
+/// The OAuth2 client, built once in `main`.
+static OAUTH2: OnceLock<OAuth2Client> = OnceLock::new();
+
+/// Pending logins: CSRF `state` -> PKCE verifier, consumed exactly once
+/// on callback. Demo-grade storage — back this with a session store or
+/// `CacheService` (feature `cache`) in production.
+static PENDING: Mutex<HashMap<String, oauth2::PkceCodeVerifier>> =
+    Mutex::new(HashMap::new());
+
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/auth")]
+struct AuthController;
+
+#[routes(state = AppState)]
+impl AuthController {
+    /// Step 1: redirect the user to the IdP with a PKCE challenge.
+    #[get("/login")]
+    async fn login() -> Redirect {
+        let client = OAUTH2.get().expect("client built in main");
+        let (challenge, verifier) = generate_pkce();
+        let auth =
+            client.authorize_url(&["openid", "email", "profile"], Some(&challenge), None);
+        PENDING
+            .lock()
+            .unwrap()
+            .insert(auth.state.secret().to_string(), verifier);
+        Redirect::to(auth.url.as_str())
+    }
+
+    /// Step 2: the IdP redirects back with `code` + `state`.
+    #[get("/callback")]
+    async fn callback(
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+        let client = OAUTH2.get().expect("client built in main");
+        let state = params.get("state").ok_or(StatusCode::BAD_REQUEST)?;
+        let code = params.get("code").ok_or(StatusCode::BAD_REQUEST)?;
+        // Validates the CSRF state AND consumes the one-time verifier.
+        let Some(verifier) = PENDING.lock().unwrap().remove(state) else {
+            return Err(StatusCode::UNAUTHORIZED);
+        };
+        let token = client
+            .exchange_code(code, Some(verifier))
+            .await
+            .map_err(|_| StatusCode::BAD_GATEWAY)?;
+        let claims = client
+            .userinfo(&token)
+            .await
+            .map_err(|_| StatusCode::BAD_GATEWAY)?;
+        Ok(axum::Json(claims))
+    }
+}
+
+#[controller(prefix = "/me")]
+#[use_guards(OAuth2Guard)]
+struct MeController;
+
+#[routes(state = AppState)]
+impl MeController {
+    /// Protected: requires a verified bearer token, 401 otherwise.
+    #[get("/")]
+    async fn me(principal: OAuth2Principal) -> String {
+        principal.subject
+    }
+}
+
+#[module(
+    controllers = [AuthController, MeController],
+    providers = [AppState],
+)]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let options = OAuth2Options::new(
+        "my-client-id",
+        std::env::var("OAUTH2_CLIENT_SECRET").expect("OAUTH2_CLIENT_SECRET set"),
+        Url::parse("https://idp.example.com/authorize").unwrap(),
+        Url::parse("https://idp.example.com/token").unwrap(),
+        Url::parse("https://app.example.com/auth/callback").unwrap(),
+    )
+    .with_userinfo_url(Url::parse("https://idp.example.com/userinfo").unwrap());
+    OAUTH2
+        .set(OAuth2Client::new(options).expect("valid options"))
+        .expect("main initialises the client once");
+
+    // Resource server: verify IdP-issued JWTs against the JWKS.
+    let validation = ValidationConfig::new(jsonwebtoken::Algorithm::RS256)
+        .with_issuer("https://idp.example.com")
+        .with_audience("my-api");
+    let verifier = JwtVerifier::from_url(
+        Url::parse("https://idp.example.com/.well-known/jwks.json").unwrap(),
+        validation,
+    )
+    .await
+    .expect("JWKS reachable");
+
+    NestFactory::create::<AppModule>()
+        .use_oauth2(Arc::new(verifier))
+        .listen(3000)
+        .await;
+}
+```
+
+Call `GET /me` with `Authorization: Bearer <access_token>` — the middleware verifies the token against the JWKS, `OAuth2Guard` confirms the identity is present, and the handler reads `principal.subject`. Without a valid token the guard answers 401.
+
+## Security notes
+
+- **Secrets never reach logs through `Debug`.** `OAuth2Options` renders `client_secret` as `<redacted>` (its *presence* stays visible for operators), and `TokenSet` / `TokenSetDto` render the access, refresh, and id tokens as `<redacted>`. `Serialize` is deliberately untouched — it's the persistence path, not a logging path.
+- **PKCE verifiers are single-use by construction.** `exchange_code` consumes the verifier by value; the v5 `oauth2` crate doesn't implement `Clone` on it, so a reuse attempt won't compile.
+- **Always validate `state`.** The `AuthorizeUrl.state` CSRF token is your defence against forged redirects — compare it with the value you persisted before exchanging any code.
+- **Pin algorithms explicitly.** The default accepted set is `EdDSA` only; if your IdP signs with `RS256`, say so with `ValidationConfig::new(Algorithm::RS256)` rather than broadening the set later.
+- **The middleware fails open by design.** A token that fails verification doesn't reject the request — it just leaves no identity. Every route that must be protected needs `OAuth2Guard`, `OAuth2Principal`, or an explicit check on `Option<OAuth2Principal>`.

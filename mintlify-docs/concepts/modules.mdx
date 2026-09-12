@@ -165,6 +165,50 @@ The `ConfigurableModuleBuilder` pattern mirrors NestJS's `forRoot` / `forRootAsy
 let shared = DynamicModule::lazy::<DatabaseModule>();
 ```
 
+## Namespaced configuration (`#[config(namespace)]`)
+
+For config that should come from environment variables instead of hardcoded `for_root` values, decorate a plain struct with `#[config(namespace = "db")]`:
+
+```rust
+use nestrs::prelude::*;
+
+#[config(namespace = "db")]
+struct DatabaseConfig {
+    host: String,
+    port: u16,
+}
+```
+
+The macro emits the required `serde::Deserialize` + `validator::Validate` derives and the `nestrs::ConfigNamespace` marker impl, so the struct itself needs no derives — but the attribute must come **before** any derives you add yourself. Values are read from `NESTRS_DB__HOST` / `NESTRS_DB__PORT` (prefix `NESTRS_`, double-underscore separator between namespace and key). The overlay merges dotenvy cascade files (`.env`, `.env.<NESTRS_ENV>`, in non-production only) with the process environment last, so config resolution is testable without mutating process env.
+
+Register typed namespaces as modules:
+
+```rust
+use nestrs::config::ConfigModule;
+
+let dm = ConfigModule::for_root(vec![nestrs::config::Config::register::<DatabaseConfig>()]);
+
+#[module(imports = [dm], providers = [DbService])]
+struct AppModule;
+```
+
+Inside any `#[injectable]`, resolve the typed config via `ConfigService`:
+
+```rust
+#[injectable]
+struct DbService {
+    cfg: std::sync::Arc<nestrs::config::ConfigService>,
+}
+
+impl DbService {
+    fn host(&self) -> String {
+        self.cfg.get::<DatabaseConfig>().unwrap().host.clone()
+    }
+}
+```
+
+Validation runs on load: a struct whose field fails its `validator` attribute surfaces a `ConfigError` at startup (fail-fast) rather than a garbled value deep in a request handler. For a single non-namespaced struct, `nestrs::config::load_config::<T>()` reads flat env vars (`HOST`, `PORT`) with the same dotenvy cascade + validation behavior.
+
 ## Lifecycle sequence
 
 When you call `NestFactory::create` and then `listen` or `listen_graceful`, nestrs drives the provider registry through the following sequence for all singleton providers:

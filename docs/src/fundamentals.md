@@ -30,6 +30,10 @@ A bare `tokio::spawn` runs on a task with **no** request scope — task-locals d
 - Spawned **outside any scope** (scheduler, startup job), the child gets a fresh empty scope — request-scoped providers construct per spawned task and are isolated from every other task.
 - The ability / principal slots are **not** carried: row-level authz stays deny-closed in the spawned task unless you explicitly wrap the future with the ability helpers.
 
+### Authorization: ability and principal slots
+
+The request scope also hosts the **ability** and **principal** task-local slots that row-level authorization reads. `install_policies_middleware` / `install_authn_middleware` (or the WebSocket / GraphQL scope equivalents) install them per request, and `current_ability` / `current_principal` read them from any depth of the call tree. Like every task-local, they do **not** cross a bare `tokio::spawn` (see `spawn_with_request_scope` above). Enforcement is deny-closed: with `authz-row-level` enabled, repository and `CrudService` calls that find no ability — or a row predicate that finds no principal — fail with an error rather than falling back to unfiltered queries. The full model (abilities, guards, row predicates, masking) is covered in [Authorization](authorization.md).
+
 ## Lifecycle hooks
 
 [`Injectable`](https://docs.rs/nestrs-core/latest/nestrs_core/trait.Injectable.html) provides **async** hooks (default no-ops):
@@ -45,6 +49,8 @@ A bare `tokio::spawn` runs on a task with **no** request scope — task-locals d
 2. **`run_on_module_init().await`**
 3. **`run_on_application_bootstrap().await`**
 4. On shutdown: **`run_on_application_shutdown().await`** then **`run_on_module_destroy().await`**
+
+**Ordering:** hooks run **dependency-first** — a provider's dependencies initialize before the dependent, and shutdown/destroy run the same order reversed (dependents tear down before their dependencies). `useValue` / `useFactory` providers can opt into the same sequence by implementing the `ProviderLifecycle` trait and registering via `register_use_value_with_lifecycle` / `register_use_factory_with_lifecycle`.
 
 **Note:** Hooks are wired for **singleton** entries in the current implementation. **Transient** types are constructed on demand and do **not** receive this global hook sequence unless you call into them explicitly.
 
@@ -133,8 +139,8 @@ On [`ProviderRegistry`](https://docs.rs/nestrs-core/latest/nestrs_core/struct.Pr
 
 | Method | Nest analogue | Notes |
 |--------|----------------|--------|
-| **`register_use_value::<T>(Arc<T>)`** | `useValue` | Pre-built singleton; no lifecycle hooks unless you wrap a type that implements them separately. |
-| **`register_use_factory::<T>(scope, \|registry\| Arc<T>)`** | `useFactory` | **Sync** closure; use `registry.get()` for dependencies. Supports **any** [`ProviderScope`]. |
+| **`register_use_value::<T>(Arc<T>)`** | `useValue` | Pre-built singleton; plain values keep registering as-is. Use **`register_use_value_with_lifecycle`** to also drive the value's `ProviderLifecycle` hooks. |
+| **`register_use_factory::<T>(scope, \|registry\| Arc<T>)`** | `useFactory` | **Sync** closure; use `registry.get()` for dependencies. Supports **any** [`ProviderScope`]. Use **`register_use_factory_with_lifecycle`** for hook-aware factories. |
 | **`register_use_class::<T>()`** | `useClass` | Same as **`register::<T>()`** for normal `#[injectable]` types. |
 
 **“Async factory” for a provider:** Nest’s async factory is usually modeled by:
@@ -222,6 +228,46 @@ async fn build_from_vault() -> DynamicModule {
 
 `Injectable::construct` remains **synchronous**; use **`on_module_init`** inside `HttpClientConfig` (or a dedicated bootstrap service) for I/O that must happen **after** the type exists.
 
+## Worked recipe: namespaced config (`#[config(namespace)]` + `ConfigModule::for_root`)
+
+For config that should come from **environment variables** instead of hardcoded `for_root` values, decorate a plain struct with **`#[config(namespace = "db")]`**:
+
+```rust
+use nestrs::prelude::*;
+
+#[config(namespace = "db")]
+struct DatabaseConfig {
+    host: String,
+    port: u16,
+}
+```
+
+The macro emits the required **`serde::Deserialize`** + **`validator::Validate`** derives and the **`nestrs::ConfigNamespace`** marker impl, so the struct needs no derives — but the attribute must come **before** any derives you add yourself. Values are read from **`NESTRS_DB__HOST`** / **`NESTRS_DB__PORT`** (prefix **`NESTRS_`**, double-underscore separator). The overlay merges dotenvy cascade files (**`.env`**, **`.env.<NESTRS_ENV>`**, non-production only) with the process environment last, so resolution is testable without mutating process env.
+
+Register typed namespaces as modules and resolve via **`ConfigService`**:
+
+```rust
+use nestrs::config::{Config, ConfigModule, ConfigService};
+
+let dm = ConfigModule::for_root(vec![Config::register::<DatabaseConfig>()]);
+
+#[module(imports = [dm], providers = [DbService])]
+struct AppModule;
+
+#[injectable]
+struct DbService {
+    cfg: std::sync::Arc<ConfigService>,
+}
+
+impl DbService {
+    fn host(&self) -> String {
+        self.cfg.get::<DatabaseConfig>().unwrap().host.clone()
+    }
+}
+```
+
+Validation runs on load: a field failing its **`validator`** attribute surfaces a **`ConfigError`** at startup (fail-fast) rather than a garbled value mid-request. For a single non-namespaced struct, **`nestrs::config::load_config::<T>()`** reads flat env vars with the same dotenvy cascade + validation.
+
 ## Worked recipe: `forward_ref` for cyclic **module** imports
 
 When **`AModule` imports `BModule`** and **`BModule` imports `AModule`**, the macro expansion detects a **cycle** and panics unless one import is the intentional **back-edge**. Mark it with **`forward_ref::<TheOtherModule>()`** (alias **`forwardRef`**):
@@ -274,7 +320,8 @@ Keep the closure **non-async**; defer I/O to **`on_module_init`** on `HeavyServi
 ## Related
 
 - [First steps](first-steps.md) — minimal app  
-- [Custom decorators](custom-decorators.md) — metadata vs Nest decorators  
+- [Custom decorators](custom-decorators.md) — metadata vs Nest decorators
+- [Authorization](authorization.md) — abilities, guards, row-level policies  
 - [Roadmap parity](roadmap-parity.md) — feature matrix  
 - [API cookbook](appendix-api-cookbook.md) — `module_ref`, `set_global_prefix`, `use_request_scope`, and other `NestApplication` helpers  
 - Rustdoc: [`nestrs_core`](https://docs.rs/nestrs-core), [`nestrs`](https://docs.rs/nestrs)  

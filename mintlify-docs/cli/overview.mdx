@@ -39,7 +39,79 @@ This alias is configured in `.cargo/config.toml` as `run -p nestrs-scaffold --bi
 |---------|---------|
 | `nestrs-cli new <name>` | Create a new single-crate app with `Cargo.toml`, `src/main.rs`, starter module/controller, `.env`, `.env.example`, `Dockerfile`, `.gitignore`, and `README.md`. |
 | `nestrs-cli generate` / `nestrs-cli g` | Generate resources, services, controllers, modules, DTOs, guards, pipes, filters, interceptors, strategies, resolvers, gateways, microservices, and transports. |
+| `nestrs-cli db migrate …` | Create, apply, revert, and inspect SQL migrations (`add`, `run`, `revert`, `info`). Default backend `sqlx`; `--backend prisma` passes through to `npx prisma`. |
+| `nestrs-cli db seed …` | Seed the database from a Cargo seed binary (`--bin`) or a transactional SQL file (`--seed-file`). |
 | `nestrs-cli doctor` | Print `rustc` and `cargo` versions, scan `Cargo.toml` for nestrs feature flags, and heuristically check `src/**/*.rs` for common misconfigurations. |
+
+<Note>
+The <code>db</code> family ships behind the <code>db</code> Cargo feature (it pulls in <code>sqlx</code> and <code>tokio</code> as CLI dependencies). Install it with:
+</Note>
+
+```bash
+cargo install nestrs-scaffold --features db
+```
+
+Without the feature, `nestrs-cli db …` fails with a clear message instead of producing a half-built binary.
+
+## nestrs-cli db
+
+`nestrs-cli db` is the migrations + seeding runner. It works on plain SQL migration files — there is no DDL-diff engine (`synchronize`) or entity auto-discovery; those belong to full ORMs.
+
+```text
+nestrs-cli db [--backend sqlx|prisma] migrate add <name> [--reversible] [--path <dir>]
+nestrs-cli db [--backend sqlx|prisma] migrate run [--path <dir>] [--target-version V] [--database-url URL]
+nestrs-cli db [--backend sqlx|prisma] migrate revert [--path <dir>] [--target-version V] [--database-url URL]
+nestrs-cli db [--backend sqlx|prisma] migrate info [--path <dir>] [--database-url URL]
+nestrs-cli db [--backend sqlx|prisma] seed --bin <name> [--manifest-path <path>] [--database-url URL]
+nestrs-cli db [--backend sqlx|prisma] seed --seed-file <path> [--database-url URL]
+```
+
+### Global flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--backend sqlx \| prisma` | `sqlx` | Backend selector. `prisma` shells out to `npx prisma …` — the file naming and migration recording belong to Prisma. |
+| `--path <dir>` | `./migrations` | Migration directory. |
+| `--database-url URL` | — | Database URL. Resolution order: `--database-url` > `DATABASE_URL` > `NESTRS_DB__URL`. |
+| `--target-version V` | latest / `0` | Stop migrating (or reverting) at version `V`. |
+
+### migrate add
+
+Writes empty SQL files you fill in. The naming convention is sequence-numbered — `<NNN>_<name>.sql` for single-shot, or `<NNN>_<name>.up.sql` + `<NNN>_<name>.down.sql` with `--reversible`. `NNN` is a zero-padded 3-digit sequence derived from the largest existing migration, incremented by one (deterministic, greppable, sortable — collisions surface immediately at add-time).
+
+```bash
+nestrs-cli db migrate add create_posts_table --reversible
+# migrations/001_create_posts_table.up.sql
+# migrations/001_create_posts_table.down.sql
+```
+
+### migrate run / revert / info
+
+`run` applies pending migrations up; `revert` walks down (set `--target-version 0` for a full revert). `info` lists applied and pending migrations. The sqlx backend uses `sqlx::migrate::Migrator` under the hood, so `_sqlx_migrations` is the recording table.
+
+```bash
+nestrs-cli db migrate run
+nestrs-cli db migrate revert --target-version 2
+nestrs-cli db migrate info
+```
+
+<Warning>
+The <code>prisma</code> backend has no <code>revert</code> — Prisma records its own migration history and does not support down-migrations. Use the <code>sqlx</code> backend (with <code>--reversible</code>) if you need downgrades.
+</Warning>
+
+### seed
+
+Two modes:
+
+- `--bin <name>` — pass-through to `cargo run --bin <name>` in the current directory. The resolved URL is forwarded to the seed binary as both `DATABASE_URL` and `NESTRS_DB__URL`. You own the seed binary; the common case is a Rust bin that composes with `CrudService<T>` and your app's services.
+- `--seed-file <path>` — execute a SQL file against the resolved URL via `sqlx::raw_sql` inside an explicit transaction, so a failed `INSERT` mid-file rolls back earlier rows. The escape hatch for `pg_dump`-style fixture dumps.
+
+```bash
+nestrs-cli db seed --bin seed_posts
+nestrs-cli db seed --seed-file fixtures/dev.sql
+```
+
+See the [database ecosystem page](/ecosystem/database) for how the CLI composes with `SqlxDatabaseModule`, and the [CRUD guide](/guides/crud) for `#[crud]` controllers over the same pool.
 
 ## nestrs-cli new
 

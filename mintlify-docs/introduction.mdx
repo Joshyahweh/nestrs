@@ -5,6 +5,10 @@ description: "nestrs brings the NestJS module/controller/provider model to Rust,
 
 nestrs is a Rust web framework that lets you build structured APIs using the same architectural patterns as NestJS — modules, controllers, providers, and dependency injection — while running on [Axum](https://github.com/tokio-rs/axum) and [Tower](https://github.com/tower-rs/tower). If your team already knows NestJS, nestrs gives you the same mental model with Rust's performance and safety guarantees.
 
+<Note>
+**nestrs is 1.0.** The public API follows semantic versioning — breaking changes only ship in a new major version — and the public API surface of the core crates is snapshot-tested in CI, so accidental breaking changes are caught before a release lands.
+</Note>
+
 ## Why nestrs exists
 
 Large Rust web applications tend to grow into ad-hoc routing files and scattered shared state. nestrs gives you a principled way to organize that code: every feature lives in a module, handlers live in controllers, and shared logic lives in injectable providers. The framework handles wiring them together so you focus on business logic.

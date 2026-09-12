@@ -275,6 +275,89 @@ async fn transactional_slot_commit_then_double_commit_is_noop() {
         .expect("rollback after commit is a no-op");
 }
 
+/// Marker type stashed into the request scope by the outer middleware in
+/// `transactional_layers_into_active_request_scope`.
+struct ScopeMarker;
+
+/// The transactional middleware runs INSIDE the request-scope middleware
+/// (`use_request_scope()`). Its nested `with_request_scope` must LAYER into
+/// the active scope — pre-fix it installed a fresh map, hiding every value
+/// the outer middleware stashed (and forking the `ProviderScope::Request`
+/// cache, so request-scoped providers would be constructed twice per
+/// request).
+#[tokio::test]
+async fn transactional_layers_into_active_request_scope() {
+    let pool = fresh_pool().await;
+    let id = insert_balance(&pool, 100).await;
+
+    // Outer middleware stands in for `request_scope_middleware`: opens the
+    // request scope and stashes a marker before the transactional
+    // middleware runs.
+    let outer = move |req: axum::extract::Request, next: Next| async move {
+        nestrs::core::with_request_scope(async move {
+            nestrs::core::request_scope_insert(
+                std::any::TypeId::of::<ScopeMarker>(),
+                Arc::new(ScopeMarker) as Arc<dyn std::any::Any + Send + Sync>,
+            );
+            next.run(req).await
+        })
+        .await
+    };
+
+    let app = Router::new()
+        .route(
+            "/scoped-inc",
+            post(move || async move {
+                // The tx slot must be installed...
+                let slot = current_transaction().expect("slot");
+                // ...AND the outer middleware's value must still be
+                // visible — pre-fix the nested with_request_scope
+                // replaced the scope map and this was None.
+                assert!(
+                    nestrs::core::request_scope_get(std::any::TypeId::of::<ScopeMarker>())
+                        .is_some(),
+                    "transactional middleware must layer into the active request scope, not replace it"
+                );
+                let result: Result<(), sqlx::Error> = slot
+                    .with_tx(|tx| {
+                        Box::pin(async move {
+                            sqlx::query(
+                                "UPDATE accounts SET balance = balance + 10 WHERE id = $1",
+                            )
+                            .bind(id)
+                            .execute(&mut **tx)
+                            .await?;
+                            Ok(())
+                        })
+                    })
+                    .await;
+                result.expect("update");
+                (StatusCode::OK, "ok")
+            }),
+        )
+        // Transactional wraps the route; the scope middleware wraps the
+        // transactional one (last-applied layer is outermost).
+        .layer(from_fn_with_state(
+            pool.clone(),
+            install_transactional_middleware,
+        ))
+        .layer(axum::middleware::from_fn(outer));
+
+    let res = app
+        .oneshot(
+            HttpRequest::builder()
+                .method("POST")
+                .uri("/scoped-inc")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    // The tx still commits on 2xx through the layered scope.
+    assert_eq!(read_balance(&pool, id).await, 110);
+}
+
 #[tokio::test]
 async fn transactional_slot_rollback_then_double_rollback_is_noop() {
     let pool = fresh_pool().await;

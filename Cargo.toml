@@ -22,13 +22,13 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "0.5.2"
+version = "1.0.0"
 rust-version = "1.88"
 repository = "https://github.com/Joshyahweh/nestrs"
-homepage = "https://github.com/Joshyahweh/nestrs"
-documentation = "https://docs.rs/nestrs"
-readme = "README.md"
-description = "NestJS-like API framework for Rust built on Axum and Tower."
+# `homepage`, `documentation`, `readme`, and `description` are deliberately
+# not set at workspace level: `homepage` would be redundant with `repository`,
+# and every member crate defines its own crate-specific values (nightly cargo
+# warns on redundant/unusued fields).
 
 [workspace.dependencies]
 axum = "0.7"

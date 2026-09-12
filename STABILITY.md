@@ -17,7 +17,7 @@ We follow **[Cargo’s semver](https://doc.rust-lang.org/cargo/reference/semver.
 
 **Proc macros:** A change that only affects **generated** code (e.g. more efficient expansion) without changing **documented** macro input syntax is usually **PATCH** or **MINOR**. A change that **breaks** existing macro invocations (attributes, token patterns) is **MAJOR**.
 
-**`0.x` releases:** Before `1.0`, minor releases (`0.y`) may include breaking changes per common Rust ecosystem practice; we still try to document them in `CHANGELOG.md`.
+**1.0 and beyond:** the public API is covered by full semver — breaking changes ship only in a new **MAJOR**. Before 1.0, minor releases (`0.y`) could include breaking changes per common Rust ecosystem practice; every such transition is documented in `CHANGELOG.md`. The `0.5.x → 1.0.0` jump is itself the major bump that legitimizes the last pre-1.0 breaking changes (e.g. `CacheOptions::InMemory` gaining `max_entries`, `Subject::Type` moving from `&'static str` to `String`) — migration notes are in their `CHANGELOG.md` entries.
 
 ## What counts as public API
 

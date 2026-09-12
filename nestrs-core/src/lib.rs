@@ -142,6 +142,10 @@ impl ProviderRegistry {
     }
 
     /// NestJS **`useValue`**: register a pre-built singleton without an [`Injectable`] impl.
+    ///
+    /// Lifecycle hooks do **not** run for this registration (any `T` is accepted, so there is no
+    /// hook impl to call). If `T` implements [`ProviderLifecycle`], use
+    /// [`Self::register_use_value_with_lifecycle`] to have the framework drive its hooks.
     pub fn register_use_value<T: Send + Sync + 'static>(&mut self, value: Arc<T>) {
         let preset: Arc<dyn Any + Send + Sync> = value;
         let cell = Arc::new(OnceLock::new());
@@ -170,6 +174,10 @@ impl ProviderRegistry {
     /// runtime inside the factory.
     ///
     /// Prefer [`Self::register`] when the provider is a normal `#[injectable]` type.
+    ///
+    /// Lifecycle hooks do **not** run for this registration (any `T` is accepted, so there is no
+    /// hook impl to call). If `T` implements [`ProviderLifecycle`], use
+    /// [`Self::register_use_factory_with_lifecycle`] to have the framework drive its hooks.
     pub fn register_use_factory<T, F>(&mut self, scope: ProviderScope, factory: F)
     where
         T: Send + Sync + 'static,
@@ -192,6 +200,62 @@ impl ProviderRegistry {
                 on_application_bootstrap: noop_hook,
                 on_before_application_shutdown: noop_hook,
                 on_application_shutdown: noop_hook,
+            },
+        );
+    }
+
+    /// NestJS **`useValue`** with lifecycle hooks: like [`Self::register_use_value`], but the
+    /// singleton's [`ProviderLifecycle`] hooks are driven by the framework (module init/destroy,
+    /// application bootstrap/shutdown) in the same order as [`Injectable`] hooks.
+    pub fn register_use_value_with_lifecycle<T>(&mut self, value: Arc<T>)
+    where
+        T: ProviderLifecycle + Send + Sync + 'static,
+    {
+        let preset: Arc<dyn Any + Send + Sync> = value;
+        let cell = Arc::new(OnceLock::new());
+        let _ = cell.set(preset.clone());
+        self.insert_entry(
+            TypeId::of::<T>(),
+            ProviderEntry {
+                type_name: std::any::type_name::<T>(),
+                scope: ProviderScope::Singleton,
+                factory: ProviderFactory::Custom(Arc::new(move |_| preset.clone())),
+                instance: cell,
+                on_module_init: lifecycle_on_module_init::<T>,
+                on_module_destroy: lifecycle_on_module_destroy::<T>,
+                on_application_bootstrap: lifecycle_on_application_bootstrap::<T>,
+                on_before_application_shutdown: lifecycle_on_before_application_shutdown::<T>,
+                on_application_shutdown: lifecycle_on_application_shutdown::<T>,
+            },
+        );
+    }
+
+    /// NestJS **`useFactory`** with lifecycle hooks: like [`Self::register_use_factory`], but
+    /// `T`'s [`ProviderLifecycle`] hooks are driven by the framework. Hooks run only while `T`
+    /// is **singleton-scoped** (matching [`Injectable`] providers: request/transient instances
+    /// have no framework-driven lifecycle).
+    pub fn register_use_factory_with_lifecycle<T, F>(&mut self, scope: ProviderScope, factory: F)
+    where
+        T: ProviderLifecycle + Send + Sync + 'static,
+        F: Fn(&ProviderRegistry) -> Arc<T> + Send + Sync + 'static,
+    {
+        let factory: std::sync::Arc<F> = std::sync::Arc::new(factory);
+        let factory = factory.clone();
+        self.insert_entry(
+            TypeId::of::<T>(),
+            ProviderEntry {
+                type_name: std::any::type_name::<T>(),
+                scope,
+                factory: ProviderFactory::Custom(Arc::new(move |r| {
+                    let v = factory(r);
+                    v as Arc<dyn Any + Send + Sync>
+                })),
+                instance: Arc::new(OnceLock::new()),
+                on_module_init: lifecycle_on_module_init::<T>,
+                on_module_destroy: lifecycle_on_module_destroy::<T>,
+                on_application_bootstrap: lifecycle_on_application_bootstrap::<T>,
+                on_before_application_shutdown: lifecycle_on_before_application_shutdown::<T>,
+                on_application_shutdown: lifecycle_on_application_shutdown::<T>,
             },
         );
     }
@@ -588,6 +652,58 @@ where
     })
 }
 
+/// [`ProviderLifecycle`] twin of [`hook_on_module_init`]: resolves the provider and drives its
+/// hook. Works for both value (preset cell) and factory (lazily built) singletons.
+fn lifecycle_on_module_init<'a, T>(registry: &'a ProviderRegistry) -> HookFuture<'a>
+where
+    T: ProviderLifecycle + Send + Sync + 'static,
+{
+    Box::pin(async move {
+        let v = registry.get::<T>();
+        v.on_module_init().await;
+    })
+}
+
+fn lifecycle_on_module_destroy<'a, T>(registry: &'a ProviderRegistry) -> HookFuture<'a>
+where
+    T: ProviderLifecycle + Send + Sync + 'static,
+{
+    Box::pin(async move {
+        let v = registry.get::<T>();
+        v.on_module_destroy().await;
+    })
+}
+
+fn lifecycle_on_application_bootstrap<'a, T>(registry: &'a ProviderRegistry) -> HookFuture<'a>
+where
+    T: ProviderLifecycle + Send + Sync + 'static,
+{
+    Box::pin(async move {
+        let v = registry.get::<T>();
+        v.on_application_bootstrap().await;
+    })
+}
+
+fn lifecycle_on_before_application_shutdown<'a, T>(registry: &'a ProviderRegistry) -> HookFuture<'a>
+where
+    T: ProviderLifecycle + Send + Sync + 'static,
+{
+    Box::pin(async move {
+        let v = registry.get::<T>();
+        v.on_before_application_shutdown().await;
+    })
+}
+
+fn lifecycle_on_application_shutdown<'a, T>(registry: &'a ProviderRegistry) -> HookFuture<'a>
+where
+    T: ProviderLifecycle + Send + Sync + 'static,
+{
+    Box::pin(async move {
+        let v = registry.get::<T>();
+        v.on_application_shutdown().await;
+    })
+}
+
 /// Application service or provider type constructed through the DI container.
 ///
 /// **`construct` is synchronous.** Perform async I/O in [`Self::on_module_init`] or after you have
@@ -611,6 +727,34 @@ pub trait Injectable: Send + Sync + 'static {
     async fn on_application_bootstrap(&self) {}
     /// NestJS `beforeApplicationShutdown`: fires before `on_application_shutdown` /
     /// `on_module_destroy` during graceful shutdown. Use to flush caches, close
+    /// long-lived connections, or release resources while dependents are still alive.
+    async fn on_before_application_shutdown(&self) {}
+    async fn on_application_shutdown(&self) {}
+}
+
+/// Lifecycle hooks for **value / factory** providers — the NestJS pattern of a
+/// `useValue`/`useFactory` object implementing `OnModuleInit` & friends.
+///
+/// NestJS calls lifecycle interfaces on any provider object that implements them, no matter how
+/// the provider was declared. Rust has no specialization, so
+/// [`ProviderRegistry::register_use_value`] / [`ProviderRegistry::register_use_factory`] — which
+/// accept any `T: Send + Sync + 'static` — cannot detect hook impls and never run hooks. Implement
+/// this trait instead and register through [`ProviderRegistry::register_use_value_with_lifecycle`]
+/// or [`ProviderRegistry::register_use_factory_with_lifecycle`]: the framework then drives the
+/// hooks for **singleton** providers in the same dependency/registration order as [`Injectable`]
+/// hooks (destroy/shutdown hooks reversed).
+///
+/// If `T` already implements [`Injectable`], its own hooks fire when registered via
+/// [`ProviderRegistry::register`] — this trait is only for the custom-provider paths.
+///
+/// **Docs:** mdBook **Fundamentals** in the repository (`docs/src/fundamentals.md`).
+#[async_trait]
+pub trait ProviderLifecycle: Send + Sync + 'static {
+    async fn on_module_init(&self) {}
+    async fn on_module_destroy(&self) {}
+    async fn on_application_bootstrap(&self) {}
+    /// NestJS `beforeApplicationShutdown`: fires before [`Self::on_application_shutdown`] /
+    /// [`Self::on_module_destroy`] during graceful shutdown. Use to flush caches, close
     /// long-lived connections, or release resources while dependents are still alive.
     async fn on_before_application_shutdown(&self) {}
     async fn on_application_shutdown(&self) {}
@@ -1253,5 +1397,156 @@ mod request_scope_tests {
             );
         })
         .await;
+    }
+}
+
+#[cfg(test)]
+mod provider_lifecycle_tests {
+    // useValue/useFactory providers registered through the *_with_lifecycle
+    // variants get their ProviderLifecycle hooks driven exactly like
+    // Injectable hooks: registration order for init/bootstrap, REVERSED for
+    // shutdown/destroy. The plain register_use_value / register_use_factory
+    // keep their documented hook-less behavior (opt-in, no bound changes).
+
+    use super::*;
+    use std::sync::Mutex;
+
+    type Log = Arc<Mutex<Vec<String>>>;
+
+    fn assert_log(log: &Log, expected: &[&str]) {
+        let got = log.lock().unwrap();
+        let expected: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
+        assert_eq!(*got, expected, "hook firing order");
+    }
+
+    /// `Tagged<'A'>` and `Tagged<'B'>` are distinct provider types (one per
+    /// TypeId) sharing a single hook impl — the const char doubles as the
+    /// event prefix in the log.
+    struct Tagged<const TAG: char> {
+        log: Log,
+    }
+
+    impl<const TAG: char> Tagged<TAG> {
+        fn record(&self, event: &str) {
+            self.log.lock().unwrap().push(format!("{TAG}:{event}"));
+        }
+    }
+
+    #[async_trait]
+    impl<const TAG: char> ProviderLifecycle for Tagged<TAG> {
+        async fn on_module_init(&self) {
+            self.record("init");
+        }
+        async fn on_module_destroy(&self) {
+            self.record("destroy");
+        }
+        async fn on_application_bootstrap(&self) {
+            self.record("bootstrap");
+        }
+        async fn on_before_application_shutdown(&self) {
+            self.record("before_shutdown");
+        }
+        async fn on_application_shutdown(&self) {
+            self.record("shutdown");
+        }
+    }
+
+    #[tokio::test]
+    async fn use_value_lifecycle_hooks_fire_in_framework_order() {
+        let log: Log = Arc::default();
+        let mut registry = ProviderRegistry::new();
+        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'V'> {
+            log: log.clone(),
+        }));
+
+        registry.run_on_module_init().await;
+        registry.run_on_application_bootstrap().await;
+        registry.run_on_before_application_shutdown().await;
+        registry.run_on_application_shutdown().await;
+        registry.run_on_module_destroy().await;
+
+        assert_log(
+            &log,
+            &[
+                "V:init",
+                "V:bootstrap",
+                "V:before_shutdown",
+                "V:shutdown",
+                "V:destroy",
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn lifecycle_hooks_register_order_init_reverse_destroy() {
+        let log: Log = Arc::default();
+        let mut registry = ProviderRegistry::new();
+        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'A'> {
+            log: log.clone(),
+        }));
+        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'B'> {
+            log: log.clone(),
+        }));
+
+        registry.run_on_module_init().await;
+        registry.run_on_module_destroy().await;
+
+        // Destroy hooks run reversed — dependents tear down before their
+        // dependencies, matching Injectable providers.
+        assert_log(&log, &["A:init", "B:init", "B:destroy", "A:destroy"]);
+    }
+
+    #[tokio::test]
+    async fn use_factory_lifecycle_hooks_fire_on_the_lazily_built_singleton() {
+        let log: Log = Arc::default();
+        let mut registry = ProviderRegistry::new();
+        registry.register_use_factory_with_lifecycle(ProviderScope::Singleton, {
+            let log = log.clone();
+            move |_r| {
+                log.lock().unwrap().push("F:construct".to_string());
+                Arc::new(Tagged::<'F'> {
+                    log: log.clone(),
+                })
+            }
+        });
+
+        // Nothing has resolved F yet — the init hook is the first `get` and
+        // constructs the singleton itself (the same lazy contract as
+        // Injectable providers whose first resolution happens in a hook).
+        registry.run_on_module_init().await;
+        assert_log(&log, &["F:construct", "F:init"]);
+
+        // Later resolutions reuse the SAME singleton the hook saw.
+        let _v: Arc<Tagged<'F'>> = registry.get();
+        assert_log(&log, &["F:construct", "F:init"]);
+    }
+
+    #[tokio::test]
+    async fn plain_use_value_and_use_factory_stay_hook_less() {
+        // Opt-in contract: types registered through the PLAIN variants never
+        // run lifecycle hooks, even when they implement ProviderLifecycle
+        // (back-compat — the fix adds the *_with_lifecycle variants rather
+        // than changing the plain methods' bounds).
+        let log: Log = Arc::default();
+        let mut registry = ProviderRegistry::new();
+        registry.register_use_value(Arc::new(Tagged::<'V'> {
+            log: log.clone(),
+        }));
+        registry.register_use_factory(ProviderScope::Singleton, {
+            let log = log.clone();
+            move |_r| {
+                Arc::new(Tagged::<'G'> {
+                    log: log.clone(),
+                })
+            }
+        });
+
+        registry.run_on_module_init().await;
+        registry.run_on_application_bootstrap().await;
+        registry.run_on_before_application_shutdown().await;
+        registry.run_on_application_shutdown().await;
+        registry.run_on_module_destroy().await;
+
+        assert_log(&log, &[]);
     }
 }

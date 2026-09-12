@@ -73,13 +73,13 @@ static TX_SLOT_TID: std::sync::OnceLock<TypeId> = std::sync::OnceLock::new();
 pub struct GqlDataContext {
     /// Resolved ability from the request. When `Some`, every call to
     /// [`graphql_router_with_context`] installs it into
-    /// `nestrs_core::ABILITY_SLOT`, so [`crate::graphql::current_gql_ability`]
+    /// `nestrs_core::ABILITY_SLOT`, so [`crate::current_gql_ability`]
     /// returns `Some(_)` from any resolver.
     pub ability: Option<Arc<Ability>>,
     /// sqlx pool for opening per-request transactions. When `Some`,
     /// the handler opens a fresh `TransactionSlot` and installs it
     /// into `nestrs_core::REQUEST_SCOPE_CACHE`; resolvers read it via
-    /// [`crate::graphql::current_gql_transaction`].
+    /// [`crate::current_gql_transaction`].
     pub pool: Option<Arc<sqlx::AnyPool>>,
     /// Resolved principal from the request. When `Some`, every call to
     /// [`graphql_router_with_context`] installs it into the per-task

@@ -7,6 +7,35 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: override_provider silently coerced overridden providers to Singleton scope
+
+`ProviderRegistry::override_provider` (and the
+`DynamicModuleBuilder`/`TestingModule`/`ConfigurableModuleBuilder` paths that
+delegate to it) rebuilt the provider entry with a hardcoded
+`ProviderScope::Singleton` and an `unreachable!()` placeholder factory —
+wholesale replacing the provider's declared scope. Overriding a
+`#[injectable(scope = "request")]` or `scope = "transient"` provider made it
+process-global: per-request state bled across requests, scope introspection
+(`provider_summaries`, the admin snapshot) reported Singleton, and the
+placeholder factory meant a scope-preserving fix could never have resolved
+anything at all.
+
+- **Behavior:** the override now preserves `T::scope()`. The placeholder
+  factory is replaced by one handing out the given instance, so
+  request-scoped overrides resolve per request (each request receives the
+  SAME instance — an override explicitly targets one concrete object) and
+  transient overrides resolve per injection site. Singleton behavior is
+  unchanged (preset instance cell, lifecycle hooks still wired).
+- **Migration:** none for singleton providers — every override in this
+  workspace and in typical `TestingModule` usage targets a singleton. Code
+  that overrode a request/transient provider and relied on the accidental
+  Singleton coercion gets the provider's declared scope back.
+- **Tests:** nestrs-core unit tests pin ptr-equality of the override
+  instance plus the preserved scope for all three scopes — Singleton
+  (instance served), Request (per-request resolution inside
+  `with_request_scope`, instance shared across sequential requests), and
+  Transient (per-resolution instance).
+
 ### Fixed — production/security audit: dependency-ordered lifecycle hooks ran DEPENDENTS before their dependencies
 
 `ordered_singletons` — the topological sort behind all five lifecycle

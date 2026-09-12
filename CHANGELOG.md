@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: masking interceptor leaked one `Box` per masked object per response
+
+- **`mask_value` leaked the response's `"type"` field.** For every JSON
+  object carrying a `"type"` key that went through the
+  `PolicyMaskingInterceptor` (HTTP, and the WS / GraphQL / MCP walkers that
+  re-use `mask_value`), the type name was `Box::leak`ed into a
+  `Subject::Type(&'static str)` — a slow, unbounded memory leak proportional
+  to response traffic, with attacker-influenceable content (any handler that
+  echoes request data into a `"type"` field).
+- **Root cause fixed: `Subject::Type` owns its name.** The variant now holds
+  a `String` instead of `&'static str`, so runtime-built subject names
+  resolve without leaking. This also removed the guard-side leak machinery:
+  `PoliciesGuard` previously pushed every route-metadata subject name through
+  a dedup set behind a **global mutex on the authz hot path**; it now clones
+  the per-request name, and that whole `leak_static` block is gone.
+  - **Migration (pre-1.0):** `Subject::Type("Post")` becomes
+    `Subject::Type("Post".into())` (or any runtime `String`). The
+    `AbilityBuilder::can*` methods still take `&'static str` literals for
+    rule types — only the *query-side* `Subject` enum changed.
+- **Tests:** unit test pinning that runtime-built (non-`'static`) names work
+  through `can()`/`type_name()` (does not compile against the old enum);
+  masking integration test masking a runtime-built `"type"` value. Public-API
+  snapshot unchanged (path-level entries only).
+
 ### Fixed — production/security audit: request-scope panic across `tokio::spawn`
 
 - **`Request`-scoped providers panicked when resolved off the request task.**

@@ -140,7 +140,10 @@ pub fn mask_value(value: &mut Value, ability: &Ability) {
     match value {
         Value::Object(map) => {
             if let Some(Value::String(type_name)) = map.get("type") {
-                let subject = Subject::Type(Box::leak(type_name.clone().into_boxed_str()));
+                // `Subject::Type` owns its name: the response's type field is
+                // untrusted, potentially unique per object, and freed with the
+                // subject (pre-fix: `Box::leak` per masked object per response).
+                let subject = Subject::Type(type_name.clone());
                 if let Some(allowed) = ability.allowed_fields(&Action::Read, &subject) {
                     let allowed: std::collections::HashSet<&str> =
                         allowed.iter().map(|s| s.as_str()).collect();

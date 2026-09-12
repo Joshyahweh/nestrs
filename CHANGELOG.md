@@ -7,6 +7,29 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: admin sidecar accepted its bearer token via query string and compared it non-constant-time
+
+The `nestrs::admin` sidecar (the `admin` feature) accepted the configured
+bearer token via `?token=<token>` in the URL, and compared both the
+header and query presentations with plain `==`.
+
+- **Behavior:** the query-string path is REMOVED — credentials in URLs
+  leak into access logs, proxy logs, browser history, and `Referer`
+  headers. The token is now accepted only via
+  `Authorization: Bearer <token>`, and the comparison is constant-time
+  (`subtle::ConstantTimeEq`), so a `==` no longer short-circuits at the
+  first differing byte (a byte-by-byte timing oracle). Token length is
+  not treated as a secret (single early length check — standard for
+  bearer credentials). The `admin` feature now pulls `subtle`.
+- **Migration:** pass the token as a header (`Authorization: Bearer
+  <token>`) — the in-repo `nestrs-mcp` runtime client already does;
+  nothing in this workspace used the query param. Requests presenting
+  the token in the query string now get 401.
+- **Tests:** unit tests cover the constant-time helper and the
+  header/scheme/wrong-token/missing-token matrix; the live smoke test
+  pins that the correct token in the query string is rejected (401), as
+  are missing tokens and tokens without the `Bearer` scheme.
+
 ### Fixed — production/security audit: override_provider silently coerced overridden providers to Singleton scope
 
 `ProviderRegistry::override_provider` (and the

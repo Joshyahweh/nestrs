@@ -28,7 +28,9 @@
 //! - `GET /__nestrs/openapi.json` — placeholder summary (real OpenAPI doc comes from the `openapi` feature)
 //!
 //! Auth: when `token` is set, the listener requires `Authorization: Bearer <token>`
-//! (or `?token=<token>` query). When unset, the listener refuses to bind to
+//! on every request. The token is deliberately NOT accepted via query string
+//! (credentials in URLs leak into access logs, proxy logs, browser history,
+//! and `Referer` headers). When unset, the listener refuses to bind to
 //! anything but a loopback address and returns 401 to all routes anyway
 //! (defense in depth — if you bind it to `0.0.0.0` without a token, every
 //! request still gets 401).
@@ -36,13 +38,14 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use nestrs_core::{AdminSnapshot, ProviderSummary};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use subtle::ConstantTimeEq;
 
 /// Configuration for the admin sidecar.
 #[derive(Debug, Clone)]
@@ -51,8 +54,9 @@ pub struct AdminOptions {
     /// address if `token` is `None`.
     pub addr: SocketAddr,
     /// Optional bearer token. When set, callers must present it as
-    /// `Authorization: Bearer <token>` or `?token=<token>`. When `None`,
-    /// every request gets 401 (defense in depth).
+    /// `Authorization: Bearer <token>` (header only — query-string tokens
+    /// are rejected). When `None`, every request gets 401 (defense in
+    /// depth).
     pub token: Option<String>,
 }
 
@@ -98,11 +102,6 @@ struct AdminState {
     snapshot_provider: Arc<dyn Fn() -> Arc<AdminSnapshot> + Send + Sync>,
 }
 
-#[derive(Debug, Deserialize)]
-struct TokenQuery {
-    token: Option<String>,
-}
-
 fn unauthorized() -> Response {
     (StatusCode::UNAUTHORIZED, "bearer token required").into_response()
 }
@@ -120,59 +119,48 @@ impl From<AuthError> for Response {
     }
 }
 
-fn check_token(state: &AdminState, auth: Option<&str>, query: Option<&str>) -> bool {
+/// Constant-time bearer-token comparison. A plain `==` short-circuits at
+/// the first differing byte, letting a patient attacker recover the token
+/// byte-by-byte from response timing; `subtle`'s `ct_eq` compares every
+/// byte unconditionally. Token LENGTH is not treated as a secret (a single
+/// early length check — standard practice for bearer credentials).
+fn token_matches(presented: &str, expected: &str) -> bool {
+    presented.len() == expected.len()
+        && bool::from(presented.as_bytes().ct_eq(expected.as_bytes()))
+}
+
+/// Header-only token check: the token is never accepted via query string
+/// (credentials in URLs leak into access logs, proxy logs, browser history,
+/// and `Referer` headers).
+fn check_token(state: &AdminState, auth: Option<&str>) -> bool {
     let Some(expected) = state.token.as_deref() else {
         return false; // no token configured → refuse everything
     };
-    if let Some(h) = auth {
-        if let Some(rest) = h.strip_prefix("Bearer ") {
-            return rest == expected;
-        }
-    }
-    if let Some(q) = query {
-        if q == expected {
-            return true;
-        }
-    }
-    false
+    let Some(presented) = auth.and_then(|h| h.strip_prefix("Bearer ")) else {
+        return false;
+    };
+    token_matches(presented, expected)
 }
 
 fn snapshot(state: &AdminState) -> Arc<AdminSnapshot> {
     (state.snapshot_provider)()
 }
 
-async fn authed<B>(
+async fn authed(
     State(state): State<AdminState>,
     headers: axum::http::HeaderMap,
-    Query(q): Query<TokenQuery>,
-    req: axum::http::Request<B>,
-) -> Result<Arc<AdminSnapshot>, AuthError>
-where
-    B: Send + 'static,
-{
+) -> Result<Arc<AdminSnapshot>, AuthError> {
     let auth = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok());
-    if !check_token(&state, auth, q.token.as_deref()) {
+    if !check_token(&state, auth) {
         return Err(AuthError::Unauthorized);
     }
-    let _ = req; // satisfy unused
     Ok(snapshot(&state))
 }
 
-async fn get_health(
-    State(state): State<AdminState>,
-    headers: axum::http::HeaderMap,
-    Query(q): Query<TokenQuery>,
-) -> Response {
-    match authed(
-        State(state),
-        headers,
-        Query(q),
-        axum::http::Request::new(()),
-    )
-    .await
-    {
+async fn get_health(State(state): State<AdminState>, headers: axum::http::HeaderMap) -> Response {
+    match authed(State(state), headers).await {
         Ok(snap) => {
             let body = serde_json::json!({
                 "status": "ok",
@@ -188,16 +176,8 @@ async fn get_health(
 async fn get_providers(
     State(state): State<AdminState>,
     headers: axum::http::HeaderMap,
-    Query(q): Query<TokenQuery>,
 ) -> Response {
-    match authed(
-        State(state),
-        headers,
-        Query(q),
-        axum::http::Request::new(()),
-    )
-    .await
-    {
+    match authed(State(state), headers).await {
         Ok(snap) => {
             let providers: Vec<ProviderSummaryJson> = snap
                 .providers
@@ -210,19 +190,8 @@ async fn get_providers(
     }
 }
 
-async fn get_routes(
-    State(state): State<AdminState>,
-    headers: axum::http::HeaderMap,
-    Query(q): Query<TokenQuery>,
-) -> Response {
-    match authed(
-        State(state),
-        headers,
-        Query(q),
-        axum::http::Request::new(()),
-    )
-    .await
-    {
+async fn get_routes(State(state): State<AdminState>, headers: axum::http::HeaderMap) -> Response {
+    match authed(State(state), headers).await {
         Ok(snap) => {
             let routes: Vec<RouteInfoJson> = snap.routes.iter().map(RouteInfoJson::from).collect();
             (StatusCode::OK, Json(routes)).into_response()
@@ -231,19 +200,8 @@ async fn get_routes(
     }
 }
 
-async fn get_openapi(
-    State(state): State<AdminState>,
-    headers: axum::http::HeaderMap,
-    Query(q): Query<TokenQuery>,
-) -> Response {
-    match authed(
-        State(state),
-        headers,
-        Query(q),
-        axum::http::Request::new(()),
-    )
-    .await
-    {
+async fn get_openapi(State(state): State<AdminState>, headers: axum::http::HeaderMap) -> Response {
+    match authed(State(state), headers).await {
         Ok(_snap) => {
             // The real OpenAPI doc comes from the `openapi` feature. When
             // that's not enabled, return a minimal summary so callers can
@@ -332,5 +290,63 @@ mod tests {
     fn allows_non_loopback_with_token() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 7777);
         assert!(validate_addr(addr, Some("secret")).is_ok());
+    }
+
+    fn state_with(token: Option<&str>) -> AdminState {
+        AdminState {
+            token: token.map(str::to_string),
+            snapshot_provider: Arc::new(|| unreachable!("no snapshot in token tests")),
+        }
+    }
+
+    #[test]
+    fn no_configured_token_refuses_everything() {
+        let state = state_with(None);
+        assert!(!check_token(&state, Some("Bearer anything")));
+        assert!(!check_token(&state, None));
+    }
+
+    #[test]
+    fn correct_bearer_header_passes() {
+        let state = state_with(Some("secret"));
+        assert!(check_token(&state, Some("Bearer secret")));
+    }
+
+    #[test]
+    fn wrong_token_same_length_fails() {
+        // Same length exercises the FULL byte comparison — the exact case
+        // where a short-circuiting `==` would leak a timing difference at
+        // the first differing byte.
+        let state = state_with(Some("secret"));
+        assert!(!check_token(&state, Some("Bearer secXet")));
+        assert!(!check_token(&state, Some("Bearer xeXXXX")));
+    }
+
+    #[test]
+    fn prefix_correct_but_longer_fails() {
+        let state = state_with(Some("secret"));
+        assert!(!check_token(&state, Some("Bearer secret-with-more")));
+        assert!(!check_token(&state, Some("Bearer secr")));
+    }
+
+    #[test]
+    fn missing_or_malformed_authorization_fails() {
+        let state = state_with(Some("secret"));
+        assert!(!check_token(&state, None));
+        assert!(!check_token(&state, Some("secret"))); // no Bearer scheme
+        assert!(!check_token(&state, Some("Basic c2VjcmV0"))); // wrong scheme
+        assert!(!check_token(&state, Some("Bearer"))); // no space, no token
+        assert!(!check_token(&state, Some(""))); // empty header
+    }
+
+    #[test]
+    fn token_matches_is_length_insensitive_at_prefix() {
+        // Direct coverage of the constant-time helper, including the
+        // length-mismatch arm.
+        assert!(token_matches("secret", "secret"));
+        assert!(!token_matches("secret", "Secret"));
+        assert!(!token_matches("secret", "secret2"));
+        assert!(!token_matches("", "s"));
+        assert!(token_matches("", ""));
     }
 }

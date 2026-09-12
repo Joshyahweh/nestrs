@@ -131,4 +131,35 @@ async fn admin_port_serves_health_routes_providers() {
         .await
         .expect("bad-token request");
     assert_eq!(bad.status().as_u16(), 401);
+
+    // 6) Missing token must 401.
+    let missing = http
+        .get(format!("{base}/__nestrs/health"))
+        .send()
+        .await
+        .expect("missing-token request");
+    assert_eq!(missing.status().as_u16(), 401);
+
+    // 7) The correct token in the QUERY STRING must be rejected: credentials
+    // in URLs leak into access logs, proxy logs, browser history, and
+    // Referer headers. Header-only.
+    let via_query = http
+        .get(format!("{base}/__nestrs/health?token=smoke-token"))
+        .send()
+        .await
+        .expect("query-token request");
+    assert_eq!(
+        via_query.status().as_u16(),
+        401,
+        "query-string tokens must be rejected (header only)"
+    );
+
+    // 8) The token without the Bearer scheme must 401.
+    let no_scheme = http
+        .get(format!("{base}/__nestrs/health"))
+        .header("authorization", "smoke-token")
+        .send()
+        .await
+        .expect("no-scheme request");
+    assert_eq!(no_scheme.status().as_u16(), 401);
 }

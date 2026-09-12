@@ -98,7 +98,7 @@ oauth2 = ["dep:nestrs-oauth2"]
 ## use `Principal` to read either a JWT or an OAuth2 token identity.
 authn-oauth2 = ["authn", "oauth2"]
 ## Enables a localhost-only HTTP admin port with `/__nestrs/{health,routes,providers,openapi.json}` endpoints. Consumed by `nestrs-mcp`'s live-runtime tools.
-admin = []
+admin = ["dep:subtle"]
 ## Clears `nestrs-core` global registries in tests (`RouteRegistry`, `MetadataRegistry`). See `STABILITY.md`.
 test-hooks = ["nestrs-core/test-hooks"]
 

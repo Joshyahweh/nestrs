@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
-homepage.workspace = true
-readme = "README.md"
 description = "CLI generator and scaffolding tooling for nestrs."
 keywords = ["cli", "scaffold", "nest", "generator", "axum"]
 categories = ["command-line-utilities", "development-tools"]
@@ -18,7 +16,7 @@ serde_json = "1"
 # re-export the `nestrs_mcp::NestrsMcpServer` here so the CLI can serve
 # stdio/HTTP without spawning a subprocess. Stubbed (off by default) for
 # now so existing CLI builds are unaffected.
-nestrs-mcp = { path = "../nestrs-mcp", version = "0.5.2", optional = true }
+nestrs-mcp = { path = "../nestrs-mcp", version = "1.0.0", optional = true }
 # Optional DB migrations + seeding (`nestrs-cli db ...`). Pinned to
 # 0.8.6 to match the rest of the workspace; sqlx's `migrate` feature
 # is what unlocks `sqlx::migrate::Migrator`. `postgres` is on the

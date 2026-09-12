@@ -5,8 +5,6 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
-homepage.workspace = true
-readme = "README.md"
 description = "Prisma integration helpers and providers for nestrs."
 keywords = ["prisma", "database", "nest", "orm", "axum"]
 categories = ["database", "web-programming"]
@@ -26,7 +24,7 @@ uuid = ["dep:uuid", "sqlx?/uuid"]
 [dependencies]
 async-trait = "0.1"
 chrono = { version = "0.4", optional = true, default-features = false, features = ["clock"] }
-nestrs = { version = "0.5.2", path = "../nestrs" }
+nestrs = { version = "1.0.0", path = "../nestrs" }
 axum.workspace = true
 pastey = "0.2"
 serde = { version = "1", features = ["derive"] }

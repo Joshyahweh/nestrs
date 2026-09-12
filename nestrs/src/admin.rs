@@ -125,8 +125,7 @@ impl From<AuthError> for Response {
 /// byte unconditionally. Token LENGTH is not treated as a secret (a single
 /// early length check — standard practice for bearer credentials).
 fn token_matches(presented: &str, expected: &str) -> bool {
-    presented.len() == expected.len()
-        && bool::from(presented.as_bytes().ct_eq(expected.as_bytes()))
+    presented.len() == expected.len() && bool::from(presented.as_bytes().ct_eq(expected.as_bytes()))
 }
 
 /// Header-only token check: the token is never accepted via query string

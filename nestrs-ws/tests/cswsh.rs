@@ -62,8 +62,8 @@ fn allowed_cfg() -> WsSecurityConfig {
 
 /// Build a client request with the supplied Origin (or no Origin at all).
 fn request_with_origin(addr: std::net::SocketAddr, origin: Option<&str>) -> Request<()> {
-    let mut req = IntoClientRequest::into_client_request(format!("ws://{addr}/ws"))
-        .expect("static URI");
+    let mut req =
+        IntoClientRequest::into_client_request(format!("ws://{addr}/ws")).expect("static URI");
     if let Some(o) = origin {
         req.headers_mut()
             .insert("Origin", o.parse().expect("Origin header value"));
@@ -279,8 +279,8 @@ async fn security_runs_before_guard_and_short_circuits() {
     }
 
     // Allowed origin, but guard rejects ⇒ in-protocol 1008 close.
-    let mut req = IntoClientRequest::into_client_request(format!("ws://{addr}/ws"))
-        .expect("static URI");
+    let mut req =
+        IntoClientRequest::into_client_request(format!("ws://{addr}/ws")).expect("static URI");
     req.headers_mut().insert(
         "Origin",
         "https://allowed.example.com".parse().expect("Origin"),

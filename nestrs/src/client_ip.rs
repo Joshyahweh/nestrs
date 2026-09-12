@@ -317,10 +317,7 @@ mod tests {
         // controlled input: when the selected entry doesn't parse, the
         // request must NOT be keyed as if it were the proxy's real IP.
         let mut headers = HeaderMap::new();
-        headers.insert(
-            &X_FORWARDED_FOR,
-            HeaderValue::from_static("not-an-ip"),
-        );
+        headers.insert(&X_FORWARDED_FOR, HeaderValue::from_static("not-an-ip"));
         assert_eq!(
             super::rate_limit_key_ip(&headers, &Extensions::new(), Some(1)),
             "unknown"

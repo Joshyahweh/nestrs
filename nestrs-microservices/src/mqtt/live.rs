@@ -42,10 +42,7 @@ impl std::fmt::Debug for MqttSocketOptions {
         // stays visible for operators.
         let mut s = f.debug_struct("MqttSocketOptions");
         s.field("username", &self.username);
-        s.field(
-            "password",
-            &self.password.as_ref().map(|_| "<redacted>"),
-        );
+        s.field("password", &self.password.as_ref().map(|_| "<redacted>"));
         match &self.tls {
             None => s.field("tls", &"None"),
             Some(MqttTlsMode::Native) => s.field("tls", &"Native"),
@@ -491,8 +488,17 @@ mod redaction_tests {
             !rendered.contains("device-secret"),
             "password leaked: {rendered}"
         );
-        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
-        assert!(rendered.contains("device-42"), "username should stay visible: {rendered}");
-        assert!(rendered.contains("4 bytes"), "CA PEM should render as size: {rendered}");
+        assert!(
+            rendered.contains("<redacted>"),
+            "no redaction marker: {rendered}"
+        );
+        assert!(
+            rendered.contains("device-42"),
+            "username should stay visible: {rendered}"
+        );
+        assert!(
+            rendered.contains("4 bytes"),
+            "CA PEM should render as size: {rendered}"
+        );
     }
 }

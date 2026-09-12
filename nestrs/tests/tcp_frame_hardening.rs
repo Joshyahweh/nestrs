@@ -62,7 +62,10 @@ async fn oversized_frame_is_rejected_and_connection_dropped() {
     // every byte, trips the cap, replies with a generic error frame, and
     // closes. Memory can no longer grow with the frame.
     let payload = vec![b'a'; MAX_FRAME_BYTES + 1];
-    stream.write_all(&payload).await.expect("write oversized frame");
+    stream
+        .write_all(&payload)
+        .await
+        .expect("write oversized frame");
 
     let mut reader = BufReader::new(stream);
     let mut rejection = String::new();
@@ -98,12 +101,18 @@ async fn pipelined_frames_are_not_swallowed() {
         r#"{"id":"2","kind":"send","pattern":"p","payload":{}}"#,
         "\n",
     );
-    stream.write_all(frames.as_bytes()).await.expect("write frames");
+    stream
+        .write_all(frames.as_bytes())
+        .await
+        .expect("write frames");
 
     let mut reader = BufReader::new(stream);
     for expected in ["1", "2"] {
         let mut line = String::new();
-        let n = reader.read_line(&mut line).await.expect("read response line");
+        let n = reader
+            .read_line(&mut line)
+            .await
+            .expect("read response line");
         assert!(n > 0, "expected a response for frame {expected}");
         let v: serde_json::Value = serde_json::from_str(&line).expect("valid JSON response");
         assert_eq!(v["id"], expected, "responses must be in order: {line}");

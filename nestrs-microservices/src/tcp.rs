@@ -162,9 +162,9 @@ impl Transport for TcpTransport {
                 payload,
             };
 
-            let mut stream = TcpStream::connect(self.options.addr).await.map_err(|e| {
-                TransportError::new(format!("tcp transport connect failed: {e}"))
-            })?;
+            let mut stream = TcpStream::connect(self.options.addr)
+                .await
+                .map_err(|e| TransportError::new(format!("tcp transport connect failed: {e}")))?;
 
             let line = serde_json::to_string(&req)
                 .map_err(|e| TransportError::new(format!("serialize request failed: {e}")))?;
@@ -172,9 +172,10 @@ impl Transport for TcpTransport {
                 .write_all(line.as_bytes())
                 .await
                 .map_err(|e| TransportError::new(format!("write request failed: {e}")))?;
-            stream.write_all(b"\n").await.map_err(|e| {
-                TransportError::new(format!("write request newline failed: {e}"))
-            })?;
+            stream
+                .write_all(b"\n")
+                .await
+                .map_err(|e| TransportError::new(format!("write request newline failed: {e}")))?;
             stream
                 .flush()
                 .await
@@ -185,12 +186,8 @@ impl Transport for TcpTransport {
             let mut reader = BufReader::new(stream);
             let resp_line = match read_capped_line(&mut reader, MAX_FRAME_BYTES).await {
                 Ok(Some(l)) => l,
-                Ok(None) => {
-                    return Err(TransportError::new("tcp transport: empty response"))
-                }
-                Err(reason) => {
-                    return Err(TransportError::new(format!("read response: {reason}")))
-                }
+                Ok(None) => return Err(TransportError::new("tcp transport: empty response")),
+                Err(reason) => return Err(TransportError::new(format!("read response: {reason}"))),
             };
             let resp: MicroserviceResponse = serde_json::from_str(&resp_line)
                 .map_err(|e| TransportError::new(format!("deserialize response failed: {e}")))?;
@@ -235,9 +232,9 @@ impl Transport for TcpTransport {
                 payload,
             };
 
-            let mut stream = TcpStream::connect(self.options.addr).await.map_err(|e| {
-                TransportError::new(format!("tcp transport connect failed: {e}"))
-            })?;
+            let mut stream = TcpStream::connect(self.options.addr)
+                .await
+                .map_err(|e| TransportError::new(format!("tcp transport connect failed: {e}")))?;
 
             let line = serde_json::to_string(&req)
                 .map_err(|e| TransportError::new(format!("serialize event failed: {e}")))?;
@@ -245,9 +242,10 @@ impl Transport for TcpTransport {
                 .write_all(line.as_bytes())
                 .await
                 .map_err(|e| TransportError::new(format!("write event failed: {e}")))?;
-            stream.write_all(b"\n").await.map_err(|e| {
-                TransportError::new(format!("write event newline failed: {e}"))
-            })?;
+            stream
+                .write_all(b"\n")
+                .await
+                .map_err(|e| TransportError::new(format!("write event newline failed: {e}")))?;
             stream
                 .flush()
                 .await

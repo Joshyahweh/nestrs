@@ -84,7 +84,9 @@ fn two_subgraph_config(user_resolver: Arc<dyn EntityResolver>) -> FederationConf
                 name: "Product".to_string(),
                 sdl: PRODUCTS_SDL.to_string(),
                 entity_resolver: Arc::new(
-                    |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+                    |_ctx: &async_graphql::Context<'_>,
+                     reps: &[&serde_json::Value]|
+                     -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
                         Ok(reps
                             .iter()
                             .map(|_| Some(json!({ "upc": "B00005N5PF", "name": "Test Product" })))
@@ -105,26 +107,24 @@ fn two_subgraph_config(user_resolver: Arc<dyn EntityResolver>) -> FederationConf
 #[tokio::test]
 async fn gateway_round_trip_two_subgraphs() {
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             Ok(reps
                 .iter()
                 .map(|_| Some(json!({ "__typename": "User", "id": "1", "name": "alice" })))
                 .collect())
         },
     );
-    let router = federation_router(two_subgraph_config(resolver), "/graphql")
-        .expect("build gateway");
+    let router =
+        federation_router(two_subgraph_config(resolver), "/graphql").expect("build gateway");
     // Round-trip: a basic `{ _service { sdl } }` introspection query
     // exercises the whole pipeline — SDL validation, schema build,
     // SDL export, dispatch table, handler routing — without depending
     // on subgraph type names appearing in the runtime schema
     // (they don't, because the resolver returns raw JSON behind the
     // `entities` field).
-    let (status, body) = post_query(
-        router,
-        r#"{ _service { sdl } }"#,
-    )
-    .await;
+    let (status, body) = post_query(router, r#"{ _service { sdl } }"#).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["errors"].is_null(), "no errors: {body}");
     let sdl = body["data"]["_service"]["sdl"]
@@ -132,14 +132,19 @@ async fn gateway_round_trip_two_subgraphs() {
         .expect("sdl string");
     // Federation-v2 marker directives and the federation entity field
     // are exposed via the runtime schema:
-    assert!(sdl.contains("FederationRoot"), "schema has FederationRoot: {sdl}");
+    assert!(
+        sdl.contains("FederationRoot"),
+        "schema has FederationRoot: {sdl}"
+    );
     assert!(sdl.contains("entities"), "schema has entities field: {sdl}");
 }
 
 #[tokio::test]
 async fn entities_resolution_routes_representation_by_typename() {
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             Ok(reps
                 .iter()
                 .map(|rep| {
@@ -179,7 +184,9 @@ async fn entities_resolution_routes_representation_by_typename() {
 #[tokio::test]
 async fn entities_resolution_returns_null_for_unknown_typename() {
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             Ok(reps
                 .iter()
                 .map(|_| Some(json!({ "__typename": "User", "id": "1", "name": "x" })))
@@ -205,7 +212,9 @@ async fn entities_resolution_batches_multiple_representations_in_one_call() {
     let resolver: Arc<dyn EntityResolver> = {
         let counter = counter.clone();
         Arc::new(
-            move |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+            move |_ctx: &async_graphql::Context<'_>,
+                  reps: &[&serde_json::Value]|
+                  -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
                 // One fetch_add per call into the resolver — the
                 // gateway groups same-typename reps into a single
                 // batch, so 3 representations with `__typename: "User"`
@@ -255,7 +264,9 @@ async fn entities_resolution_batches_multiple_representations_in_one_call() {
 #[tokio::test]
 async fn gateway_emits_service_field_with_merged_sdl() {
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             Ok(reps
                 .iter()
                 .map(|_| Some(json!({ "__typename": "User", "id": "1", "name": "x" })))
@@ -272,7 +283,10 @@ async fn gateway_emits_service_field_with_merged_sdl() {
     // resolvers are dispatched via the dispatch table — they don't
     // appear in the runtime schema because they live behind the
     // JSON-typed `entities` field (test #3 covers end-to-end dispatch).
-    assert!(sdl.contains("FederationRoot"), "schema has FederationRoot: {sdl}");
+    assert!(
+        sdl.contains("FederationRoot"),
+        "schema has FederationRoot: {sdl}"
+    );
     assert!(sdl.contains("entities"), "schema has entities field: {sdl}");
     // Federation-v2 must expose `_service` and `_Any` plumbing.
     assert!(sdl.contains("_service") || sdl.contains("ServiceField"));
@@ -285,7 +299,9 @@ async fn gateway_strips_federation_directives_from_response() {
     // but NEVER in the runtime response data — they belong to the
     // schema layer, not the transport.
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             Ok(reps
                 .iter()
                 .map(|_| Some(json!({ "__typename": "User", "id": "1", "name": "x" })))
@@ -316,7 +332,9 @@ async fn gateway_sdl_export_includes_link_directive_for_fed2() {
     // `schema` when `SDLExportOptions::federation()` is set — verify
     // it's in the gateway's merged SDL output.
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             Ok(reps
                 .iter()
                 .map(|_| Some(json!({ "__typename": "User", "id": "1", "name": "x" })))
@@ -353,7 +371,9 @@ async fn gateway_passes_row_level_predicate_through_entity_resolver() {
     // If the hook is missing or doesn't install the principal task-local,
     // both calls will return the same data, and the assertion fails.
     let resolver = Arc::new(
-        |ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             let principal = ctx.data_opt::<Arc<Mutex<Option<String>>>>();
             let who = principal
                 .as_ref()
@@ -407,11 +427,10 @@ async fn gateway_passes_row_level_predicate_through_entity_resolver() {
 #[tokio::test]
 async fn gateway_refuses_to_start_on_unparseable_subgraph_sdl() {
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
-            Ok(reps
-                .iter()
-                .map(|_| Some(json!({ "id": "1" })))
-                .collect())
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+            Ok(reps.iter().map(|_| Some(json!({ "id": "1" }))).collect())
         },
     );
     let cfg = FederationConfig {
@@ -447,11 +466,10 @@ async fn gateway_refuses_to_start_on_merge_conflict() {
     // table is keyed on `SubgraphSpec::name`, so this surfaces as a
     // merge conflict (test #12).
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
-            Ok(reps
-                .iter()
-                .map(|_| Some(json!({ "id": "1" })))
-                .collect())
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+            Ok(reps.iter().map(|_| Some(json!({ "id": "1" }))).collect())
         },
     );
     let cfg = FederationConfig {
@@ -485,7 +503,9 @@ async fn gateway_with_hook_runs_through_without_errors() {
     // crate. We don't open a transaction here — the goal is to confirm
     // the hook path doesn't break the resolution loop.
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             Ok(reps
                 .iter()
                 .map(|_| Some(json!({ "__typename": "User", "id": "1", "name": "x" })))
@@ -523,7 +543,9 @@ async fn gateway_routes_ability_scoped_query_through_hook() {
     // assert row-level filtering here (that's covered by
     // `graphql_multi_transport_scope`); we confirm the wiring is sane.
     let resolver = Arc::new(
-        |_ctx: &async_graphql::Context<'_>, reps: &[&serde_json::Value]| -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
+        |_ctx: &async_graphql::Context<'_>,
+         reps: &[&serde_json::Value]|
+         -> async_graphql::Result<Vec<Option<serde_json::Value>>> {
             Ok(reps
                 .iter()
                 .map(|_| Some(json!({ "__typename": "User", "id": "1", "name": "alice" })))

@@ -137,13 +137,7 @@ impl KafkaTransport {
         // Connect before taking the partition-cache lock so the two locks
         // are never nested.
         let c = self.connect().await?;
-        cached_partition(
-            &c,
-            &self.partitions,
-            topic,
-            self.options.request_timeout,
-        )
-        .await
+        cached_partition(&c, &self.partitions, topic, self.options.request_timeout).await
     }
 }
 
@@ -436,9 +430,7 @@ impl KafkaMicroserviceServer {
         let start = req_pc
             .get_offset(self.options.consumer_start.into())
             .await
-            .map_err(|e| {
-                TransportError::new(format!("kafka get_offset (requests) failed: {e}"))
-            })?;
+            .map_err(|e| TransportError::new(format!("kafka get_offset (requests) failed: {e}")))?;
         *self.next_offset.lock().await = start;
         *g = Some(c.clone());
         Ok(c)
@@ -485,8 +477,9 @@ impl KafkaMicroserviceServer {
 
         // Reply partition clients, shared by every reply task (was: one
         // fresh partition client — leader discovery and all — per reply).
-        let reply_pcs: Arc<Mutex<HashMap<String, Arc<rskafka::client::partition::PartitionClient>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let reply_pcs: Arc<
+            Mutex<HashMap<String, Arc<rskafka::client::partition::PartitionClient>>>,
+        > = Arc::new(Mutex::new(HashMap::new()));
 
         // In-memory consumer position (rskafka 0.6 has no offset-commit
         // API); advanced before dispatch (at-most-once), same as before.
@@ -742,10 +735,7 @@ mod connection_tests {
             .send_json("audit.ping", serde_json::json!({}))
             .await
             .expect_err("second call must fail too");
-        assert!(
-            err.message.contains("kafka"),
-            "unexpected error: {err:?}"
-        );
+        assert!(err.message.contains("kafka"), "unexpected error: {err:?}");
     }
 
     #[tokio::test]

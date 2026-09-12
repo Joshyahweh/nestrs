@@ -156,10 +156,7 @@ impl DiHandler {
     #[use_micro_interceptors(RegistryBoundInterceptor)]
     #[use_micro_guards(RegistryBoundGuard)]
     #[use_micro_pipes(RegistryBoundPipe)]
-    async fn echo(
-        &self,
-        payload: serde_json::Value,
-    ) -> Result<serde_json::Value, HttpException> {
+    async fn echo(&self, payload: serde_json::Value) -> Result<serde_json::Value, HttpException> {
         Ok(payload)
     }
 }
@@ -401,7 +398,10 @@ async fn tcp_microservice_wildcard_patterns_match_with_literal_priority() {
         .send::<serde_json::Value, UserRes>("deep.one", &serde_json::json!({}))
         .await
         .expect_err("`>` requires at least one trailing token");
-    assert_eq!(err.message, "no microservice handler for pattern `deep.one`");
+    assert_eq!(
+        err.message,
+        "no microservice handler for pattern `deep.one`"
+    );
 
     // Too many tokens for a `*` pattern.
     let err = proxy

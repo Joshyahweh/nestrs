@@ -48,7 +48,10 @@ struct UserLoader {
 impl UserLoader {
     async fn batch_load(&self, keys: &[i64]) -> Result<HashMap<i64, User>, nestrs::graphql::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        self.keys_seen.lock().expect("keys lock").extend_from_slice(keys);
+        self.keys_seen
+            .lock()
+            .expect("keys lock")
+            .extend_from_slice(keys);
         let failing = self.fail_on.lock().expect("fail lock").clone();
         Ok(keys
             .iter()
@@ -195,11 +198,7 @@ async fn sibling_load_one_calls_batch_into_a_single_loader_call() {
 async fn load_many_batches_once_for_the_key_list() {
     let loader = UserLoader::default();
     let ctx = GqlDataContext::new().with_loaders(registry_for(&loader));
-    let (_status, body) = post_query(
-        ctx,
-        r#"{ users(ids: [3, 4, 5]) { id name } }"#,
-    )
-    .await;
+    let (_status, body) = post_query(ctx, r#"{ users(ids: [3, 4, 5]) { id name } }"#).await;
 
     let names: Vec<&str> = body["data"]["users"]
         .as_array()
@@ -245,7 +244,11 @@ async fn factory_builds_a_fresh_loader_per_request() {
         assert_eq!(body["data"]["user"]["name"], "user-9");
     }
 
-    assert_eq!(factory_runs.load(Ordering::SeqCst), 2, "one build per request");
+    assert_eq!(
+        factory_runs.load(Ordering::SeqCst),
+        2,
+        "one build per request"
+    );
     assert_eq!(loader.calls(), 2, "cache must not leak across requests");
 }
 
@@ -264,8 +267,7 @@ async fn registry_holds_multiple_loader_types() {
         .with_loader(move || rl.clone().into_data_loader());
     let ctx = GqlDataContext::new().with_loaders(loaders);
 
-    let (_status, body) =
-        post_query(ctx, r#"{ user(id: 1) { name } role(name: "admin") }"#).await;
+    let (_status, body) = post_query(ctx, r#"{ user(id: 1) { name } role(name: "admin") }"#).await;
 
     assert_eq!(body["data"]["user"]["name"], "user-1");
     assert_eq!(body["data"]["role"], "role-of-admin");
@@ -313,11 +315,7 @@ async fn loader_error_surfaces_as_field_error() {
 #[tokio::test]
 async fn batch_error_reaches_every_waiting_resolver() {
     let loader = UserLoader::default();
-    loader
-        .fail_on
-        .lock()
-        .expect("fail lock")
-        .extend([7, 8]);
+    loader.fail_on.lock().expect("fail lock").extend([7, 8]);
     let ctx = GqlDataContext::new().with_loaders(registry_for(&loader));
     let (_status, body) = post_query(
         ctx,

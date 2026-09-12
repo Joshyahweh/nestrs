@@ -269,28 +269,36 @@ impl ProviderRegistry {
         self.register::<T>();
     }
 
-    /// Override a provider with a concrete singleton instance (testing utility).
+    /// Override a provider with a concrete instance (testing utility).
     ///
     /// This is primarily intended for `TestingModule`-style overrides where you want to replace an
     /// injectable with a mock instance.
+    ///
+    /// The override preserves the provider's declared scope (`T::scope()`): a request- or
+    /// transient-scoped provider keeps its per-request / per-resolution semantics, and every
+    /// resolution hands out the given instance — an override explicitly targets one concrete
+    /// object, so request-scoped overrides share that instance across requests.
     pub fn override_provider<T>(&mut self, instance: Arc<T>)
     where
         T: Injectable + Send + Sync + 'static,
     {
+        let preset: Arc<dyn Any + Send + Sync> = instance;
+        let instance_cell = Arc::new(OnceLock::new());
+        let _ = instance_cell.set(preset.clone());
         let entry = ProviderEntry {
             type_name: std::any::type_name::<T>(),
-            scope: ProviderScope::Singleton,
-            factory: ProviderFactory::InjectableFn(|_| unreachable!("override preset")),
-            instance: Arc::new(OnceLock::new()),
+            scope: T::scope(),
+            // A real factory (not a placeholder) so request/transient resolutions
+            // return the override instead of panicking; the preset cell serves
+            // the singleton path directly.
+            factory: ProviderFactory::Custom(Arc::new(move |_| preset.clone())),
+            instance: instance_cell,
             on_module_init: hook_on_module_init::<T>,
             on_module_destroy: hook_on_module_destroy::<T>,
             on_application_bootstrap: hook_on_application_bootstrap::<T>,
             on_before_application_shutdown: hook_on_before_application_shutdown::<T>,
             on_application_shutdown: hook_on_application_shutdown::<T>,
         };
-
-        let any: Arc<dyn Any + Send + Sync> = instance;
-        let _ = entry.instance.set(any);
 
         self.insert_entry(TypeId::of::<T>(), entry);
     }
@@ -1613,6 +1621,133 @@ mod provider_dep_graph_tests {
             targets.len(),
             1,
             "racing recorders must not duplicate an edge"
+        );
+    }
+}
+
+#[cfg(test)]
+mod override_provider_tests {
+    // override_provider replaces WHAT a provider resolves to — it must not
+    // silently change the provider's LIFETIME. Pre-fix the override entry
+    // hardcoded `ProviderScope::Singleton` with an `unreachable!()`
+    // placeholder factory: overriding a request- or transient-scoped
+    // provider made it process-global (per-request state bleeding across
+    // requests, `provider_summaries` reporting the wrong scope), and a
+    // scope-preserving fix could never have resolved anything.
+
+    use super::*;
+
+    struct SingletonSvc;
+
+    impl Injectable for SingletonSvc {
+        fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
+            unreachable!("overridden before construction")
+        }
+    }
+
+    struct RequestSvc;
+
+    impl Injectable for RequestSvc {
+        fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
+            unreachable!("overridden before construction")
+        }
+
+        fn scope() -> ProviderScope {
+            ProviderScope::Request
+        }
+    }
+
+    struct TransientSvc;
+
+    impl Injectable for TransientSvc {
+        fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
+            unreachable!("overridden before construction")
+        }
+
+        fn scope() -> ProviderScope {
+            ProviderScope::Transient
+        }
+    }
+
+    fn declared_scope<T: 'static>(registry: &ProviderRegistry) -> ProviderScope {
+        let name = std::any::type_name::<T>();
+        registry
+            .provider_summaries()
+            .into_iter()
+            .find(|s| s.type_name == name)
+            .map(|s| s.scope)
+            .unwrap_or_else(|| panic!("{name} not registered"))
+    }
+
+    #[test]
+    fn singleton_override_returns_the_instance_and_keeps_singleton_scope() {
+        let mut registry = ProviderRegistry::new();
+        registry.register::<SingletonSvc>();
+        let mock = Arc::new(SingletonSvc);
+        registry.override_provider::<SingletonSvc>(mock.clone());
+
+        let resolved = registry.get::<SingletonSvc>();
+        assert!(Arc::ptr_eq(&resolved, &mock), "override instance served");
+        assert_eq!(
+            declared_scope::<SingletonSvc>(&registry),
+            ProviderScope::Singleton,
+            "singleton overrides stay singleton"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_override_keeps_request_scope_and_resolves_to_the_instance() {
+        let mut registry = ProviderRegistry::new();
+        registry.register::<RequestSvc>();
+        let mock = Arc::new(RequestSvc);
+        registry.override_provider::<RequestSvc>(mock.clone());
+
+        // Per-request resolution: two gets inside one request return the
+        // override, cached in that request's scope.
+        let first = with_request_scope(async {
+            let a = registry.get::<RequestSvc>();
+            let b = registry.get::<RequestSvc>();
+            assert!(Arc::ptr_eq(&a, &b), "one resolution per request");
+            a
+        })
+        .await;
+        assert!(Arc::ptr_eq(&first, &mock), "override served inside request");
+
+        // A separate request resolves the SAME override — an override
+        // explicitly targets one concrete instance. (Run sequentially at the
+        // top level: a nested `with_request_scope` would JOIN the first
+        // scope, not open a fresh one.)
+        let second = with_request_scope(async { registry.get::<RequestSvc>() }).await;
+        assert!(
+            Arc::ptr_eq(&second, &mock),
+            "override instance shared across requests"
+        );
+
+        assert_eq!(
+            declared_scope::<RequestSvc>(&registry),
+            ProviderScope::Request,
+            "request overrides keep request scope — no silent Singleton coercion"
+        );
+    }
+
+    #[test]
+    fn transient_override_keeps_transient_scope_and_resolves_each_time() {
+        let mut registry = ProviderRegistry::new();
+        registry.register::<TransientSvc>();
+        let mock = Arc::new(TransientSvc);
+        registry.override_provider::<TransientSvc>(mock.clone());
+
+        // Transient = a resolution per injection site; the override hands
+        // out the one concrete instance each time (pre-fix this path
+        // panicked via the placeholder factory).
+        let a = registry.get::<TransientSvc>();
+        let b = registry.get::<TransientSvc>();
+        assert!(Arc::ptr_eq(&a, &mock), "first transient resolution served");
+        assert!(Arc::ptr_eq(&b, &mock), "second transient resolution served");
+        assert_eq!(
+            declared_scope::<TransientSvc>(&registry),
+            ProviderScope::Transient,
+            "transient overrides keep transient scope"
         );
     }
 }

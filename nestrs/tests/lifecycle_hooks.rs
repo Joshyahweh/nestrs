@@ -107,16 +107,10 @@ fn assert_log(log: &Log, expected: &[&str]) {
 async fn use_value_and_factory_lifecycle_hooks_run_through_boot_sequence() {
     let log: Log = Arc::default();
     let mut registry = ProviderRegistry::new();
-    registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'V'> {
-        log: log.clone(),
-    }));
+    registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'V'> { log: log.clone() }));
     registry.register_use_factory_with_lifecycle(ProviderScope::Singleton, {
         let log = log.clone();
-        move |_r| {
-            Arc::new(Tagged::<'F'> {
-                log: log.clone(),
-            })
-        }
+        move |_r| Arc::new(Tagged::<'F'> { log: log.clone() })
     });
 
     // The exact `listen()` boot sequence: eager construction, module init,
@@ -231,7 +225,14 @@ async fn hooks_initialize_dependencies_before_dependents_and_reverse_on_destroy(
     registry.run_on_module_destroy().await;
     assert_eq!(
         *INIT_ORDER.lock().unwrap(),
-        vec!["A:init", "B:init", "C:init", "C:destroy", "B:destroy", "A:destroy"],
+        vec![
+            "A:init",
+            "B:init",
+            "C:init",
+            "C:destroy",
+            "B:destroy",
+            "A:destroy"
+        ],
         "dependents must destroy before their dependencies"
     );
 }

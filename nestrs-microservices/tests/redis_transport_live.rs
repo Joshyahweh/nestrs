@@ -52,7 +52,10 @@ impl MicroserviceHandler for RecordingHandler {
 
     async fn handle_event(&self, pattern: &str, payload: Value) -> bool {
         if pattern == "audit.tick" {
-            self.emits.lock().expect("emits lock").push((pattern.to_string(), payload));
+            self.emits
+                .lock()
+                .expect("emits lock")
+                .push((pattern.to_string(), payload));
             true
         } else {
             false
@@ -111,10 +114,7 @@ async fn await_ready(transport: &RedisTransport) {
 /// measuring itself never changes the count.
 async fn connected_clients(url: &str) -> u64 {
     let client = redis::Client::open(url).expect("info client");
-    let mut conn = client
-        .get_connection_manager()
-        .await
-        .expect("info manager");
+    let mut conn = client.get_connection_manager().await.expect("info manager");
     let info: String = redis::cmd("INFO")
         .arg("clients")
         .query_async(&mut conn)
@@ -163,7 +163,10 @@ async fn rpcs_and_emits_run_on_a_fixed_set_of_connections() {
         .send_json("audit.missing", json!({}))
         .await
         .expect_err("unhandled pattern must error");
-    assert!(missing.message.contains("no microservice handler"), "{missing:?}");
+    assert!(
+        missing.message.contains("no microservice handler"),
+        "{missing:?}"
+    );
     let failing = transport
         .send_json("audit.fail", json!({}))
         .await
@@ -183,7 +186,11 @@ async fn rpcs_and_emits_run_on_a_fixed_set_of_connections() {
         .collect();
     let joined = futures_util::future::join_all(rounds).await;
     for (n, res) in joined {
-        assert_eq!(res.expect("concurrent rpc")["pong"], n, "concurrent RPC {n}");
+        assert_eq!(
+            res.expect("concurrent rpc")["pong"],
+            n,
+            "concurrent RPC {n}"
+        );
     }
 
     // Emits ride the shared manager connection too.
@@ -205,7 +212,11 @@ async fn rpcs_and_emits_run_on_a_fixed_set_of_connections() {
     }
     let (first_seq, second_seq, emit_count) = {
         let recorded = emits.lock().expect("emits lock");
-        (recorded[0].1["seq"].clone(), recorded[1].1["seq"].clone(), recorded.len())
+        (
+            recorded[0].1["seq"].clone(),
+            recorded[1].1["seq"].clone(),
+            recorded.len(),
+        )
     };
     assert_eq!(emit_count, 2, "both emits delivered");
     assert_eq!(first_seq, 1);

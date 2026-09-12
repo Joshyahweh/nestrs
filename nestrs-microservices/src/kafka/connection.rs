@@ -115,15 +115,24 @@ mod redaction_tests {
         };
         let rendered = format!("{opts:?}");
         assert!(!rendered.contains("hunter2"), "password leaked: {rendered}");
-        assert!(rendered.contains("<redacted>"), "no redaction marker: {rendered}");
-        assert!(rendered.contains("alice"), "username should stay visible: {rendered}");
+        assert!(
+            rendered.contains("<redacted>"),
+            "no redaction marker: {rendered}"
+        );
+        assert!(
+            rendered.contains("alice"),
+            "username should stay visible: {rendered}"
+        );
 
         let opts = KafkaSaslOptions::ScramSha512 {
             username: "bob".to_string(),
             password: "topsecret".to_string(),
         };
         let rendered = format!("{opts:?}");
-        assert!(!rendered.contains("topsecret"), "password leaked: {rendered}");
+        assert!(
+            !rendered.contains("topsecret"),
+            "password leaked: {rendered}"
+        );
         assert!(rendered.contains("ScramSha512"));
 
         // Composition: a whole options tree with nested SASL stays clean.
@@ -135,6 +144,9 @@ mod redaction_tests {
             ..Default::default()
         };
         let rendered = format!("{conn:?}");
-        assert!(!rendered.contains("s3cr3t"), "password leaked via parent: {rendered}");
+        assert!(
+            !rendered.contains("s3cr3t"),
+            "password leaked via parent: {rendered}"
+        );
     }
 }

@@ -379,7 +379,10 @@ async fn list_plain_paging_returns_exact_id_windows() {
     assert_eq!(page_ids(&r, "/posts/").await, vec![1, 2, 3, 4, 5, 6, 7]);
 
     // Page 2 of 3: ids 4, 5, 6 (OFFSET 3, not "rows 4..7 after skip(3)").
-    assert_eq!(page_ids(&r, "/posts/?page=2&per_page=3").await, vec![4, 5, 6]);
+    assert_eq!(
+        page_ids(&r, "/posts/?page=2&per_page=3").await,
+        vec![4, 5, 6]
+    );
 
     // Partial last page: id 7 only.
     assert_eq!(page_ids(&r, "/posts/?page=3&per_page=3").await, vec![7]);
@@ -411,14 +414,28 @@ async fn repository_find_all_paged_windows_rows_and_rejects_negative() {
 
     let rows = svc.repo().find_all_paged(2, 0).await.expect("first window");
     assert_eq!(ids(&rows), vec![1, 2]);
-    let rows = svc.repo().find_all_paged(2, 2).await.expect("second window");
+    let rows = svc
+        .repo()
+        .find_all_paged(2, 2)
+        .await
+        .expect("second window");
     assert_eq!(ids(&rows), vec![3, 4]);
     // Partial last page.
     let rows = svc.repo().find_all_paged(2, 4).await.expect("last window");
     assert_eq!(ids(&rows), vec![5]);
     // Past the end and zero-width windows are empty, not errors.
-    assert!(svc.repo().find_all_paged(2, 100).await.expect("past end").is_empty());
-    assert!(svc.repo().find_all_paged(0, 0).await.expect("zero limit").is_empty());
+    assert!(svc
+        .repo()
+        .find_all_paged(2, 100)
+        .await
+        .expect("past end")
+        .is_empty());
+    assert!(svc
+        .repo()
+        .find_all_paged(0, 0)
+        .await
+        .expect("zero limit")
+        .is_empty());
 
     // Negative limit/offset: Protocol error naming the constraint. Under
     // `authz-row-level` this also proves validation runs BEFORE the
@@ -715,14 +732,11 @@ async fn uninitialised_state_500_names_the_real_state_type() {
         std::sync::Arc::new(dynamic_module.registry),
         dynamic_module.router,
     );
-    let ability = Arc::new(
-        Ability::builder()
-            .can(Action::Read, "posts")
-            .build(),
-    );
-    let router = app
-        .into_router()
-        .layer(middleware::from_fn_with_state(ability, install_policies_middleware));
+    let ability = Arc::new(Ability::builder().can(Action::Read, "posts").build());
+    let router = app.into_router().layer(middleware::from_fn_with_state(
+        ability,
+        install_policies_middleware,
+    ));
 
     let (status, body) = get(&router, "/posts/").await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);

@@ -246,6 +246,9 @@ async fn masking_masks_runtime_built_type_names_without_leaking() {
         .await
         .unwrap();
     let v: Value = serde_json::from_slice(&body).unwrap();
-    assert!(v.get("body").is_none(), "runtime-built type name still masks");
+    assert!(
+        v.get("body").is_none(),
+        "runtime-built type name still masks"
+    );
     assert_eq!(v.get("title").and_then(|t| t.as_str()), Some("hi"));
 }

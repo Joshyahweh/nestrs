@@ -1,10 +1,10 @@
-mod doctor;
 #[cfg(feature = "db")]
 mod db;
 #[cfg(feature = "db")]
 mod db_migrate;
 #[cfg(feature = "db")]
 mod db_seed;
+mod doctor;
 mod resource_templates;
 
 use std::env;
@@ -60,7 +60,8 @@ fn run() -> Result<(), String> {
             #[cfg(not(feature = "db"))]
             {
                 Err(
-                    "`nestrs-cli db` requires the `db` Cargo feature; rebuild with `--features db`".to_string(),
+                    "`nestrs-cli db` requires the `db` Cargo feature; rebuild with `--features db`"
+                        .to_string(),
                 )
             }
         }

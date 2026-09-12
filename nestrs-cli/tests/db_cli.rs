@@ -48,15 +48,17 @@ fn cli_bin() -> PathBuf {
     };
     for candidate in [
         workspace_root.join("target").join("debug").join(bin_name),
-        workspace_root.join("target").join("debug").join("deps").join(bin_name),
+        workspace_root
+            .join("target")
+            .join("debug")
+            .join("deps")
+            .join(bin_name),
     ] {
         if candidate.is_file() {
             return candidate;
         }
     }
-    panic!(
-        "could not locate nestrs-cli; CARGO_BIN_EXE_* not set and binary not in target/debug"
-    );
+    panic!("could not locate nestrs-cli; CARGO_BIN_EXE_* not set and binary not in target/debug");
 }
 
 fn unique_tmp_dir(label: &str) -> PathBuf {
@@ -113,7 +115,14 @@ fn migrate_add_creates_version_stamped_file() {
     let dir = unique_tmp_dir("add-empty");
     let out = run_in(
         &dir,
-        &["db", "migrate", "add", "create_users", "--path", "migrations"],
+        &[
+            "db",
+            "migrate",
+            "add",
+            "create_users",
+            "--path",
+            "migrations",
+        ],
     );
     assert_success(&out, "migrate add create_users");
     let f = dir.join("migrations").join("001_create_users.sql");
@@ -174,10 +183,7 @@ fn migrate_add_rejects_invalid_name() {
     // hyphens are not part of `[a-z0-9_]+`. Empty name is rejected at
     // validation time.
     for bad in ["BadName", "has-dash", "has space", "", "with/slash"] {
-        let out = run_in(
-            &dir,
-            &["db", "migrate", "add", bad, "--path", "migrations"],
-        );
+        let out = run_in(&dir, &["db", "migrate", "add", bad, "--path", "migrations"]);
         assert_failure(
             &out,
             &format!("migrate add {bad:?} should fail (invalid name)"),
@@ -209,7 +215,15 @@ fn two_migrations_applied(label: &str) -> (PathBuf, PathBuf) {
     let url = sqlite_url(&db_file);
     let out = run_in(
         &dir,
-        &["db", "migrate", "run", "--path", "migrations", "--database-url", &url],
+        &[
+            "db",
+            "migrate",
+            "run",
+            "--path",
+            "migrations",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "migrate run (setup)");
     (dir, db_file)
@@ -222,7 +236,9 @@ fn migrate_run_applies_pending_in_order() {
     // migration 001, 2 from migration 002.
     let rt = tokio::runtime::Runtime::new().unwrap();
     let count: (i64,) = rt.block_on(async {
-        let pool = sqlx::SqlitePool::connect(&sqlite_url(&db_file)).await.unwrap();
+        let pool = sqlx::SqlitePool::connect(&sqlite_url(&db_file))
+            .await
+            .unwrap();
         sqlx::query_as("SELECT COUNT(*) FROM widgets")
             .fetch_one(&pool)
             .await
@@ -231,7 +247,9 @@ fn migrate_run_applies_pending_in_order() {
     assert_eq!(count.0, 4, "expected 4 rows after both migrations applied");
     // And `_sqlx_migrations` should have 2 rows.
     let applied: Vec<(i64,)> = rt.block_on(async {
-        let pool = sqlx::SqlitePool::connect(&sqlite_url(&db_file)).await.unwrap();
+        let pool = sqlx::SqlitePool::connect(&sqlite_url(&db_file))
+            .await
+            .unwrap();
         sqlx::query_as("SELECT version FROM _sqlx_migrations ORDER BY version")
             .fetch_all(&pool)
             .await
@@ -250,7 +268,15 @@ fn migrate_run_is_idempotent_on_already_applied_set() {
     // Second run should be a no-op (no error, no rows added).
     let out = run_in(
         &dir,
-        &["db", "migrate", "run", "--path", "migrations", "--database-url", &url],
+        &[
+            "db",
+            "migrate",
+            "run",
+            "--path",
+            "migrations",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "second migrate run");
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -284,7 +310,15 @@ fn migrate_revert_on_reversible_migrations() {
     // Apply the reversible migration.
     let out = run_in(
         &dir,
-        &["db", "migrate", "run", "--path", "migrations", "--database-url", &url],
+        &[
+            "db",
+            "migrate",
+            "run",
+            "--path",
+            "migrations",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "reversible run");
     // Verify table exists.
@@ -300,7 +334,15 @@ fn migrate_revert_on_reversible_migrations() {
     // Revert (target_version defaults to max - 1; here, max is 1, so target is 0).
     let out = run_in(
         &dir,
-        &["db", "migrate", "revert", "--path", "migrations", "--database-url", &url],
+        &[
+            "db",
+            "migrate",
+            "revert",
+            "--path",
+            "migrations",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "reversible revert");
     let exists: (i64,) = rt.block_on(async {
@@ -327,7 +369,15 @@ fn migrate_info_lists_applied_and_pending() {
     let url = sqlite_url(&db_file);
     let out = run_in(
         &dir,
-        &["db", "migrate", "run", "--path", "migrations", "--database-url", &url],
+        &[
+            "db",
+            "migrate",
+            "run",
+            "--path",
+            "migrations",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "apply 001");
     // Now drop in 002 — sqlx tracks only what's been applied; 002 is
@@ -339,15 +389,32 @@ fn migrate_info_lists_applied_and_pending() {
     .unwrap();
     let out = run_in(
         &dir,
-        &["db", "migrate", "info", "--path", "migrations", "--database-url", &url],
+        &[
+            "db",
+            "migrate",
+            "info",
+            "--path",
+            "migrations",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "info");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("001"), "stdout missing 001: {stdout}");
     assert!(stdout.contains("002"), "stdout missing 002: {stdout}");
-    assert!(stdout.contains("applied"), "stdout missing 'applied': {stdout}");
-    assert!(stdout.contains("pending"), "stdout missing 'pending': {stdout}");
-    assert!(stdout.contains("1 pending"), "stdout missing count: {stdout}");
+    assert!(
+        stdout.contains("applied"),
+        "stdout missing 'applied': {stdout}"
+    );
+    assert!(
+        stdout.contains("pending"),
+        "stdout missing 'pending': {stdout}"
+    );
+    assert!(
+        stdout.contains("1 pending"),
+        "stdout missing count: {stdout}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -490,7 +557,15 @@ fn seed_file_executes_sql_statements() {
     let url = sqlite_url(&db_file);
     let out = run_in(
         &dir,
-        &["db", "migrate", "run", "--path", "migrations", "--database-url", &url],
+        &[
+            "db",
+            "migrate",
+            "run",
+            "--path",
+            "migrations",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "setup migrate run");
     // Write the seed file with two INSERTs.
@@ -502,7 +577,14 @@ fn seed_file_executes_sql_statements() {
     .unwrap();
     let out = run_in(
         &dir,
-        &["db", "seed", "--seed-file", "seeds.sql", "--database-url", &url],
+        &[
+            "db",
+            "seed",
+            "--seed-file",
+            "seeds.sql",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "seed --seed-file");
     // Verify rows.
@@ -530,7 +612,15 @@ fn seed_file_rolls_back_on_sql_error() {
     let url = sqlite_url(&db_file);
     let out = run_in(
         &dir,
-        &["db", "migrate", "run", "--path", "migrations", "--database-url", &url],
+        &[
+            "db",
+            "migrate",
+            "run",
+            "--path",
+            "migrations",
+            "--database-url",
+            &url,
+        ],
     );
     assert_success(&out, "setup migrate run");
     // First INSERT is valid; second references a nonexistent table, which
@@ -544,7 +634,14 @@ fn seed_file_rolls_back_on_sql_error() {
     .unwrap();
     let out = run_in(
         &dir,
-        &["db", "seed", "--seed-file", "seed_fail.sql", "--database-url", &url],
+        &[
+            "db",
+            "seed",
+            "--seed-file",
+            "seed_fail.sql",
+            "--database-url",
+            &url,
+        ],
     );
     assert_failure(&out, "seed file with bad statement must fail");
     // Confirm the first INSERT was rolled back: table should exist

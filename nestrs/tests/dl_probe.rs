@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, SimpleObject)]
-struct User { id: i64 }
+struct User {
+    id: i64,
+}
 
 #[dataloader(key = i64, value = User, error = nestrs::graphql::Error)]
 #[derive(Clone, Default)]
@@ -30,27 +32,43 @@ impl UserLoader {
 
 #[tokio::test]
 async fn probe_concurrent_errors() {
-    let loader = UserLoader { fail_on: Arc::new(Mutex::new([7i64, 8].into())), ..Default::default() };
+    let loader = UserLoader {
+        fail_on: Arc::new(Mutex::new([7i64, 8].into())),
+        ..Default::default()
+    };
     let dl = nestrs::graphql::data_loader(loader.clone());
     let (a, b) = tokio::join!(dl.load_one(7), dl.load_one(8));
-    println!("a={a:?} b={b:?} calls={}", loader.calls.load(Ordering::SeqCst));
+    println!(
+        "a={a:?} b={b:?} calls={}",
+        loader.calls.load(Ordering::SeqCst)
+    );
     assert!(a.is_err());
     assert!(b.is_err());
 }
 
 #[tokio::test]
 async fn probe_mixed_success_failure() {
-    let loader = UserLoader { fail_on: Arc::new(Mutex::new([7i64].into())), ..Default::default() };
+    let loader = UserLoader {
+        fail_on: Arc::new(Mutex::new([7i64].into())),
+        ..Default::default()
+    };
     let dl = nestrs::graphql::data_loader(loader.clone());
     let (a, b) = tokio::join!(dl.load_one(1), dl.load_one(7));
-    println!("a={a:?} b={b:?} calls={}", loader.calls.load(Ordering::SeqCst));
+    println!(
+        "a={a:?} b={b:?} calls={}",
+        loader.calls.load(Ordering::SeqCst)
+    );
 }
 
 struct ProbeQuery;
 
 #[async_graphql::Object]
 impl ProbeQuery {
-    async fn user(&self, ctx: &async_graphql::Context<'_>, id: i64) -> async_graphql::Result<Option<User>> {
+    async fn user(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        id: i64,
+    ) -> async_graphql::Result<Option<User>> {
         match ctx.data::<nestrs::graphql::DataLoader<UserLoader>>() {
             Ok(loader) => Ok(loader.load_one(id).await?),
             Err(_) => Ok(None),
@@ -60,12 +78,23 @@ impl ProbeQuery {
 
 #[tokio::test]
 async fn probe_executor_two_failing_fields() {
-    let loader = UserLoader { fail_on: Arc::new(Mutex::new([7i64, 8].into())), ..Default::default() };
-    let mut request = nestrs::graphql::Request::new("{ u1: user(id: 7) { id } u2: user(id: 8) { id } }".to_string());
-    request.data.insert(nestrs::graphql::data_loader(loader.clone()));
-    let resp = async_graphql::Schema::new(ProbeQuery, async_graphql::EmptyMutation, async_graphql::EmptySubscription)
-        .execute(request)
-        .await;
+    let loader = UserLoader {
+        fail_on: Arc::new(Mutex::new([7i64, 8].into())),
+        ..Default::default()
+    };
+    let mut request = nestrs::graphql::Request::new(
+        "{ u1: user(id: 7) { id } u2: user(id: 8) { id } }".to_string(),
+    );
+    request
+        .data
+        .insert(nestrs::graphql::data_loader(loader.clone()));
+    let resp = async_graphql::Schema::new(
+        ProbeQuery,
+        async_graphql::EmptyMutation,
+        async_graphql::EmptySubscription,
+    )
+    .execute(request)
+    .await;
     println!("errors={:?} data={:?}", resp.errors, resp.data);
 }
 
@@ -81,20 +110,35 @@ impl DirectQuery {
 
 #[tokio::test]
 async fn probe_direct_errors_no_loader() {
-    let resp = async_graphql::Schema::new(DirectQuery, async_graphql::EmptyMutation, async_graphql::EmptySubscription)
-        .execute("{ u1: bad(id: 7) u2: bad(id: 8) }")
-        .await;
+    let resp = async_graphql::Schema::new(
+        DirectQuery,
+        async_graphql::EmptyMutation,
+        async_graphql::EmptySubscription,
+    )
+    .execute("{ u1: bad(id: 7) u2: bad(id: 8) }")
+    .await;
     println!("direct errors={:?} data={:?}", resp.errors, resp.data);
 }
 
 #[tokio::test]
 async fn probe_router_mixed_body() {
-    let loader = UserLoader { fail_on: Arc::new(Mutex::new([7i64].into())), ..Default::default() };
-    let mut request = nestrs::graphql::Request::new("{ ping: pingOne ok: user(id: 1) { id } bad: user(id: 7) { id } }".to_string());
-    request.data.insert(nestrs::graphql::data_loader(loader.clone()));
-    let resp = async_graphql::Schema::new(ProbeQuery2, async_graphql::EmptyMutation, async_graphql::EmptySubscription)
-        .execute(request)
-        .await;
+    let loader = UserLoader {
+        fail_on: Arc::new(Mutex::new([7i64].into())),
+        ..Default::default()
+    };
+    let mut request = nestrs::graphql::Request::new(
+        "{ ping: pingOne ok: user(id: 1) { id } bad: user(id: 7) { id } }".to_string(),
+    );
+    request
+        .data
+        .insert(nestrs::graphql::data_loader(loader.clone()));
+    let resp = async_graphql::Schema::new(
+        ProbeQuery2,
+        async_graphql::EmptyMutation,
+        async_graphql::EmptySubscription,
+    )
+    .execute(request)
+    .await;
     println!("mixed errors={:?} data={:?}", resp.errors, resp.data);
 }
 
@@ -102,8 +146,14 @@ struct ProbeQuery2;
 
 #[async_graphql::Object]
 impl ProbeQuery2 {
-    async fn ping_one(&self) -> &'static str { "pong" }
-    async fn user(&self, ctx: &async_graphql::Context<'_>, id: i64) -> async_graphql::Result<Option<User>> {
+    async fn ping_one(&self) -> &'static str {
+        "pong"
+    }
+    async fn user(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        id: i64,
+    ) -> async_graphql::Result<Option<User>> {
         match ctx.data::<nestrs::graphql::DataLoader<UserLoader>>() {
             Ok(loader) => Ok(loader.load_one(id).await?),
             Err(_) => Ok(None),

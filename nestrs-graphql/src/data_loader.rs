@@ -127,7 +127,10 @@ where
 /// request beyond what the 1 ms batch window already deduplicates.
 /// Note the concrete type changes (`DataLoader<L, LruCache>`), so
 /// resolvers must name `DataLoader<L, LruCache>` when fetching it back.
-pub fn data_loader_cached<L>(loader: L, cap: usize) -> DataLoader<L, async_graphql::dataloader::LruCache>
+pub fn data_loader_cached<L>(
+    loader: L,
+    cap: usize,
+) -> DataLoader<L, async_graphql::dataloader::LruCache>
 where
     L: Send + Sync + 'static,
 {

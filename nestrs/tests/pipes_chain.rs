@@ -46,9 +46,7 @@ async fn parse_int_pipe_coerces_valid_path_segment_to_i64() {
     // (`/users/:id` → "42" → 42). We dispatch through a real axum router
     // (with the `:id` route matcher) so `MatchedPath` is set — that's the
     // only way `axum::extract::Path<T>` populates from the request.
-    async fn handler(
-        raw: PipedPath1<String, ParseIntPipe>,
-    ) -> Result<String, HttpException> {
+    async fn handler(raw: PipedPath1<String, ParseIntPipe>) -> Result<String, HttpException> {
         Ok(raw.0.to_string())
     }
 
@@ -73,9 +71,7 @@ async fn parse_int_pipe_coerces_valid_path_segment_to_i64() {
 
 #[tokio::test]
 async fn parse_int_pipe_returns_400_on_invalid_path_segment() {
-    async fn handler(
-        _raw: PipedPath1<String, ParseIntPipe>,
-    ) -> Result<String, HttpException> {
+    async fn handler(_raw: PipedPath1<String, ParseIntPipe>) -> Result<String, HttpException> {
         Ok("unreachable".to_string())
     }
 
@@ -106,9 +102,8 @@ async fn trim_pipe_strips_leading_and_trailing_whitespace_from_body_string() {
         .body(axum::body::Body::from(r#""   hello   ""#))
         .expect("request");
 
-    let extractor = must(
-        <PipedBody1<String, TrimPipe> as FromRequest<()>>::from_request(req, &()).await,
-    );
+    let extractor =
+        must(<PipedBody1<String, TrimPipe> as FromRequest<()>>::from_request(req, &()).await);
 
     assert_eq!(extractor.0, "hello");
 }
@@ -122,9 +117,8 @@ async fn trim_pipe_preserves_internal_whitespace() {
         .body(axum::body::Body::from(r#""  hello world  ""#))
         .expect("request");
 
-    let extractor = must(
-        <PipedBody1<String, TrimPipe> as FromRequest<()>>::from_request(req, &()).await,
-    );
+    let extractor =
+        must(<PipedBody1<String, TrimPipe> as FromRequest<()>>::from_request(req, &()).await);
 
     assert_eq!(extractor.0, "hello world");
 }

@@ -1698,9 +1698,7 @@ mod provider_lifecycle_tests {
     async fn use_value_lifecycle_hooks_fire_in_framework_order() {
         let log: Log = Arc::default();
         let mut registry = ProviderRegistry::new();
-        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'V'> {
-            log: log.clone(),
-        }));
+        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'V'> { log: log.clone() }));
 
         registry.run_on_module_init().await;
         registry.run_on_application_bootstrap().await;
@@ -1724,12 +1722,8 @@ mod provider_lifecycle_tests {
     async fn lifecycle_hooks_register_order_init_reverse_destroy() {
         let log: Log = Arc::default();
         let mut registry = ProviderRegistry::new();
-        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'A'> {
-            log: log.clone(),
-        }));
-        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'B'> {
-            log: log.clone(),
-        }));
+        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'A'> { log: log.clone() }));
+        registry.register_use_value_with_lifecycle(Arc::new(Tagged::<'B'> { log: log.clone() }));
 
         registry.run_on_module_init().await;
         registry.run_on_module_destroy().await;
@@ -1747,9 +1741,7 @@ mod provider_lifecycle_tests {
             let log = log.clone();
             move |_r| {
                 log.lock().unwrap().push("F:construct".to_string());
-                Arc::new(Tagged::<'F'> {
-                    log: log.clone(),
-                })
+                Arc::new(Tagged::<'F'> { log: log.clone() })
             }
         });
 
@@ -1772,16 +1764,10 @@ mod provider_lifecycle_tests {
         // than changing the plain methods' bounds).
         let log: Log = Arc::default();
         let mut registry = ProviderRegistry::new();
-        registry.register_use_value(Arc::new(Tagged::<'V'> {
-            log: log.clone(),
-        }));
+        registry.register_use_value(Arc::new(Tagged::<'V'> { log: log.clone() }));
         registry.register_use_factory(ProviderScope::Singleton, {
             let log = log.clone();
-            move |_r| {
-                Arc::new(Tagged::<'G'> {
-                    log: log.clone(),
-                })
-            }
+            move |_r| Arc::new(Tagged::<'G'> { log: log.clone() })
         });
 
         registry.run_on_module_init().await;

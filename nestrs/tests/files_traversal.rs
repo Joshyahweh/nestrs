@@ -31,8 +31,7 @@ async fn response_body(resp: axum::response::Response) -> Vec<u8> {
 async fn streams_file_inside_base() {
     let dir = scratch_dir("ok");
     std::fs::write(dir.join("report.txt"), b"file contents").expect("write");
-    let resp =
-        nestrs::stream_file_from_dir(&dir, "report.txt", "application/octet-stream").await;
+    let resp = nestrs::stream_file_from_dir(&dir, "report.txt", "application/octet-stream").await;
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(response_body(resp).await, b"file contents");
 }
@@ -80,8 +79,7 @@ async fn symlink_plant_outside_base_is_404() {
     std::fs::write(outside.join("secret.txt"), b"secret").expect("write");
     symlink(outside.join("secret.txt"), dir.join("innocent.txt")).expect("symlink");
 
-    let resp =
-        nestrs::stream_file_from_dir(&dir, "innocent.txt", "application/octet-stream").await;
+    let resp = nestrs::stream_file_from_dir(&dir, "innocent.txt", "application/octet-stream").await;
     assert_eq!(
         resp.status(),
         StatusCode::NOT_FOUND,

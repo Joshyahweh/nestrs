@@ -28,9 +28,9 @@ const MAX_REQUEST_ID_LEN: usize = 128;
 fn acceptable_request_id(raw: &[u8]) -> bool {
     !raw.is_empty()
         && raw.len() <= MAX_REQUEST_ID_LEN
-        && raw.iter().all(|&b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')
-        })
+        && raw
+            .iter()
+            .all(|&b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 
 /// Strips an unacceptable client-supplied `x-request-id` BEFORE the

@@ -43,7 +43,6 @@ pub struct IoController;
 
 #[routes(state = UploadService)]
 impl IoController {
-
     /// Multipart upload: curl -F file=@somefile
     #[post("/upload")]
     pub async fn upload(
@@ -62,9 +61,7 @@ impl IoController {
 
     /// Streaming download of an uploaded file.
     #[get("/download/:name")]
-    pub async fn download(
-        #[param::param] p: NameParams,
-    ) -> axum::response::Response {
+    pub async fn download(#[param::param] p: NameParams) -> axum::response::Response {
         // The library helper rejects traversal (`..`, separators, absolute
         // names — including percent-decoded `%2F`) and symlink plants
         // before touching the filesystem.

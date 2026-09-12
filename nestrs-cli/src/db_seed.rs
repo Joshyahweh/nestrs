@@ -70,7 +70,9 @@ pub(crate) fn run(args: &[String], opts: &DbOptions) -> Result<(), String> {
         (Some(name), None) => run_seed_bin(&name, manifest_path.as_deref(), opts),
         (None, Some(path)) => run_seed_file(&path, opts),
         (Some(_), Some(_)) => Err("pass either --bin or --seed-file, not both".to_string()),
-        (None, None) => Err("expected `db seed --bin <name>` or `db seed --seed-file <path>`".to_string()),
+        (None, None) => {
+            Err("expected `db seed --bin <name>` or `db seed --seed-file <path>`".to_string())
+        }
     }
 }
 
@@ -127,8 +129,7 @@ fn run_seed_file(path: &std::path::Path, opts: &DbOptions) -> Result<(), String>
     let url = resolve_database_url(opts)?;
     let contents = std::fs::read_to_string(path)
         .map_err(|e| format!("read seed file `{}`: {e}", path.display()))?;
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| format!("create tokio runtime: {e}"))?;
+    let rt = tokio::runtime::Runtime::new().map_err(|e| format!("create tokio runtime: {e}"))?;
     rt.block_on(async move {
         let pool = match sqlx::AnyPool::connect(&url).await {
             Ok(p) => p,

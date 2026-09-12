@@ -1,4 +1,4 @@
-//! Authentication helpers and reusable guards (Nest **Passport**-style strategies stay in your app; these wire into [`CanActivate`](crate::core::CanActivate) and Axum extractors).
+//! Authentication helpers and reusable guards (Nest **Passport**-style strategies stay in your app; these wire into [`CanActivate`] and Axum extractors).
 
 use crate::core::{AuthStrategy, CanActivate, GuardError, HandlerKey, MetadataRegistry};
 use crate::UnauthorizedException;
@@ -115,7 +115,7 @@ where
 /// ⚠️ **Never use this in production.** The role comes from a request header anyone can set.
 /// Real deployments must derive the role from authenticated material (JWT claims, session,
 /// API-key lookup) inside your own [`CanActivate`] implementation or an
-/// [`AuthStrategy`](crate::core::AuthStrategy). This type exists to demonstrate
+/// [`AuthStrategy`]. This type exists to demonstrate
 /// `set_metadata`/`roles` wiring end-to-end in tests and examples.
 #[derive(Debug, Default)]
 pub struct DemoXRoleMetadataGuard;

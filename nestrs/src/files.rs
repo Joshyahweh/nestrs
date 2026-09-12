@@ -55,7 +55,7 @@ fn is_safe_path_component(name: &str) -> bool {
 /// }
 /// ```
 ///
-/// `name` must be a single path component (see [`is_safe_path_component`]
+/// `name` must be a single path component (see `is_safe_path_component`
 /// semantics): anything containing separators or traversal segments —
 /// including values that arrive percent-encoded (`..%2F..%2Fetc%2Fpasswd`
 /// decodes before the handler sees it) — is rejected with **400**, never

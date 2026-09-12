@@ -4007,7 +4007,9 @@ const DTO_FLOAT_TYPES: &[&str] = &["f32", "f64"];
 fn dto_inner_type_ident(field: &Field) -> Option<String> {
     let mut ty = &field.ty;
     loop {
-        let syn::Type::Path(type_path) = ty else { return None };
+        let syn::Type::Path(type_path) = ty else {
+            return None;
+        };
         let last = type_path.path.segments.last()?;
         if last.ident == "Option" {
             if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
@@ -4436,6 +4438,56 @@ impl Parse for CrudArgs {
     }
 }
 
+/// Generate a complete 5-verb REST (or GraphQL) CRUD controller from one
+/// attribute on a struct that holds an `Arc<sqlx::AnyPool>`.
+///
+/// The generated routes are `GET /` (list), `GET /:id` (read one),
+/// `POST /` (create), `PATCH /:id` (update), and `DELETE /:id` (delete),
+/// plus the `{Pascal}Service` (with `list_query` / `get_one` / `create_one`
+/// / `update_one` / `delete_one`) and the hidden `__{Pascal}CrudState`
+/// provider behind them. Every handler is wired through
+/// `nestrs::impl_routes!`, so guards, interceptors, filters, and OpenAPI
+/// metadata work unchanged. Row-level authorization is enforced by the
+/// existing `CrudService<T>` (deny-closed when the `authz-row-level`
+/// feature is on) — the macro adds no new authz surface.
+///
+/// Options: `entity = <Type>` (required, implements `nestrs::Entity`),
+/// `output = <Type>` (required, response DTO), `create = <Type>`
+/// (required, create-body DTO), `update = <Type>` (required,
+/// update-body DTO), and `transport = "http" | "graphql"` (optional,
+/// defaults to `"http"`).
+///
+/// The decorated struct must have exactly one `pool: Arc<sqlx::AnyPool>`
+/// field, and `#[crud]` cannot be combined with `#[routes(...)]` — the
+/// macro generates the routes itself. Register the generated
+/// `__{Pascal}CrudState` provider in your module and override it with
+/// the real pool via `override_provider::<__{Pascal}CrudState>(Arc::new(
+/// __{Pascal}CrudState::from_pool(pool)))`. The list endpoint follows
+/// the `@nestjsx/crud` query contract (`?page`, `?per_page`, `?sort`,
+/// `?filter[field]=`, `?search`) — see the `nestrs::crud_macro` module
+/// docs for the exact semantics and error contract.
+///
+/// ```ignore
+/// use nestrs::{controller, crud, module, NestDto};
+/// use std::sync::Arc;
+///
+/// #[derive(serde::Serialize, serde::Deserialize, NestDto)]
+/// struct PostDto { id: i64, author: String, body: String }
+///
+/// #[controller(prefix = "/posts")]
+/// #[crud(entity = Post, output = PostDto,
+///        create = CreatePostDto, update = UpdatePostDto)]
+/// struct PostController {
+///     pool: Arc<sqlx::AnyPool>,
+/// }
+///
+/// #[module(controllers = [PostController], providers = [__PostCrudState])]
+/// struct PostsModule;
+/// ```
+///
+/// Gated on the consumer side: the generated code references
+/// `nestrs::crud_macro`, which requires the `database-sqlx` feature on
+/// the `nestrs` crate.
 #[proc_macro_attribute]
 pub fn crud(attr: TokenStream, item: TokenStream) -> TokenStream {
     let opts = parse_macro_input!(attr as CrudArgs);

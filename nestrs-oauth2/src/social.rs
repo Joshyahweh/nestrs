@@ -59,7 +59,7 @@ impl Google {
 }
 
 /// Google userinfo response shape. See
-/// https://developers.google.com/identity/openid-connect/openid-connect#id_token-example
+/// <https://developers.google.com/identity/openid-connect/openid-connect#id_token-example>
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoogleUser {
     pub sub: String,
@@ -208,7 +208,7 @@ impl Apple {
     /// Build an Apple OAuth2 client with a pre-signed client_secret
     /// JWT. The caller is responsible for minting the JWT per
     /// Apple's spec (see
-    /// https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens).
+    /// <https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens>).
     pub fn new(
         client_id: impl Into<String>,
         client_secret_jwt: impl Into<String>,

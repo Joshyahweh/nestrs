@@ -146,6 +146,7 @@ mod versioning;
 #[cfg(feature = "ws-authz")]
 mod ws_authz;
 
+pub use crate::core::HttpPipeTransform;
 #[cfg(feature = "authn")]
 pub use authn::{
     build_jwt_service, install_authn_middleware, Argon2idParams, Argon2idPasswordHasher,
@@ -181,8 +182,7 @@ pub use health_probes::HttpIndicator;
 pub use health_probes::{DatabaseIndicator, ProbeKind, ProbeOutcome};
 #[cfg(feature = "http-client")]
 pub use http_client::{
-    HttpModule, HttpService, HttpServiceOptions, DEFAULT_CONNECT_TIMEOUT,
-    DEFAULT_REQUEST_TIMEOUT,
+    HttpModule, HttpService, HttpServiceOptions, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT,
 };
 pub use http_execution_context::{ExecutionContextMissing, HttpExecutionContext};
 pub use i18n::{I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Locale};
@@ -204,7 +204,6 @@ pub use otel::{OpenTelemetryConfig, OtlpProtocol};
 pub use pipes::ParseIntPipe;
 pub use pipes::TrimPipe;
 pub use pipes::ValidationPipe;
-pub use crate::core::HttpPipeTransform;
 #[cfg(feature = "authz")]
 pub use policies::current_ability;
 #[cfg(feature = "authz")]
@@ -271,7 +270,7 @@ pub use ws_authz::{
     WsScope,
 };
 
-/// Axum middleware from an [`Interceptor`](Interceptor) type (uses `I::default()` per request).
+/// Axum middleware from an [`Interceptor`] type (uses `I::default()` per request).
 #[macro_export]
 macro_rules! interceptor_layer {
     ($I:ty) => {
@@ -360,14 +359,14 @@ pub mod prelude {
         NestFactory, NotAcceptableException, NotFoundException, NotImplementedException,
         ParseIntPipe, PathNormalization, PayloadTooLargeException, PaymentRequiredException,
         PipedBody1, PipedBody2, PipedBody3, PipedBody4, PipedPath1, PipedPath2, PipedPath3,
-        PipedPath4, PipedQuery1, PipedQuery2, PipedQuery3, PipedQuery4,
-        ProblemDetails, RateLimitOptions, RawBody, ReadinessContext, RequestContext,
-        RequestContextMissing, RequestScoped, RequestScopedMissing, RequestTimeoutException,
-        RequestTracingOptions, SecurityHeaders, ServiceUnavailableException, TestClient,
-        TestRequest, TestingModule, TestingModuleBuilder, TooManyRequestsException, TracingConfig,
-        TracingFormat, TrimPipe, TypedConfigModule, UnauthorizedException,
-        UnprocessableEntityException, UnsupportedMediaTypeException, ValidatedBody, ValidatedPath,
-        ValidatedQuery, ValidationPipe, VersioningType,
+        PipedPath4, PipedQuery1, PipedQuery2, PipedQuery3, PipedQuery4, ProblemDetails,
+        RateLimitOptions, RawBody, ReadinessContext, RequestContext, RequestContextMissing,
+        RequestScoped, RequestScopedMissing, RequestTimeoutException, RequestTracingOptions,
+        SecurityHeaders, ServiceUnavailableException, TestClient, TestRequest, TestingModule,
+        TestingModuleBuilder, TooManyRequestsException, TracingConfig, TracingFormat, TrimPipe,
+        TypedConfigModule, UnauthorizedException, UnprocessableEntityException,
+        UnsupportedMediaTypeException, ValidatedBody, ValidatedPath, ValidatedQuery,
+        ValidationPipe, VersioningType,
     };
     #[cfg(feature = "authn")]
     pub use crate::{
@@ -648,7 +647,7 @@ pub struct RateLimitOptions {
     window_secs: u64,
     /// Number of trusted reverse proxies in front of this service (see
     /// [`NestApplication::use_trusted_proxy_headers`]). `None` (default) inherits the
-    /// application-wide hop count, so the limiter and the [`ClientIp`](crate::ClientIp)
+    /// application-wide hop count, so the limiter and the [`ClientIp`]
     /// extractor always resolve the same client identity; forwarded headers stay
     /// untrusted when no topology was declared anywhere.
     trusted_proxy_hops: Option<u16>,
@@ -1170,8 +1169,8 @@ impl NestFactory {
     /// Creates a microservice app (feature: `microservices-grpc`) using the gRPC transport adapter.
     ///
     /// The tonic service carries **JSON** (`pattern` + `payload_json`) matching the [`crate::microservices::wire`]
-    /// module’s request/response shapes inside protobuf; use [`GrpcMicroserviceOptions::bind`](crate::microservices::GrpcMicroserviceOptions::bind)
-    /// and [`GrpcTransportOptions::with_request_timeout`](crate::microservices::GrpcTransportOptions::with_request_timeout) for clients.
+    /// module’s request/response shapes inside protobuf; use `GrpcMicroserviceOptions::bind`
+    /// and `GrpcTransportOptions::with_request_timeout` for clients.
     #[cfg(feature = "microservices-grpc")]
     pub fn create_microservice_grpc<M>(
         options: crate::microservices::GrpcMicroserviceOptions,
@@ -1674,11 +1673,11 @@ impl NestApplication {
     /// request and installs an ambient `nestrs::core::TraceContext` task-local for the
     /// handler (and resolvers running inside the request task).
     ///
-    /// Handlers read it via [`ExecutionContext::trace_id`](crate::core::ExecutionContext::trace_id)
+    /// Handlers read it via [`ExecutionContext::trace_id`]
     /// / `span_id` / `trace_flags`, or directly with
-    /// [`current_trace_context`](crate::core::current_trace_context). Requests without a
+    /// `current_trace_context`. Requests without a
     /// valid `traceparent` header run without a trace context (accessors return `None`).
-    /// Non-HTTP transports install it with [`with_trace_context`](crate::core::with_trace_context).
+    /// Non-HTTP transports install it with `with_trace_context`.
     pub fn use_trace_context(mut self) -> Self {
         self.trace_context = true;
         self
@@ -1687,7 +1686,7 @@ impl NestApplication {
     /// NestJS [`ModuleRef`](https://docs.nestjs.com/fundamentals/module-ref) analogue for dynamic lookups
     /// against the composed provider graph.
     ///
-    /// Use [`ModuleRef::get`](crate::core::ModuleRef::get) for type-keyed resolution. Pair with
+    /// Use [`ModuleRef::get`] for type-keyed resolution. Pair with
     /// [`DiscoveryService`] for introspection. **Docs:** mdBook
     /// **Fundamentals** in the repository (`docs/src/fundamentals.md`).
     pub fn module_ref(&self) -> ModuleRef {
@@ -1807,7 +1806,7 @@ impl NestApplication {
     ///
     /// For `servers`, `components`, `security`, document-level `tags`, and optional
     /// **`infer_route_security_from_roles`** (Swagger lock for `#[roles]` metadata), use
-    /// [`enable_openapi_with_options`](Self::enable_openapi_with_options). See mdBook **OpenAPI & HTTP**
+    /// [`Self::enable_openapi_with_options`]. See mdBook **OpenAPI & HTTP**
     /// (`docs/src/openapi-http.md`).
     #[cfg(feature = "openapi")]
     pub fn enable_openapi(mut self) -> Self {
@@ -2415,8 +2414,8 @@ impl NestApplication {
         s.build_router()
     }
 
-    /// Borrow the underlying [`ProviderRegistry`]. Primarily for
-    /// `ProviderRegistry::override_provider` in tests that need to
+    /// Borrow the underlying `ProviderRegistry`.
+    /// Primarily for `ProviderRegistry::override_provider` in tests that need to
     /// replace a macro-generated `#[injectable]` state struct (e.g.
     /// `#[nestrs::crud]`'s hidden `__PascalCrudState`).
     pub fn registry(&self) -> &std::sync::Arc<crate::core::ProviderRegistry> {
@@ -3147,7 +3146,7 @@ fn client_ip_from_request(req: &axum::extract::Request, trusted_hops: Option<u16
 }
 
 /// Middleware that records the configured trusted-proxy hop count on every request so the
-/// [`ClientIp`](crate::ClientIp) extractor can safely use forwarded headers.
+/// [`ClientIp`] extractor can safely use forwarded headers.
 async fn install_trusted_proxy_middleware(
     axum::extract::State(hops): axum::extract::State<crate::client_ip::TrustedProxyHops>,
     mut req: axum::extract::Request,
@@ -3722,9 +3721,16 @@ fn __nestrs_pipe_error_to_http_exception(
 // ---------- PipedBody arity 1..=4 ----------
 
 /// Body extractor that runs a single pipe on the deserialized JSON value.
-pub struct PipedBody1<T, P1>(
-    pub <P1 as nestrs_core::PipeTransform<T>>::Output,
-)
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
+pub struct PipedBody1<T, P1>(pub <P1 as nestrs_core::PipeTransform<T>>::Output)
 where
     P1: nestrs_core::HttpPipeTransform<T>;
 
@@ -3737,33 +3743,35 @@ where
 {
     type Rejection = HttpException;
 
-    async fn from_request(
-        req: axum::extract::Request,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let axum::Json(value) = <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(
-            req, state,
-        )
-        .await
-        .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
-        let pipe = P1::default();
-        let out =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
+    async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) =
+            <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(req, state)
                 .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+                .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
+        let pipe = P1::default();
+        let out = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         Ok(Self(out))
     }
 }
 
 /// Body extractor that runs two pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 pub struct PipedBody2<T, P1, P2>(
     pub <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
 )
 where
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >;
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>;
 
 #[axum::async_trait]
 impl<S, T, P1, P2> axum::extract::FromRequest<S> for PipedBody2<T, P1, P2>
@@ -3771,26 +3779,19 @@ where
     S: Send + Sync + 'static,
     T: serde::de::DeserializeOwned + Send + 'static,
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
 {
     type Rejection = HttpException;
 
-    async fn from_request(
-        req: axum::extract::Request,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let axum::Json(value) = <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(
-            req, state,
-        )
-        .await
-        .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
-        let pipes = (P1::default(), P2::default());
-        let v1 =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+    async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) =
+            <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(req, state)
                 .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+                .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
+        let pipes = (P1::default(), P2::default());
+        let v1 = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         let v2 = <P2 as nestrs_core::PipeTransform<
             <P1 as nestrs_core::PipeTransform<T>>::Output,
         >>::transform(&pipes.1, v1)
@@ -3801,22 +3802,25 @@ where
 }
 
 /// Body extractor that runs three pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 pub struct PipedBody3<T, P1, P2, P3>(
-    pub <P3 as nestrs_core::PipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+    pub  <P3 as nestrs_core::PipeTransform<
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >>::Output,
 )
 where
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
     P3: nestrs_core::HttpPipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >;
 
 #[axum::async_trait]
@@ -3825,31 +3829,22 @@ where
     S: Send + Sync + 'static,
     T: serde::de::DeserializeOwned + Send + 'static,
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
     P3: nestrs_core::HttpPipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >,
 {
     type Rejection = HttpException;
 
-    async fn from_request(
-        req: axum::extract::Request,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let axum::Json(value) = <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(
-            req, state,
-        )
-        .await
-        .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
-        let pipes = (P1::default(), P2::default(), P3::default());
-        let v1 =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+    async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) =
+            <axum::Json<T> as axum::extract::FromRequest<S>>::from_request(req, state)
                 .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+                .map_err(|e| BadRequestException::new(format!("Invalid JSON body: {e}")))?;
+        let pipes = (P1::default(), P2::default(), P3::default());
+        let v1 = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         let v2 = <P2 as nestrs_core::PipeTransform<
             <P1 as nestrs_core::PipeTransform<T>>::Output,
         >>::transform(&pipes.1, v1)
@@ -3867,6 +3862,15 @@ where
 }
 
 /// Body extractor that runs four pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 #[allow(clippy::type_complexity)]
 pub struct PipedBody4<T, P1, P2, P3, P4>(
     pub <P4 as nestrs_core::PipeTransform<
@@ -3961,9 +3965,16 @@ where
 // ---------- PipedQuery arity 1..=4 ----------
 
 /// Query-string extractor that runs a single pipe on the deserialized value.
-pub struct PipedQuery1<T, P1>(
-    pub <P1 as nestrs_core::PipeTransform<T>>::Output,
-)
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
+pub struct PipedQuery1<T, P1>(pub <P1 as nestrs_core::PipeTransform<T>>::Output)
 where
     P1: nestrs_core::HttpPipeTransform<T>;
 
@@ -3987,23 +3998,29 @@ where
             .await
             .map_err(|e| BadRequestException::new(format!("Invalid query: {e}")))?;
         let pipe = P1::default();
-        let out =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
-                .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let out = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         Ok(Self(out))
     }
 }
 
 /// Query-string extractor that runs two pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 pub struct PipedQuery2<T, P1, P2>(
     pub <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
 )
 where
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >;
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>;
 
 #[axum::async_trait]
 impl<S, T, P1, P2> axum::extract::FromRequestParts<S> for PipedQuery2<T, P1, P2>
@@ -4011,9 +4028,7 @@ where
     S: Send + Sync + 'static,
     T: serde::de::DeserializeOwned + Send + 'static,
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
 {
     type Rejection = HttpException;
 
@@ -4028,10 +4043,9 @@ where
             .await
             .map_err(|e| BadRequestException::new(format!("Invalid query: {e}")))?;
         let pipes = (P1::default(), P2::default());
-        let v1 =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
-                .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v1 = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         let v2 = <P2 as nestrs_core::PipeTransform<
             <P1 as nestrs_core::PipeTransform<T>>::Output,
         >>::transform(&pipes.1, v1)
@@ -4042,22 +4056,25 @@ where
 }
 
 /// Query-string extractor that runs three pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 pub struct PipedQuery3<T, P1, P2, P3>(
-    pub <P3 as nestrs_core::PipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+    pub  <P3 as nestrs_core::PipeTransform<
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >>::Output,
 )
 where
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
     P3: nestrs_core::HttpPipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >;
 
 #[axum::async_trait]
@@ -4066,13 +4083,9 @@ where
     S: Send + Sync + 'static,
     T: serde::de::DeserializeOwned + Send + 'static,
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
     P3: nestrs_core::HttpPipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >,
 {
     type Rejection = HttpException;
@@ -4088,10 +4101,9 @@ where
             .await
             .map_err(|e| BadRequestException::new(format!("Invalid query: {e}")))?;
         let pipes = (P1::default(), P2::default(), P3::default());
-        let v1 =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
-                .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v1 = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         let v2 = <P2 as nestrs_core::PipeTransform<
             <P1 as nestrs_core::PipeTransform<T>>::Output,
         >>::transform(&pipes.1, v1)
@@ -4109,6 +4121,15 @@ where
 }
 
 /// Query-string extractor that runs four pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 #[allow(clippy::type_complexity)]
 pub struct PipedQuery4<T, P1, P2, P3, P4>(
     pub <P4 as nestrs_core::PipeTransform<
@@ -4204,9 +4225,16 @@ where
 // ---------- PipedPath arity 1..=4 ----------
 
 /// Path extractor that runs a single pipe on the deserialized value.
-pub struct PipedPath1<T, P1>(
-    pub <P1 as nestrs_core::PipeTransform<T>>::Output,
-)
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
+pub struct PipedPath1<T, P1>(pub <P1 as nestrs_core::PipeTransform<T>>::Output)
 where
     P1: nestrs_core::HttpPipeTransform<T>;
 
@@ -4230,23 +4258,29 @@ where
             .await
             .map_err(|e| BadRequestException::new(format!("Invalid path params: {e}")))?;
         let pipe = P1::default();
-        let out =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
-                .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let out = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipe, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         Ok(Self(out))
     }
 }
 
 /// Path extractor that runs two pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 pub struct PipedPath2<T, P1, P2>(
     pub <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
 )
 where
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >;
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>;
 
 #[axum::async_trait]
 impl<S, T, P1, P2> axum::extract::FromRequestParts<S> for PipedPath2<T, P1, P2>
@@ -4254,9 +4288,7 @@ where
     S: Send + Sync + 'static,
     T: serde::de::DeserializeOwned + Send + 'static,
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
 {
     type Rejection = HttpException;
 
@@ -4271,10 +4303,9 @@ where
             .await
             .map_err(|e| BadRequestException::new(format!("Invalid path params: {e}")))?;
         let pipes = (P1::default(), P2::default());
-        let v1 =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
-                .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v1 = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         let v2 = <P2 as nestrs_core::PipeTransform<
             <P1 as nestrs_core::PipeTransform<T>>::Output,
         >>::transform(&pipes.1, v1)
@@ -4285,22 +4316,25 @@ where
 }
 
 /// Path extractor that runs three pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 pub struct PipedPath3<T, P1, P2, P3>(
-    pub <P3 as nestrs_core::PipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+    pub  <P3 as nestrs_core::PipeTransform<
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >>::Output,
 )
 where
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
     P3: nestrs_core::HttpPipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >;
 
 #[axum::async_trait]
@@ -4309,13 +4343,9 @@ where
     S: Send + Sync + 'static,
     T: serde::de::DeserializeOwned + Send + 'static,
     P1: nestrs_core::HttpPipeTransform<T>,
-    P2: nestrs_core::HttpPipeTransform<
-        <P1 as nestrs_core::PipeTransform<T>>::Output,
-    >,
+    P2: nestrs_core::HttpPipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>,
     P3: nestrs_core::HttpPipeTransform<
-        <P2 as nestrs_core::PipeTransform<
-            <P1 as nestrs_core::PipeTransform<T>>::Output,
-        >>::Output,
+        <P2 as nestrs_core::PipeTransform<<P1 as nestrs_core::PipeTransform<T>>::Output>>::Output,
     >,
 {
     type Rejection = HttpException;
@@ -4331,10 +4361,9 @@ where
             .await
             .map_err(|e| BadRequestException::new(format!("Invalid path params: {e}")))?;
         let pipes = (P1::default(), P2::default(), P3::default());
-        let v1 =
-            <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
-                .await
-                .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
+        let v1 = <P1 as nestrs_core::PipeTransform<T>>::transform(&pipes.0, value)
+            .await
+            .map_err(|err| __nestrs_pipe_error_to_http_exception(Box::new(err) as _))?;
         let v2 = <P2 as nestrs_core::PipeTransform<
             <P1 as nestrs_core::PipeTransform<T>>::Output,
         >>::transform(&pipes.1, v1)
@@ -4352,6 +4381,15 @@ where
 }
 
 /// Path extractor that runs four pipes in order.
+///
+/// Emitted by the `#[use_pipes]` macro when a parameter's pipe chain is
+/// longer than one pipe or the lone pipe is not `ValidationPipe` (the
+/// `ValidationPipe`-only fast path still uses the `Validated*` extractors).
+/// Pipes run in declaration order at extraction time; the first failing pipe
+/// short-circuits the chain and its `HttpException` status is returned
+/// (e.g. 422 from `ValidationPipe`, 400 from `ParseIntPipe`). Hand-written
+/// handlers can use these directly with any `HttpPipeTransform` pipe.
+/// Arity is capped at 4; wrap longer chains in a custom pipe.
 #[allow(clippy::type_complexity)]
 pub struct PipedPath4<T, P1, P2, P3, P4>(
     pub <P4 as nestrs_core::PipeTransform<

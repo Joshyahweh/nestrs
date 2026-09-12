@@ -2,14 +2,14 @@
 //! feature).
 //!
 //! Each predicate is a small struct with defaulted column names plus a
-//! [`RowPredicate`](crate::RowPredicate) impl. Two layers:
+//! [`RowPredicate`] impl. Two layers:
 //!
 //! * [`RowPredicate::check`] — the always-on closure check ("is this row
 //!   visible to this principal?"). Applied post-load by every authorized
 //!   repository path and by `CrudService` under `authz-row-level`.
-//! * [`RowPredicate::sql_conditions`](crate::RowPredicate::sql_conditions) —
+//! * [`RowPredicate::sql_conditions`] —
 //!   the per-request pushdown hint, compiled into the `WHERE` clause by
-//!   [`Repository::find_many_authorized`](crate::Repository::find_many_authorized)
+//!   `Repository::find_many_authorized`
 //!   (and the other authorized finds via the rule's declarative conditions).
 //!
 //! OR-shaped predicates (`OwnerOrAdmin`, `TenantOrAdmin`, `SelfOrAdmin`,

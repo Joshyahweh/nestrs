@@ -354,7 +354,7 @@ impl AbilityBuilder {
     }
 
     /// Grant `action` on `subject_type` but only over the listed field names
-    /// (used by [`PolicyMaskingInterceptor`](crate::masking) to strip responses).
+    /// (used by [`crate::PolicyMaskingInterceptor`] to strip responses).
     pub fn can_on_fields(
         mut self,
         action: Action,
@@ -658,8 +658,8 @@ where
 
 /// Axum middleware that takes a configured [`Ability`] via state and stashes
 /// it into both `parts.extensions` (so [`PoliciesGuard`] and
-/// [`PolicyMaskingInterceptor`](crate::masking) can read it) and a
-/// per-task local (so [`Repository::find_*_authorized`] can read it).
+/// [`crate::PolicyMaskingInterceptor`] can read it) and a
+/// per-task local (so `Repository::find_*_authorized` can read it).
 ///
 /// `install_authn_middleware` is independent; run this *after* authn so the
 /// guard chain can read both the principal and the ability.

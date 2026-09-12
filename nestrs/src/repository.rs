@@ -160,7 +160,7 @@ impl<T: Entity> Repository<T> {
     // All methods in this section require `authz-row-level` feature.
 
     #[cfg(feature = "authz-row-level")]
-    /// Same as [`Self::find_one`] but consults the request-scoped [`Ability`]
+    /// Same as [`Self::find_one`] but consults the request-scoped [`crate::Ability`]
     /// and appends the resolved constraint as a `WHERE` clause. Returns
     /// `Ok(None)` when the principal lacks the action OR the constraint
     /// filters the row out.
@@ -455,7 +455,7 @@ pub struct FindManyParams {
 
 #[cfg(feature = "authz-row-level")]
 impl<T: Entity> Repository<T> {
-    /// Fetch many rows with the request-scoped [`Ability`] enforced — the
+    /// Fetch many rows with the request-scoped [`crate::Ability`] enforced — the
     /// row-level analogue of [`Self::find_all_authorized`] with pagination
     /// and a caller-supplied extra filter.
     ///
@@ -665,7 +665,7 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
         T::from_row(&row)
     }
 
-    /// INSERT a new row with the request-scoped [`Ability`] enforced: the
+    /// INSERT a new row with the request-scoped [`crate::Ability`] enforced: the
     /// `create` action must be granted and the row-level predicate must
     /// accept the row being inserted (e.g. `AuthorIsCurrentUser` rejects
     /// rows authored as someone else). No `Ability` in scope → deny-closed
@@ -695,7 +695,7 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
         self.repo.find_one(id).await
     }
 
-    /// READ a row with the request-scoped [`Ability`] enforced (deny →
+    /// READ a row with the request-scoped [`crate::Ability`] enforced (deny →
     /// `Ok(None)`, same channel as [`Repository::find_one_authorized`]).
     #[cfg(feature = "authz-row-level")]
     pub async fn read(&self, id: i64) -> Result<Option<T>, sqlx::Error> {
@@ -729,7 +729,7 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
         }
     }
 
-    /// UPDATE a row by id with the request-scoped [`Ability`] enforced. The
+    /// UPDATE a row by id with the request-scoped [`crate::Ability`] enforced. The
     /// `update` action must be granted, the current row must be visible to
     /// the update rule's predicate (fetched through the *update* action's
     /// own constraint — invisible rows read as `Ok(None)`), and the
@@ -788,7 +788,7 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
         self.repo.delete(id).await
     }
 
-    /// DELETE a row with the request-scoped [`Ability`] enforced: the
+    /// DELETE a row with the request-scoped [`crate::Ability`] enforced: the
     /// `delete` action must be granted, the row must be visible to the
     /// delete rule's predicate, and the predicate must accept it (deny →
     /// `Err(sqlx::Error::Protocol)`; invisible → `Ok(false)`).
@@ -820,7 +820,7 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
         self.repo.find_all().await
     }
 
-    /// LIST all rows with the request-scoped [`Ability`] enforced (deny →
+    /// LIST all rows with the request-scoped [`crate::Ability`] enforced (deny →
     /// `Ok(vec![])`, same channel as [`Repository::find_all_authorized`]).
     #[cfg(feature = "authz-row-level")]
     pub async fn list(&self) -> Result<Vec<T>, sqlx::Error> {

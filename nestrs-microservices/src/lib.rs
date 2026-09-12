@@ -634,19 +634,25 @@ mod redaction_tests {
             "redis://***@cache.local:6379/0"
         );
         // username only — the userinfo is still redacted whole
-        assert_eq!(redact_url("nats://daniel@nats.local"), "nats://***@nats.local");
+        assert_eq!(
+            redact_url("nats://daniel@nats.local"),
+            "nats://***@nats.local"
+        );
         // percent-encoded '@' inside the password is left intact in the
         // authority (it is not a raw '@'), so the first '@' is the separator.
-        assert_eq!(
-            redact_url("amqp://u:p%40ss@host"),
-            "amqp://***@host"
-        );
+        assert_eq!(redact_url("amqp://u:p%40ss@host"), "amqp://***@host");
     }
 
     #[test]
     fn redact_url_leaves_credential_free_urls_alone() {
-        assert_eq!(redact_url("amqp://rabbit.local/vhost"), "amqp://rabbit.local/vhost");
-        assert_eq!(redact_url("redis://cache.local:6379"), "redis://cache.local:6379");
+        assert_eq!(
+            redact_url("amqp://rabbit.local/vhost"),
+            "amqp://rabbit.local/vhost"
+        );
+        assert_eq!(
+            redact_url("redis://cache.local:6379"),
+            "redis://cache.local:6379"
+        );
         // An '@' after a path separator is not userinfo.
         assert_eq!(
             redact_url("amqp://host/vhost@example"),

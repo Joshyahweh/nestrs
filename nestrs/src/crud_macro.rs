@@ -3,13 +3,13 @@
 //! The macro emits a `{Pascal}ListQuery` DTO + a hidden `FromRequestParts`
 //! extractor that parses it from the request URI's query string using
 //! `serde_qs` (which understands `?filter[field]=x&sort=field:DIR` bracket
-//! syntax). This module is the *adapter* — the macro references
-//! [`__CrudQueryAdapter`] by path when it rewrites the generated handler's
-//! `#[param::query]` parameter type.
+//! syntax). This module is the *adapter* — the macro references the
+//! `__CrudQueryAdapter` extractor (defined below) by path when it rewrites
+//! the generated handler's `#[param::query]` parameter type.
 //!
 //! # Why a custom adapter (not just `ValidatedQuery`)?
 //!
-//! [`ValidatedQuery`](crate::ValidatedQuery) wraps `axum::extract::Query<T>`,
+//! `ValidatedQuery` wraps `axum::extract::Query<T>`,
 //! which uses `serde_urlencoded` — that deserializer only handles flat
 //! `?key=value&key2=value2` pairs and silently drops bracketed keys. The
 //! `#[crud]` list endpoint contract follows `@nestjsx/crud`'s convention
@@ -224,9 +224,7 @@ where
         let value: T = config
             .deserialize_str(&raw)
             .map_err(|e| BadRequestException::new(format!("Invalid crud query string: {e}")))?;
-        value
-            .validate()
-            .map_err(validation_to_http_exception)?;
+        value.validate().map_err(validation_to_http_exception)?;
         Ok(Self(value))
     }
 }

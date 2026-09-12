@@ -1,4 +1,4 @@
-//! Built-in [`PipeTransform`](crate::core::PipeTransform) implementations.
+//! Built-in [`PipeTransform`] implementations.
 
 use crate::async_trait;
 use crate::core::{HttpPipeTransform, PipeTransform};

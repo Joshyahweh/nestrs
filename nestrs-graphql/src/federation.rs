@@ -17,7 +17,7 @@
 //!    via [`async_graphql_parser::parse_schema`]. Refuses with
 //!    [`FederationError::Parse`] on bad input.
 //! 2. **Emit** the merged SDL through [`Schema::sdl_with_options`] with
-//!    [`SDLExportOptions::default().federation()`] — the same flags
+//!    [`SDLExportOptions`]`::default().federation()` — the same flags
 //!    async-graphql uses for individual federation-v2 subgraphs.
 //! 3. **Route** cross-subgraph entity queries by `__typename` to a
 //!    user-supplied async resolver. Each subgraph ships with its own
@@ -31,11 +31,11 @@ use axum::{Extension, Router};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_graphql::types::Any;
 use async_graphql::{
     http::{playground_source, GraphQLPlaygroundConfig},
     BatchRequest, EmptyMutation, EmptySubscription, Object, Schema,
 };
-use async_graphql::types::Any;
 use async_graphql_parser::parse_schema;
 
 use crate::gql_data_context::GqlHandlerHook;
@@ -229,8 +229,7 @@ impl FederationRoot {
         // Step 1: convert each `Any` to JSON and extract its `__typename`.
         // We keep the original index so we can re-interleave batched
         // results back into input order.
-        let mut decoded: Vec<(usize, serde_json::Value, String)> =
-            Vec::with_capacity(n);
+        let mut decoded: Vec<(usize, serde_json::Value, String)> = Vec::with_capacity(n);
         for (idx, rep) in representations.into_iter().enumerate() {
             let rep_json = match rep.0.into_json() {
                 Ok(v) => v,
@@ -258,10 +257,8 @@ impl FederationRoot {
         // a resolver) from `untyped` (no resolver or missing
         // __typename) so the untyped slots stay `null` without
         // triggering a wasted dispatch.
-        let mut groups: std::collections::HashMap<
-            String,
-            Vec<(usize, serde_json::Value)>,
-        > = std::collections::HashMap::new();
+        let mut groups: std::collections::HashMap<String, Vec<(usize, serde_json::Value)>> =
+            std::collections::HashMap::new();
         let mut untyped: Vec<usize> = Vec::new();
         for (idx, rep_json, typename) in decoded {
             if typename.is_empty() {
@@ -269,10 +266,7 @@ impl FederationRoot {
                 continue;
             }
             match self.entities.get(&typename) {
-                Some(_) => groups
-                    .entry(typename)
-                    .or_default()
-                    .push((idx, rep_json)),
+                Some(_) => groups.entry(typename).or_default().push((idx, rep_json)),
                 None => untyped.push(idx),
             }
         }
@@ -284,8 +278,7 @@ impl FederationRoot {
         for (typename, group) in groups {
             let resolver = self.entities.get(&typename).expect("present");
             // Borrow as slice-of-references — the trait contract.
-            let refs: Vec<&serde_json::Value> =
-                group.iter().map(|(_, v)| v).collect();
+            let refs: Vec<&serde_json::Value> = group.iter().map(|(_, v)| v).collect();
             match resolver.resolve(ctx, &refs) {
                 Ok(resolved) => {
                     if resolved.len() != group.len() {
@@ -324,11 +317,7 @@ impl FederationRoot {
         // `results`), so the `unwrap_or(Null)` is defensive.
         let mut out: Vec<serde_json::Value> = Vec::with_capacity(n);
         for idx in 0..n {
-            out.push(
-                results
-                    .remove(&idx)
-                    .unwrap_or(serde_json::Value::Null),
-            );
+            out.push(results.remove(&idx).unwrap_or(serde_json::Value::Null));
         }
         serde_json::Value::Array(out)
     }
@@ -380,12 +369,7 @@ pub fn federation_router_with_hook(
     path: impl Into<String>,
     hook: Arc<dyn GqlHandlerHook>,
 ) -> Result<Router, FederationError> {
-    build_router(
-        cfg,
-        path.into(),
-        GraphQlHttpOptions::default(),
-        Some(hook),
-    )
+    build_router(cfg, path.into(), GraphQlHttpOptions::default(), Some(hook))
 }
 
 // ---------------------------------------------------------------------------
@@ -409,10 +393,10 @@ fn build_router(
     // request in the batch (dataloader installs fresh loaders), then we
     // run `execute_batch` wrapped in the hook's scope so task-locals
     // (ability/principal/tx) are visible to entity resolvers.
-    let handler = move |
-        Extension(schema): Extension<Schema<FederationRoot, EmptyMutation, EmptySubscription>>,
-        Json(req): Json<BatchRequest>,
-    | {
+    let handler = move |Extension(schema): Extension<
+        Schema<FederationRoot, EmptyMutation, EmptySubscription>,
+    >,
+                        Json(req): Json<BatchRequest>| {
         let hook = hook.clone();
         async move {
             let mut req = req;
@@ -446,10 +430,8 @@ fn build_router(
                 endpoint.as_str(),
             )))
         };
-        let router = Router::new().route(
-            path.as_str(),
-            axum::routing::get(playground).post(handler),
-        );
+        let router =
+            Router::new().route(path.as_str(), axum::routing::get(playground).post(handler));
         Ok(router.layer(Extension(schema)))
     } else {
         let router = Router::new().route(
@@ -533,11 +515,8 @@ fn build_schema(
     // Re-export the merged SDL using the same federation flag the
     // single-subgraph SDL export uses — so test #8 sees the `@link`
     // directive and Federation-v2 SDL shape.
-    let merged_sdl_exported = schema.sdl_with_options(
-        SDLExportOptions::default()
-            .federation()
-            .compose_directive(),
-    );
+    let merged_sdl_exported =
+        schema.sdl_with_options(SDLExportOptions::default().federation().compose_directive());
 
     Ok((schema, merged_sdl_exported))
 }

@@ -15,6 +15,9 @@ nestrs_core::Module
 nestrs_core::Module::build
 nestrs_core::ModuleGraph
 nestrs_core::ModuleOptions
+nestrs_core::ProviderLifecycle
+nestrs_core::ProviderLifecycle::on_application_shutdown
+nestrs_core::ProviderLifecycle::on_module_destroy
 nestrs_core::ProviderRegistry
 nestrs_core::ProviderRegistry::absorb_exported
 nestrs_core::ProviderRegistry::absorb_exported_from
@@ -22,6 +25,9 @@ nestrs_core::ProviderRegistry::get
 nestrs_core::ProviderRegistry::provider_summaries
 nestrs_core::ProviderRegistry::register
 nestrs_core::ProviderRegistry::register_use_factory
+nestrs_core::ProviderRegistry::register_use_factory_with_lifecycle
+nestrs_core::ProviderRegistry::register_use_value
+nestrs_core::ProviderRegistry::register_use_value_with_lifecycle
 nestrs_core::ProviderRegistry::run_on_module_init
 nestrs_core::ProviderRegistry::try_get
 nestrs_core::ProviderScope

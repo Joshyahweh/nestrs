@@ -290,7 +290,7 @@ pub mod prelude {
         Controller, DatabasePing, DiscoveryService, DynamicModule, DynamicModuleBuilder,
         ExecutionContext, GuardError, HostType, HttpExecutionArguments, HttpPipeTransform,
         HttpServerEngine, Injectable, MetadataRegistry, Module, ModuleOptions, ModuleRef,
-        PipeTransform, ProviderRegistry, ProviderScope,
+        PipeTransform, ProviderLifecycle, ProviderRegistry, ProviderScope,
     };
     #[cfg(feature = "graphql")]
     pub use crate::graphql;

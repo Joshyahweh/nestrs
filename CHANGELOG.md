@@ -7,6 +7,46 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: useValue/useFactory providers could not run lifecycle hooks
+
+`register_use_value` / `register_use_factory` accepted any
+`T: Send + Sync + 'static`, so their five lifecycle hook slots were wired to
+a no-op — `onModuleInit`, `onModuleDestroy`, `onApplicationBootstrap`,
+`onBeforeApplicationShutdown`, and `onApplicationShutdown` never fired for
+value/factory providers, silently. A pre-built connection pool, cache, or
+background worker registered via `useValue`/`useFactory` had no way to warm
+up or flush/close during boot or graceful shutdown (the workarounds —
+eager construction inside the factory, or "fail on first use" — are exactly
+the patterns this forces).
+
+- **Behavior:** new opt-in trait `ProviderLifecycle` (five default-no-op
+  async hooks, mirroring the NestJS `OnModuleInit` & friends on a
+  `useValue`/`useFactory` provider) plus two registration variants,
+  `ProviderRegistry::register_use_value_with_lifecycle` and
+  `register_use_factory_with_lifecycle`. The framework then drives the
+  hooks for singleton providers exactly like `Injectable` hooks:
+  dependency/registration order for init/bootstrap, reverse for
+  before-shutdown/shutdown/destroy. A factory singleton that nothing has
+  resolved yet is constructed by its first hook (the same lazy contract as
+  `Injectable` providers whose first resolution happens in a hook).
+- **Why not fix the plain methods:** Rust has no specialization, so
+  `register_use_value`/`register_use_factory` (which take any `T` so plain
+  values like `i32`/`String`/config structs stay registerable) cannot
+  detect a hook impl. Their documented hook-less behavior is unchanged.
+- **Migration:** none — both plain methods keep byte-identical signatures.
+  To get hooks on a value/factory provider, implement `ProviderLifecycle`
+  for its type (re-exported in `nestrs::prelude`) and switch the
+  registration call to the `_with_lifecycle` variant. Request/transient
+  factory providers keep their existing behavior (hooks run only for
+  singletons, matching `Injectable`).
+- **Tests:** nestrs-core unit tests pin the hook sequence per provider
+  (init → bootstrap → before-shutdown → shutdown → destroy), init-order /
+  reverse-destroy ordering across providers, the factory-singleton lazy
+  construction (hook is the first `get`, later `get`s reuse it), and the
+  plain variants staying hook-less; a nestrs integration test drives the
+  exact `listen()` boot + graceful-shutdown sequences over a value and a
+  factory provider together.
+
 ### Fixed — production/security audit: nested scope installers REPLACED the request scope instead of layering into it
 
 `with_request_scope` unconditionally opened a fresh request-scoped provider

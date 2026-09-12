@@ -1044,6 +1044,73 @@ async fn use_request_id_sets_response_header() {
 }
 
 #[tokio::test]
+async fn use_request_id_honors_a_valid_client_supplied_id() {
+    // Legitimate upstream propagation: a UUID-style client id flows through
+    // untouched (echoed on the response, visible to RequestContext).
+    const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+    let router = NestFactory::create::<AppModule>()
+        .use_request_id()
+        .into_router();
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .header(X_REQUEST_ID, "01890604-1d6f-7a46-9b0b-1f0b4ef7b9e3")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request");
+
+    assert_eq!(
+        response
+            .headers()
+            .get(X_REQUEST_ID)
+            .and_then(|v| v.to_str().ok()),
+        Some("01890604-1d6f-7a46-9b0b-1f0b4ef7b9e3")
+    );
+}
+
+#[tokio::test]
+async fn use_request_id_replaces_an_invalid_client_supplied_id() {
+    // tower-http's SetRequestIdLayer honors any client-supplied header
+    // verbatim (it only fills in a MISSING one) — an attacker-chosen value
+    // would be echoed into logs, tracing, and the response header. The
+    // sanitizer replaces unacceptable values with a fresh UUID.
+    const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+    let router = NestFactory::create::<AppModule>()
+        .use_request_id()
+        .into_router();
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/v1/api")
+                .method("GET")
+                .header(X_REQUEST_ID, "forged id with spaces")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await
+        .expect("router should serve request");
+
+    let assigned = response
+        .headers()
+        .get(X_REQUEST_ID)
+        .and_then(|v| v.to_str().ok())
+        .expect("fresh x-request-id assigned");
+    assert_ne!(assigned, "forged id with spaces");
+    assert!(
+        assigned
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')),
+        "assigned UUID must itself be charset-clean"
+    );
+}
+
+#[tokio::test]
 async fn additional_http_exceptions_emit_expected_status_and_error_label() {
     let cases = [
         (

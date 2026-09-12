@@ -16,15 +16,15 @@ fn ability_can_returns_true_for_granted_action() {
         .can(Action::Read, "Post")
         .can(Action::Update, "Post")
         .build();
-    assert!(ab.can(&Action::Read, &Subject::Type("Post")));
-    assert!(ab.can(&Action::Update, &Subject::Type("Post")));
+    assert!(ab.can(&Action::Read, &Subject::Type("Post".into())));
+    assert!(ab.can(&Action::Update, &Subject::Type("Post".into())));
 }
 
 #[test]
 fn ability_can_returns_false_for_ungranted_action() {
     let ab = Ability::builder().can(Action::Read, "Post").build();
-    assert!(!ab.can(&Action::Delete, &Subject::Type("Post")));
-    assert!(!ab.can(&Action::Read, &Subject::Type("Comment")));
+    assert!(!ab.can(&Action::Delete, &Subject::Type("Post".into())));
+    assert!(!ab.can(&Action::Read, &Subject::Type("Comment".into())));
 }
 
 #[test]
@@ -95,11 +95,11 @@ fn ability_can_with_instance_subject_rejects_for_other_owner() {
 #[test]
 fn ability_can_with_manage_implies_all_actions() {
     let ab = Ability::builder().can(Action::Manage, "Org").build();
-    assert!(ab.can(&Action::Read, &Subject::Type("Org")));
-    assert!(ab.can(&Action::Create, &Subject::Type("Org")));
-    assert!(ab.can(&Action::Update, &Subject::Type("Org")));
-    assert!(ab.can(&Action::Delete, &Subject::Type("Org")));
-    assert!(ab.can(&Action::Custom("audit".into()), &Subject::Type("Org")));
+    assert!(ab.can(&Action::Read, &Subject::Type("Org".into())));
+    assert!(ab.can(&Action::Create, &Subject::Type("Org".into())));
+    assert!(ab.can(&Action::Update, &Subject::Type("Org".into())));
+    assert!(ab.can(&Action::Delete, &Subject::Type("Org".into())));
+    assert!(ab.can(&Action::Custom("audit".into()), &Subject::Type("Org".into())));
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn ability_allowed_fields_returns_field_subset_when_defined() {
         .can_on_fields(Action::Read, "User", vec!["id".into(), "email".into()])
         .can(Action::Update, "User")
         .build();
-    let subject = Subject::Type("User");
+    let subject = Subject::Type("User".into());
     let read_fields = ab.allowed_fields(&Action::Read, &subject).expect("Some");
     assert_eq!(read_fields, vec!["id", "email"]);
     assert!(ab.allowed_fields(&Action::Update, &subject).is_none());
@@ -122,7 +122,7 @@ fn ability_constraint_returns_conditions_for_subject() {
         .can_with_conditions(Action::Read, "Post", conds)
         .build();
     let got = ab
-        .constraint(&Action::Read, &Subject::Type("Post"))
+        .constraint(&Action::Read, &Subject::Type("Post".into()))
         .expect("Some");
     assert_eq!(got.get("status").unwrap(), &json!("published"));
 }
@@ -131,7 +131,7 @@ fn ability_constraint_returns_conditions_for_subject() {
 fn ability_constraint_is_none_when_no_conditions_rule() {
     let ab = Ability::builder().can(Action::Read, "Post").build();
     assert!(ab
-        .constraint(&Action::Read, &Subject::Type("Post"))
+        .constraint(&Action::Read, &Subject::Type("Post".into()))
         .is_none());
 }
 
@@ -276,7 +276,7 @@ fn can_with_predicate_keeps_field_restrictions() {
             |_: &serde_json::Value, _: &Principal| true,
         )
         .build();
-    let subject = Subject::Type("Doc");
+    let subject = Subject::Type("Doc".into());
     let fields = ab.allowed_fields(&Action::Read, &subject).expect("Some");
     assert_eq!(fields, vec!["id", "title"]);
 }

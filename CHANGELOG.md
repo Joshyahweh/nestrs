@@ -7,6 +7,47 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: nested scope installers REPLACED the request scope instead of layering into it
+
+`with_request_scope` unconditionally opened a fresh request-scoped provider
+cache, even when one was already active. Every installer that runs inside an
+active request scope therefore forked it — most visibly the `#[transactional]`
+middleware (`install_transactional_middleware` /
+`TransactionalInterceptor`) under `use_request_scope()`: the nested
+middleware replaced the request-scoped cache the outer middleware had
+opened, instead of layering into it. The same shadowing applied to the
+GraphQL, WebSocket, and MCP scope wrappers whenever they ran inside an
+in-request transport.
+
+- **Behavior:** `with_request_scope` now JOINS an active scope — values
+  inserted by outer middleware stay visible inside nested installers, and
+  anything a nested installer inserts (e.g. the `TransactionSlot`) lands in
+  the same scope. Only when no scope is active does it open a fresh one
+  (the per-request middleware case, and per-message/per-operation scopes
+  on transports that drive handlers outside an HTTP request — those keep
+  their isolation, since the upgraded-connection / tool-call futures run
+  outside the original request's scope).
+- **The user-visible defect:** a `ProviderScope::Request` provider resolved
+  before a nested installer (e.g. by a guard) was invisible inside it —
+  re-resolution constructed a SECOND instance of a provider the request
+  had already built, breaking the one-instance-per-request DI contract,
+  and values stashed by outer middleware disappeared for the rest of the
+  request.
+- **No migration.** No signature changes (`with_request_scope`,
+  `request_scope_insert`, `request_scope_get` unchanged); public API
+  snapshot verified unchanged. Code that (incorrectly) relied on a nested
+  `with_request_scope` hiding outer values would be affected — there were
+  no such call sites in the workspace.
+- Tests: nestrs-core unit tests pin nesting (outer value visible inside,
+  nested insert visible outside, one construction of a request-scoped
+  provider across a nested boundary — `Arc::ptr_eq`); an end-to-end
+  transactional test drives a route through an outer scope middleware +
+  the transactional middleware, asserting the tx slot AND the outer
+  middleware's stashed value are both visible in the handler and the
+  transaction still commits; all multi-transport scope suites
+  (request_scope, testing_module, ws/graphql multi-transport, MCP) pass
+  unchanged.
+
 ### Fixed — production/security audit: `#[crud]` list endpoint materialized the entire table per request
 
 `GET /` on a `#[crud]` controller fetched **every row** from the database

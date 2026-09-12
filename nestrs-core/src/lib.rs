@@ -478,9 +478,10 @@ impl ProviderRegistry {
             .copied()
             .collect();
 
-        // Edge `dep -> dependent`: dep must be initialized first. Only edges between
-        // registered singletons participate (edges to transient/request types or types from
-        // other registries are ignored).
+        // The graph records `constructor -> dependency` (the DEPENDENT first); the
+        // sort needs `dep -> dependent` (dependencies initialize first). Only edges
+        // between registered singletons participate (edges to transient/request types
+        // or types from other registries are ignored).
         let deps = provider_dep_graph().read().expect("provider dep graph");
         let mut incoming: HashMap<TypeId, usize> =
             singletons.iter().map(|id| (*id, 0usize)).collect();
@@ -491,8 +492,8 @@ impl ProviderRegistry {
             }
             for to in targets {
                 if singletons.contains(to) {
-                    adjacency.entry(*from).or_default().push(*to);
-                    *incoming.entry(*to).or_insert(0) += 1;
+                    adjacency.entry(*to).or_default().push(*from);
+                    *incoming.entry(*from).or_insert(0) += 1;
                 }
             }
         }

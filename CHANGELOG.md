@@ -7,6 +7,36 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: dependency-ordered lifecycle hooks ran DEPENDENTS before their dependencies
+
+`ordered_singletons` — the topological sort behind all five lifecycle
+hook runners — built its adjacency directly from the recorded
+`constructor -> dependency` edges, treating the CONSTRUCTOR (the
+dependent) as the node that initializes first. That inverted the
+documented "dependencies initialize before dependents" contract: in
+practice hook order collapsed to registration order for
+dependency-connected providers, so a service's `on_module_init` could
+run before the provider it depends on had initialized (e.g. a DB pool,
+a cache), and the (already reversed) destroy hooks tore dependencies
+down before the dependents that still held references to them.
+
+- **Discovered while fixing the DI write-lock contention** (an empirical
+  probe: a provider registered FIRST with a construct-time dependency
+  still ran its init hook first, matching registration order instead of
+  dependency order).
+- **Behavior:** the sort now inverts the recorded edge direction when
+  building its adjacency, so dependencies initialize first and the
+  reversed destroy/shutdown hooks tear dependents down before their
+  dependencies. Ties keep registration order; the hook-cycle fallback
+  (append unvisited in registration order) is unchanged.
+- **Migration:** code that relied on the old behavior was relying on a
+  documented-contract violation (registration order even when a
+  dependency edge existed). The doc comment and mdBook always stated
+  dependencies first.
+- **Tests:** a 3-level chain (C depends on B depends on A, registered
+  top-first) pins init `[A, B, C]` and destroy `[C, B, A]` — both
+  the direction and the registration-order override.
+
 ### Fixed — production/security audit: DI dependency recording took the global write lock on every resolution
 
 Every `registry.get` executed inside a provider construction (inside

@@ -3,6 +3,8 @@ use nestrs::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+static INIT_ORDER: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
 static MODULE_INIT: AtomicBool = AtomicBool::new(false);
 static APP_BOOTSTRAP: AtomicBool = AtomicBool::new(false);
 static APP_SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -145,5 +147,91 @@ async fn use_value_and_factory_lifecycle_hooks_run_through_boot_sequence() {
             "F:destroy",
             "V:destroy",
         ],
+    );
+}
+
+// --- dependency-ordered hooks (follow-up to audit #43) ----------------------
+//
+// `ordered_singletons` consumed the recorded `constructor -> dependency`
+// edges in the WRONG direction, topologically sorting DEPENDENTS before
+// their dependencies — in effect collapsing hook order to registration
+// order for dependency-connected providers. A service's `on_module_init`
+// could run before the provider it depends on had initialized, and
+// destroy hooks tore dependencies down before their dependents. The sort
+// now honors the documented "dependencies initialize before dependents"
+// contract.
+
+struct ChainLeaf;
+
+#[async_trait]
+impl Injectable for ChainLeaf {
+    fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
+        Arc::new(Self)
+    }
+    async fn on_module_init(&self) {
+        INIT_ORDER.lock().unwrap().push("A:init");
+    }
+    async fn on_module_destroy(&self) {
+        INIT_ORDER.lock().unwrap().push("A:destroy");
+    }
+}
+
+struct ChainMid;
+
+#[async_trait]
+impl Injectable for ChainMid {
+    fn construct(registry: &ProviderRegistry) -> Arc<Self> {
+        let _ = registry.get::<ChainLeaf>();
+        Arc::new(Self)
+    }
+    async fn on_module_init(&self) {
+        INIT_ORDER.lock().unwrap().push("B:init");
+    }
+    async fn on_module_destroy(&self) {
+        INIT_ORDER.lock().unwrap().push("B:destroy");
+    }
+}
+
+struct ChainTop;
+
+#[async_trait]
+impl Injectable for ChainTop {
+    fn construct(registry: &ProviderRegistry) -> Arc<Self> {
+        let _ = registry.get::<ChainMid>();
+        Arc::new(Self)
+    }
+    async fn on_module_init(&self) {
+        INIT_ORDER.lock().unwrap().push("C:init");
+    }
+    async fn on_module_destroy(&self) {
+        INIT_ORDER.lock().unwrap().push("C:destroy");
+    }
+}
+
+#[tokio::test]
+async fn hooks_initialize_dependencies_before_dependents_and_reverse_on_destroy() {
+    // Register TOP-FIRST: registration order alone would init C, B, A. The
+    // recorded construction edges (C -> B -> A) must override it so the
+    // leaf initializes first.
+    let mut registry = ProviderRegistry::new();
+    registry.register::<ChainTop>();
+    registry.register::<ChainMid>();
+    registry.register::<ChainLeaf>();
+
+    registry.eager_init_singletons();
+    registry.run_on_module_init().await;
+    assert_eq!(
+        *INIT_ORDER.lock().unwrap(),
+        vec!["A:init", "B:init", "C:init"],
+        "dependencies must initialize before their dependents"
+    );
+
+    // Destroy hooks run in reverse init order: dependents tear down
+    // BEFORE the dependencies they still hold references to.
+    registry.run_on_module_destroy().await;
+    assert_eq!(
+        *INIT_ORDER.lock().unwrap(),
+        vec!["A:init", "B:init", "C:init", "C:destroy", "B:destroy", "A:destroy"],
+        "dependents must destroy before their dependencies"
     );
 }

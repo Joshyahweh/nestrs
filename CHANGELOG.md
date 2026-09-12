@@ -7,6 +7,50 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: unbounded in-memory cache, silent "unknown" rate-limit bucket, and trusted client-supplied request ids
+
+Three hardening fixes from one audit finding cluster:
+
+- **In-memory `CacheService` had no entry cap.** The in-memory backend was a
+  plain unbounded `HashMap` — any flood of distinct keys (e.g.
+  attacker-influenced cache keys) grew the map without limit, and TTL'd
+  entries were only removed when *their own key* was read again (one-shot
+  entries leaked their memory forever). The store is now bounded:
+  **FIFO eviction of the oldest-inserted entry when full**, with a default
+  cap of **10 000 entries**. Updates to existing keys never evict (and
+  refresh their FIFO position).
+  - **Migration (pre-1.0):** `CacheOptions::InMemory` changed from a unit
+    variant to `InMemory { max_entries: usize }`. Use the constructors —
+    `CacheOptions::in_memory()` (10 000 cap, unchanged semantics for
+    working sets under that size) or
+    `CacheOptions::in_memory_with_max_entries(n)` for a larger working
+    set (`0` disables caching — writes are dropped). No in-repo caller
+    pattern-matched the variant.
+- **Rate limiting silently bucketed unresolvable client IPs into one
+  shared `"unknown"` key.** When no IP could be resolved (malformed
+  `x-forwarded-for` under a trusted topology, or a transport without
+  socket metadata), the rate limiter, throttler, and throttler guard all
+  keyed the request under the same `unknown` bucket — coupling the limits
+  of unrelated clients. The shared fallback is kept (fail-closed:
+  unkeyable traffic is still limited; per-request unique keys would let a
+  garbage-XFF attacker bypass limiting entirely), but it now **warns**
+  (`target: nestrs::client_ip`) so operators can see when traffic is being
+  keyed this way and fix the proxy topology. All three call sites share
+  one helper (`rate_limit_key_ip`).
+- **`use_request_id` trusted the client-supplied `x-request-id`.**
+  tower-http's `SetRequestIdLayer` only fills in a *missing* header —
+  whatever the client sent was honored verbatim and echoed into logs,
+  tracing, `RequestContext`, and the response header (forged correlation
+  ids, log-forging payloads, unbounded value length). A sanitize layer now
+  runs before the tower-http layers: a client-supplied id is honored only
+  when it is plain identifier-ish ASCII (`[A-Za-z0-9._-]`, non-empty,
+  ≤ 128 bytes — UUID/ULID/hex style); anything else is stripped and a
+  fresh UUID is assigned (with a `nestrs::request_id` warn). Legitimate
+  upstream propagation still works.
+  - **No migration:** valid ids (the only kind well-behaved clients send)
+    pass through unchanged; invalid ones previously round-tripped
+    attacker-chosen bytes.
+
 ### Fixed — production/security audit: admin sidecar accepted its bearer token via query string and compared it non-constant-time
 
 The `nestrs::admin` sidecar (the `admin` feature) accepted the configured

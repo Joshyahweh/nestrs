@@ -1642,6 +1642,11 @@ impl NestApplication {
     }
 
     /// Assigns a stable `x-request-id` on each request (UUID when missing) and echoes it on the response.
+    ///
+    /// A client-supplied `x-request-id` is honored only when it is plain identifier-ish
+    /// ASCII (`[A-Za-z0-9._-]`, non-empty, ≤ 128 bytes — UUID/ULID/hex style); anything
+    /// else is replaced with a fresh UUID, so unparseable traffic can never forge
+    /// correlation ids or smuggle log-forging payloads through the request-id channel.
     pub fn use_request_id(mut self) -> Self {
         self.request_id = true;
         self
@@ -2255,9 +2260,15 @@ impl NestApplication {
             };
             // First `.layer` is innermost: Propagate wraps the router; Set wraps Propagate so the
             // request hits Set before Propagate (matches tower-http ServiceBuilder example order).
+            // The sanitizer wraps Set (outermost of the three): Set only fills in a MISSING
+            // header — it honors whatever the client sent — so an unacceptable client value
+            // must be stripped before Set sees it.
             router = router
                 .layer(PropagateRequestIdLayer::x_request_id())
-                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid));
+                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+                .layer(axum::middleware::from_fn(
+                    request_context::sanitize_request_id_middleware,
+                ));
         }
 
         if let Some(scrape_path) = metrics_path {
@@ -3132,13 +3143,7 @@ async fn redis_rate_allow(
 }
 
 fn client_ip_from_request(req: &axum::extract::Request, trusted_hops: Option<u16>) -> String {
-    crate::client_ip::best_effort_client_ip_from_request(
-        req.headers(),
-        req.extensions(),
-        trusted_hops,
-    )
-    .map(|ip| ip.to_string())
-    .unwrap_or_else(|| "unknown".to_string())
+    crate::client_ip::rate_limit_key_ip(req.headers(), req.extensions(), trusted_hops)
 }
 
 /// Middleware that records the configured trusted-proxy hop count on every request so the

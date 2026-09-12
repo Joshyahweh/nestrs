@@ -21,14 +21,32 @@ impl std::error::Error for CacheError {}
 
 #[derive(Debug, Clone)]
 pub enum CacheOptions {
-    InMemory,
+    /// In-memory store, capped at `max_entries` live entries (FIFO eviction
+    /// of the oldest-inserted entry when full; `0` disables caching — writes
+    /// are dropped). See [`Self::in_memory`] for the default cap.
+    InMemory { max_entries: usize },
     #[cfg(feature = "cache-redis")]
     Redis(RedisCacheOptions),
 }
 
+/// Default cap for [`CacheOptions::in_memory`]. Bounds the in-process cache
+/// so a flood of distinct keys (e.g. attacker-influenced cache keys) cannot
+/// grow the map without limit; raise it via
+/// [`CacheOptions::in_memory_with_max_entries`] when your working set is
+/// legitimately larger.
+pub const DEFAULT_MAX_IN_MEMORY_ENTRIES: usize = 10_000;
+
 impl CacheOptions {
     pub fn in_memory() -> Self {
-        Self::InMemory
+        Self::InMemory {
+            max_entries: DEFAULT_MAX_IN_MEMORY_ENTRIES,
+        }
+    }
+
+    /// In-memory store with a caller-chosen entry cap (FIFO eviction when
+    /// full). `0` disables caching — writes are dropped, reads miss.
+    pub fn in_memory_with_max_entries(max_entries: usize) -> Self {
+        Self::InMemory { max_entries }
     }
 
     #[cfg(feature = "cache-redis")]
@@ -63,6 +81,9 @@ impl RedisCacheOptions {
 struct CacheEntry {
     value: serde_json::Value,
     expires_at: Option<Instant>,
+    /// Insertion order (monotonic under the store's lock) — drives FIFO
+    /// eviction when the map is at its entry cap.
+    seq: u64,
 }
 
 impl CacheEntry {
@@ -78,9 +99,56 @@ impl CacheEntry {
     }
 }
 
+/// Bounded in-memory store: a map plus the bookkeeping needed to keep it
+/// at `max_entries`. Expired entries are removed lazily on read (same as
+/// before); the cap is what bounds memory when keys are never read again.
+struct InMemoryStore {
+    map: HashMap<String, CacheEntry>,
+    next_seq: u64,
+    max_entries: usize,
+}
+
+impl InMemoryStore {
+    /// Insert an entry, evicting the oldest-inserted live entry first when
+    /// the cap is full and `key` is new. An update to an existing key never
+    /// evicts (it takes the key's slot) and refreshes its FIFO position.
+    fn insert(&mut self, key: String, value: serde_json::Value, expires_at: Option<Instant>) {
+        if self.max_entries == 0 {
+            return; // caching disabled
+        }
+        if !self.map.contains_key(&key) && self.map.len() >= self.max_entries {
+            if let Some(oldest) = self
+                .map
+                .iter()
+                .min_by_key(|(_, e)| e.seq)
+                .map(|(k, _)| k.clone())
+            {
+                self.map.remove(&oldest);
+            }
+        }
+        self.map.insert(
+            key,
+            CacheEntry {
+                value,
+                expires_at,
+                seq: self.next_seq,
+            },
+        );
+        self.next_seq += 1;
+    }
+
+    fn get(&self, key: &str) -> Option<&CacheEntry> {
+        self.map.get(key)
+    }
+
+    fn remove(&mut self, key: &str) -> Option<CacheEntry> {
+        self.map.remove(key)
+    }
+}
+
 enum CacheBackend {
     InMemory {
-        inner: tokio::sync::RwLock<HashMap<String, CacheEntry>>,
+        inner: tokio::sync::RwLock<InMemoryStore>,
     },
     #[cfg(feature = "cache-redis")]
     Redis {
@@ -152,20 +220,20 @@ pub struct CacheService {
 #[nestrs::async_trait]
 impl Injectable for CacheService {
     fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
-        Arc::new(Self {
-            backend: CacheBackend::InMemory {
-                inner: tokio::sync::RwLock::new(HashMap::new()),
-            },
-        })
+        Arc::new(Self::from_options(CacheOptions::in_memory()).expect("in-memory cache builds"))
     }
 }
 
 impl CacheService {
     fn from_options(options: CacheOptions) -> Result<Self, CacheError> {
         match options {
-            CacheOptions::InMemory => Ok(Self {
+            CacheOptions::InMemory { max_entries } => Ok(Self {
                 backend: CacheBackend::InMemory {
-                    inner: tokio::sync::RwLock::new(HashMap::new()),
+                    inner: tokio::sync::RwLock::new(InMemoryStore {
+                        map: HashMap::new(),
+                        next_seq: 0,
+                        max_entries,
+                    }),
                 },
             }),
             #[cfg(feature = "cache-redis")]
@@ -257,8 +325,8 @@ impl CacheService {
         match &self.backend {
             CacheBackend::InMemory { inner } => {
                 let expires_at = ttl.and_then(|d| Instant::now().checked_add(d));
-                let mut guard = inner.write().await;
-                guard.insert(key.into(), CacheEntry { value, expires_at });
+                let mut store = inner.write().await;
+                store.insert(key.into(), value, expires_at);
             }
             #[cfg(feature = "cache-redis")]
             CacheBackend::Redis { .. } => {
@@ -417,5 +485,86 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(1_000)).await;
         assert!(cache.get_json("k").await.is_none());
         assert!(cache.ttl("k").await.is_none());
+    }
+
+    // --- bounded in-memory store (audit #46) ---------------------------------
+    //
+    // The in-memory backend used to be a plain unbounded HashMap: any flood
+    // of distinct keys (e.g. attacker-influenced cache keys) grew the map
+    // without limit — expired entries were only removed when THEIR key was
+    // read, so one-shot TTL'd entries leaked their memory forever.
+
+    async fn in_memory_len(cache: &CacheService) -> usize {
+        match &cache.backend {
+            CacheBackend::InMemory { inner, .. } => inner.read().await.map.len(),
+            #[cfg(feature = "cache-redis")]
+            CacheBackend::Redis { .. } => panic!("test constructs an in-memory cache"),
+        }
+    }
+
+    fn bounded_cache(max_entries: usize) -> CacheService {
+        CacheService::from_options(CacheOptions::in_memory_with_max_entries(max_entries))
+            .expect("in-memory cache builds")
+    }
+
+    #[tokio::test]
+    async fn in_memory_cache_evicts_oldest_at_capacity() {
+        let cache = bounded_cache(4);
+        for i in 0..6 {
+            cache
+                .set(format!("k{i}"), &serde_json::json!({"v": i}), None)
+                .await
+                .unwrap();
+        }
+        assert_eq!(in_memory_len(&cache).await, 4, "cap enforced");
+        // FIFO: the two oldest keys (k0, k1) were evicted; the newest survive.
+        assert!(cache.get_json("k0").await.is_none());
+        assert!(cache.get_json("k1").await.is_none());
+        assert_eq!(cache.get_json("k4").await.unwrap()["v"], 4);
+        assert_eq!(cache.get_json("k5").await.unwrap()["v"], 5);
+    }
+
+    #[tokio::test]
+    async fn in_memory_cache_update_at_capacity_does_not_evict() {
+        // Updating an existing key takes its own slot — no eviction, and the
+        // updated value is what reads see.
+        let cache = bounded_cache(2);
+        cache
+            .set("k1", &serde_json::json!({"v": 1}), None)
+            .await
+            .unwrap();
+        cache
+            .set("k2", &serde_json::json!({"v": 2}), None)
+            .await
+            .unwrap();
+        cache
+            .set("k1", &serde_json::json!({"v": 10}), None)
+            .await
+            .unwrap();
+        assert_eq!(in_memory_len(&cache).await, 2, "update evicts nothing");
+        assert_eq!(cache.get_json("k1").await.unwrap()["v"], 10);
+        assert_eq!(cache.get_json("k2").await.unwrap()["v"], 2);
+    }
+
+    #[tokio::test]
+    async fn in_memory_cache_zero_entries_disables_caching() {
+        let cache = bounded_cache(0);
+        cache
+            .set("k", &serde_json::json!({"v": 1}), None)
+            .await
+            .unwrap();
+        assert_eq!(in_memory_len(&cache).await, 0);
+        assert!(cache.get_json("k").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn in_memory_default_cap_is_the_documented_constant() {
+        let cache = CacheService::from_options(CacheOptions::in_memory()).unwrap();
+        let max = match &cache.backend {
+            CacheBackend::InMemory { inner, .. } => inner.read().await.max_entries,
+            #[cfg(feature = "cache-redis")]
+            CacheBackend::Redis { .. } => panic!("in-memory cache"),
+        };
+        assert_eq!(max, DEFAULT_MAX_IN_MEMORY_ENTRIES);
     }
 }

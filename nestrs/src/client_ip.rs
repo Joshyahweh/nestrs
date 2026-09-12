@@ -117,12 +117,30 @@ pub(crate) fn best_effort_client_ip(
         .and_then(parse_forwarded_ip)
 }
 
-pub(crate) fn best_effort_client_ip_from_request(
+/// Client IP for a rate-limit / throttle key, with the shared `"unknown"`
+/// fallback.
+///
+/// Resolution fails when no forwarded header parses and no peer address is
+/// available (e.g. a malformed `x-forwarded-for` under a trusted topology, or
+/// a transport without socket metadata). Every such request lands in ONE
+/// shared `unknown` bucket, coupling the rate limits of unrelated clients —
+/// so the fallback warns: operators need to see when their traffic is being
+/// keyed this way.
+pub(crate) fn rate_limit_key_ip(
     headers: &HeaderMap,
     extensions: &Extensions,
     trusted_hops: Option<u16>,
-) -> Option<IpAddr> {
+) -> String {
     best_effort_client_ip(headers, extensions, trusted_hops)
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                target: "nestrs::client_ip",
+                "no client IP could be resolved; rate limiting into the shared \"unknown\" \
+                 bucket (check trusted-proxy hops and x-forwarded-for health)"
+            );
+            "unknown".to_string()
+        })
 }
 
 #[async_trait::async_trait]
@@ -266,6 +284,46 @@ mod tests {
         assert_eq!(
             best_effort_client_ip(&HeaderMap::new(), &extensions, None),
             Some(IpAddr::from([127, 0, 0, 1]))
+        );
+    }
+
+    // --- rate-limit key fallback (audit #46) ---------------------------------
+    //
+    // When no IP resolves, rate limiting keys into the shared "unknown"
+    // bucket (fail-closed: unkeyable traffic is still limited). The key
+    // string is the observable contract; the warn is the operator signal.
+
+    #[test]
+    fn rate_limit_key_ip_formats_a_resolved_ip() {
+        let mut extensions = Extensions::new();
+        extensions.insert(MockConnectInfo(SocketAddr::from(([203, 0, 113, 9], 443))));
+
+        assert_eq!(
+            super::rate_limit_key_ip(&HeaderMap::new(), &extensions, None),
+            "203.0.113.9"
+        );
+    }
+
+    #[test]
+    fn rate_limit_key_ip_falls_back_to_unknown_when_unresolvable() {
+        // Nothing to resolve: no forwarded headers, no connection metadata.
+        // Also the shared helper used by the rate limiter, throttler, and
+        // throttler guard — one consistent fallback everywhere.
+        assert_eq!(
+            super::rate_limit_key_ip(&HeaderMap::new(), &Extensions::new(), None),
+            "unknown"
+        );
+        // A malformed XFF under a trusted topology is still attacker-
+        // controlled input: when the selected entry doesn't parse, the
+        // request must NOT be keyed as if it were the proxy's real IP.
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            &X_FORWARDED_FOR,
+            HeaderValue::from_static("not-an-ip"),
+        );
+        assert_eq!(
+            super::rate_limit_key_ip(&headers, &Extensions::new(), Some(1)),
+            "unknown"
         );
     }
 }

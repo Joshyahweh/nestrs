@@ -20,7 +20,15 @@ Set scope on a type with **`#[injectable(scope = "singleton" | "transient" | "re
 2. Mark providers with **`#[injectable(scope = "request")]`**.
 3. In handlers, use the **`RequestScoped<T>`** extractor to resolve `T` for that request.
 
-Without **`use_request_scope()`**, resolving a `Request`-scoped provider outside a request context **panics** (there is no cache).
+Without a request scope active, resolving a `Request`-scoped provider behaves like any other unresolvable provider: **`registry.get::<T>()` panics** (with a message naming the fixes) and **`registry.try_get::<T>()` returns `None`**.
+
+#### Background work: `spawn_with_request_scope`
+
+A bare `tokio::spawn` runs on a task with **no** request scope — task-locals do not cross `spawn`. Use [`spawn_with_request_scope`](https://docs.rs/nestrs-core/latest/nestrs_core/fn.spawn_with_request_scope.html) for background work that resolves `Request`-scoped providers:
+
+- Spawned **inside a request**, the child receives a **snapshot** of the request scope: it resolves the same request-scoped instances the request had at spawn time (including any in-flight transaction slot), while values constructed or inserted after the spawn stay private to whichever side created them.
+- Spawned **outside any scope** (scheduler, startup job), the child gets a fresh empty scope — request-scoped providers construct per spawned task and are isolated from every other task.
+- The ability / principal slots are **not** carried: row-level authz stays deny-closed in the spawned task unless you explicitly wrap the future with the ability helpers.
 
 ## Lifecycle hooks
 

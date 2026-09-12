@@ -179,7 +179,7 @@ impl<T: Entity> Repository<T> {
                     .into(),
             )
         })?;
-        let subject = Subject::Type(T::TABLE);
+        let subject = Subject::Type(T::TABLE.to_string());
         if !ability.can(&action, &subject) {
             return Ok(None);
         }
@@ -232,7 +232,7 @@ impl<T: Entity> Repository<T> {
         let ability = current_ability().ok_or_else(|| {
             sqlx::Error::Protocol("find_all_authorized requires install_policies_middleware".into())
         })?;
-        let subject = Subject::Type(T::TABLE);
+        let subject = Subject::Type(T::TABLE.to_string());
         if !ability.can(&action, &subject) {
             return Ok(Vec::new());
         }
@@ -294,7 +294,7 @@ impl<T: Entity> Repository<T> {
                 "find_all_authorized_paged requires install_policies_middleware".into(),
             )
         })?;
-        let subject = Subject::Type(T::TABLE);
+        let subject = Subject::Type(T::TABLE.to_string());
         if !ability.can(&action, &subject) {
             return Ok(Vec::new());
         }
@@ -487,7 +487,7 @@ impl<T: Entity> Repository<T> {
                     .into(),
             )
         })?;
-        let subject = Subject::Type(T::TABLE);
+        let subject = Subject::Type(T::TABLE.to_string());
         if !ability.can(&action, &subject) {
             return Ok(Vec::new());
         }
@@ -673,7 +673,7 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
     #[cfg(feature = "authz-row-level")]
     pub async fn create(&self, value: serde_json::Value) -> Result<T, sqlx::Error> {
         let ability = Self::required_ability("create")?;
-        let subject = Subject::Type(T::TABLE);
+        let subject = Subject::Type(T::TABLE.to_string());
         if !ability.can(&Action::Create, &subject) {
             return Err(sqlx::Error::Protocol(format!(
                 "policy denied: create on {}",
@@ -742,7 +742,7 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
         value: serde_json::Value,
     ) -> Result<Option<T>, sqlx::Error> {
         let ability = Self::required_ability("update")?;
-        let subject = Subject::Type(T::TABLE);
+        let subject = Subject::Type(T::TABLE.to_string());
         if !ability.can(&Action::Update, &subject) {
             return Err(sqlx::Error::Protocol(format!(
                 "policy denied: update on {}",
@@ -795,7 +795,7 @@ impl<T: Entity + Serialize + DeserializeOwned> CrudService<T> {
     #[cfg(feature = "authz-row-level")]
     pub async fn delete(&self, id: i64) -> Result<bool, sqlx::Error> {
         let ability = Self::required_ability("delete")?;
-        let subject = Subject::Type(T::TABLE);
+        let subject = Subject::Type(T::TABLE.to_string());
         if !ability.can(&Action::Delete, &subject) {
             return Err(sqlx::Error::Protocol(format!(
                 "policy denied: delete on {}",

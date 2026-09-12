@@ -227,3 +227,25 @@ async fn masking_recurses_into_arrays_of_objects() {
         assert!(item.get("title").is_some());
     }
 }
+
+#[tokio::test]
+async fn masking_masks_runtime_built_type_names_without_leaking() {
+    // Audit regression: the walker used to Box::leak the response's "type"
+    // value into a Subject::Type(&'static str) — one leaked allocation per
+    // masked object per response, with attacker-influenceable content.
+    // Subject::Type owns its name now; a runtime-built (non-'static) name
+    // masks identically and is freed with the subject.
+    let ability = ability_with_post_fields();
+    let type_name = format!("{}{}", "Po", "st");
+    let resp = json_response(
+        StatusCode::OK,
+        json!({ "type": type_name, "id": 1, "title": "hi", "body": "secret" }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let body = axum::body::to_bytes(masked.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert!(v.get("body").is_none(), "runtime-built type name still masks");
+    assert_eq!(v.get("title").and_then(|t| t.as_str()), Some("hi"));
+}

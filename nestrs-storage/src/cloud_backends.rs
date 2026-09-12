@@ -13,7 +13,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use object_store::path::Path as ObjPath;
+// 0.13+ splits the convenience methods (`get`/`put`/`delete`/`head`) into
+// `ObjectStoreExt`; the `ObjectStore as _` import keeps the trait-object
+// base methods usable on `Arc<dyn ObjectStore>`.
 use object_store::ObjectStore as _;
+use object_store::ObjectStoreExt as _;
 use serde::{Deserialize, Serialize};
 
 use crate::presign::PresignedUrl;

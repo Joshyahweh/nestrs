@@ -388,13 +388,11 @@ async fn enforce(
     req: Request,
     next: Next,
 ) -> Response {
-    let ip = crate::client_ip::best_effort_client_ip_from_request(
+    let ip = crate::client_ip::rate_limit_key_ip(
         req.headers(),
         req.extensions(),
         Some(state.trusted_proxy_hops),
-    )
-    .map(|ip| ip.to_string())
-    .unwrap_or_else(|| "unknown".to_string());
+    );
     let key = format!("{scope}:{ip}");
     match state.service.check(&key, &spec).await {
         ThrottleOutcome::Allowed { .. } => next.run(req).await,
@@ -492,13 +490,11 @@ impl crate::core::CanActivate for ThrottlerGuard {
             .get::<crate::client_ip::TrustedProxyHops>()
             .map(|h| h.0)
             .unwrap_or(self.trusted_proxy_hops);
-        let ip = crate::client_ip::best_effort_client_ip_from_request(
+        let ip = crate::client_ip::rate_limit_key_ip(
             &parts.headers,
             &parts.extensions,
             Some(trusted_proxy_hops),
-        )
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        );
         match service.check(&format!("{handler}:{ip}"), &spec).await {
             ThrottleOutcome::Allowed { .. } => Ok(()),
             ThrottleOutcome::Limited { retry_after_secs } => Err(GuardError::too_many_requests(

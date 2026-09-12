@@ -116,6 +116,7 @@ nestrs::cache::CacheModule::register
 nestrs::cache::CacheOptions
 nestrs::cache::CacheOptions::InMemory
 nestrs::cache::CacheOptions::Redis
+nestrs::cache::CacheOptions::in_memory
 nestrs::cache::CacheService
 nestrs::cache::RedisCacheOptions
 nestrs::client_ip::ClientIp

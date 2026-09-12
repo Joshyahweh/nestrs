@@ -5,8 +5,6 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
-homepage.workspace = true
-readme = "README.md"
 description = "WebSocket extension crate for nestrs."
 keywords = ["websocket", "axum", "nest", "tower", "async"]
 categories = ["network-programming", "web-programming", "asynchronous"]
@@ -14,7 +12,7 @@ categories = ["network-programming", "web-programming", "asynchronous"]
 [dependencies]
 async-trait = "0.1"
 axum = { workspace = true, features = ["ws"] }
-nestrs-core = { version = "0.5.2", path = "../nestrs-core" }
+nestrs-core = { version = "1.0.0", path = "../nestrs-core" }
 tokio = { workspace = true, features = ["sync", "time"] }
 futures-util = { version = "0.3", features = ["sink"] }
 serde = { version = "1", features = ["derive"] }

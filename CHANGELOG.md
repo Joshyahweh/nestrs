@@ -7,6 +7,29 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — production/security audit: DI dependency recording took the global write lock on every resolution
+
+Every `registry.get` executed inside a provider construction (inside
+`construct` or a `useFactory` closure) recorded the
+`constructor -> dependency` edge into the **process-global** dependency
+graph under a `RwLock` **write** lock — even when the edge had long
+since been recorded. Request-scoped and transient providers are
+constructed per request, so every warm request re-took the same global
+write lock for each DI dependency, serializing resolution across all
+threads and tasks on one graph lock.
+
+- **Behavior:** `record_provider_dependency` now double-checks under the
+  read lock first — an already-recorded edge (the steady-state case on a
+  warm process) returns without ever taking the write lock. The write
+  lock is taken only the first time an edge is seen, and its existing
+  re-check-before-push makes racing first recordings safe (no duplicate
+  edges).
+- **No migration.** Lock-contention fix only; the recorded graph contents
+  are byte-identical and no public API changed (snapshot unchanged).
+- **Tests:** nestrs-core unit tests pin edge idempotency across repeated
+  recordings (the read-locked fast path) and dedup under 16 concurrent
+  first-time recorders (the double-checked write arm).
+
 ### Fixed — production/security audit: useValue/useFactory providers could not run lifecycle hooks
 
 `register_use_value` / `register_use_factory` accepted any

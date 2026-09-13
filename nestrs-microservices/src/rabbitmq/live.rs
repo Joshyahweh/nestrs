@@ -101,7 +101,7 @@ impl Transport for RabbitMqTransport {
         let reply_name = format!("nestrs.reply.{}", Uuid::new_v4());
         consume_ch
             .queue_declare(
-                &reply_name,
+                reply_name.as_str().into(),
                 QueueDeclareOptions {
                     exclusive: true,
                     auto_delete: true,
@@ -116,8 +116,8 @@ impl Transport for RabbitMqTransport {
 
         let mut consumer = consume_ch
             .basic_consume(
-                &reply_name,
-                "nestrs_reply",
+                reply_name.as_str().into(),
+                "nestrs_reply".into(),
                 BasicConsumeOptions {
                     no_ack: false,
                     ..Default::default()
@@ -143,8 +143,8 @@ impl Transport for RabbitMqTransport {
             .map_err(|e| TransportError::new(format!("rabbitmq publish channel failed: {e}")))?;
         pub_ch
             .basic_publish(
-                "",
-                &self.options.work_queue,
+                "".into(),
+                self.options.work_queue.as_str().into(),
                 BasicPublishOptions::default(),
                 &body,
                 BasicProperties::default(),
@@ -200,8 +200,8 @@ impl Transport for RabbitMqTransport {
         let body = serde_json::to_vec(&wire)
             .map_err(|e| TransportError::new(format!("serialize event failed: {e}")))?;
         ch.basic_publish(
-            "",
-            &self.options.work_queue,
+            "".into(),
+            self.options.work_queue.as_str().into(),
             BasicPublishOptions::default(),
             &body,
             BasicProperties::default(),
@@ -298,7 +298,7 @@ impl RabbitMqMicroserviceServer {
 
         channel
             .queue_declare(
-                &self.options.work_queue,
+                self.options.work_queue.as_str().into(),
                 QueueDeclareOptions {
                     durable: self.options.durable_queue,
                     ..Default::default()
@@ -315,8 +315,8 @@ impl RabbitMqMicroserviceServer {
 
         let mut consumer = channel
             .basic_consume(
-                &self.options.work_queue,
-                "nestrs_microservice",
+                self.options.work_queue.as_str().into(),
+                "nestrs_microservice".into(),
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
@@ -413,8 +413,8 @@ impl RabbitMqMicroserviceServer {
                                         if let Ok(bytes) = serde_json::to_vec(&wire) {
                                             if let Err(e) = reply_ch
                                                 .basic_publish(
-                                                    "",
-                                                    &reply_q,
+                                                    "".into(),
+                                                    reply_q.as_str().into(),
                                                     BasicPublishOptions::default(),
                                                     &bytes,
                                                     BasicProperties::default(),
@@ -459,8 +459,8 @@ impl RabbitMqMicroserviceServer {
                                 if let Ok(bytes) = serde_json::to_vec(&wire) {
                                     if let Err(e) = reply_ch
                                         .basic_publish(
-                                            "",
-                                            &reply_q,
+                                            "".into(),
+                                            reply_q.as_str().into(),
                                             BasicPublishOptions::default(),
                                             &bytes,
                                             BasicProperties::default(),

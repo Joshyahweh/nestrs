@@ -134,6 +134,10 @@ jobs:
           sleep 60
           publish_pkg nestrs-microservices
           sleep 60
+          publish_pkg nestrs-oauth2
+          sleep 60
+          publish_pkg nestrs-storage
+          sleep 60
           publish_pkg nestrs
           sleep 60
           publish_pkg nestrs-prisma

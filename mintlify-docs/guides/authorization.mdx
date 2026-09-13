@@ -650,8 +650,8 @@ Behavior, end to end:
 - A create naming someone else as author → `policy denied: create on posts (row predicate)` — the candidate row is judged before it exists.
 - Migration table shape: `posts (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)`; seed initial rows with `Repository::<Post>::new(pool).repo_crud_create(&post)`.
 
-  </Accordion>
-  <Accordion title="Field masking on the way out">
+</Accordion>
+<Accordion title="Field masking on the way out">
 
 Restrict a wire subject to `type`, `id`, and `title`, and let the interceptor strip everything else from JSON responses:
 

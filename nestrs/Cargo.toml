@@ -133,10 +133,10 @@ redis = { version = "0.29", features = ["tokio-comp"], optional = true }
 async-nats = { version = "0.47", optional = true }
 tokio-cron-scheduler = { version = "0.15.1", optional = true }
 linkme = { version = "0.3", optional = true }
-opentelemetry = { version = "0.31.0", features = ["trace"], optional = true }
-opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"], optional = true }
-opentelemetry-otlp = { version = "0.31.1", default-features = false, features = ["trace", "grpc-tonic"], optional = true }
-tracing-opentelemetry = { version = "0.32.1", default-features = false, optional = true }
+opentelemetry = { version = "0.32.0", features = ["trace"], optional = true }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace", "grpc-tonic"], optional = true }
+tracing-opentelemetry = { version = "0.33.0", default-features = false, optional = true }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "macros", "postgres", "sqlite"], optional = true }
 ## Query-string parsing for the `#[nestrs::crud]` proc-macro's list endpoint
 ## (`?filter[field]=x&sort=field:DIR&page=2&per_page=10`). Bracketed-key syntax

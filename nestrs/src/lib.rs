@@ -29,7 +29,13 @@ static OTEL_INSTALLED: OnceLock<()> = OnceLock::new();
 
 fn init_prometheus_recorder() -> &'static PrometheusHandle {
     PROMETHEUS_HANDLE.get_or_init(|| {
-        let handle = PrometheusBuilder::new()
+        // nestrs owns the single global `metrics` recorder slot with a
+        // fanout (see `metrics_export`): the Prometheus recorder registers
+        // as a fanout member instead of claiming the global slot itself,
+        // so the OTLP metrics bridge (`OpenTelemetryConfig::metrics()`)
+        // can join alongside it.
+        metrics_export::ensure_global_composite();
+        let recorder = PrometheusBuilder::new()
             .set_buckets_for_metric(
                 Matcher::Full("http_request_duration_seconds".to_owned()),
                 &[
@@ -37,14 +43,16 @@ fn init_prometheus_recorder() -> &'static PrometheusHandle {
                 ],
             )
             .expect("nestrs: invalid Prometheus histogram buckets")
-            .install_recorder()
-            .expect("nestrs: failed to install Prometheus metrics recorder");
+            .build_recorder();
+        let handle = recorder.handle();
+        metrics_export::add_recorder_member(Arc::new(recorder));
+        metrics_export::describe_framework_metrics();
         let upkeep = handle.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(5));
             upkeep.run_upkeep();
         });
-        handle.clone()
+        handle
     })
 }
 
@@ -106,6 +114,10 @@ mod i18n;
 mod interceptor;
 #[cfg(feature = "authz")]
 mod masking;
+/// Composite metrics export: the nestrs-owned fanout that claims the
+/// global `metrics` recorder slot and forwards to every installed backend
+/// (Prometheus recorder, and — with `otel` — the OTLP bridge).
+mod metrics_export;
 #[cfg(feature = "mongo")]
 mod mongo;
 mod multipart;
@@ -191,6 +203,13 @@ pub use interceptor::{Interceptor, LoggingInterceptor};
 pub use masking::{
     json_response, mask_response, mask_value, MaskingConfig, PolicyMaskingInterceptor,
 };
+/// The `metrics` facade this crate records through — re-exported so apps
+/// can instrument with `nestrs::metrics::counter!(...)` without adding the
+/// dependency themselves. Every facade instrument fans out to all enabled
+/// backends: the Prometheus `/metrics` recorder (see
+/// [`NestApplication::enable_metrics`]), and — with the `otel`
+/// feature plus `OpenTelemetryConfig::metrics()` — the OTLP pipeline.
+pub use metrics;
 #[cfg(feature = "mongo")]
 pub use mongo::{MongoModule, MongoService};
 #[cfg(feature = "mvc")]
@@ -199,6 +218,10 @@ pub use mvc::{MvcModule, MvcService};
 pub use oauth2_bridge::{
     install_oauth2_middleware, OAuth2Identity, OAuth2Principal, OAuth2PrincipalMissing,
 };
+/// The OpenTelemetry API — for apps that build their own instruments on
+/// the same OTLP pipeline as nestrs' (feature: `otel`).
+#[cfg(feature = "otel")]
+pub use opentelemetry;
 #[cfg(feature = "otel")]
 pub use otel::{OpenTelemetryConfig, OtlpProtocol};
 pub use pipes::ParseIntPipe;
@@ -521,11 +544,37 @@ fn install_tracing_subscriber_otel(
 ) -> Result<(), String> {
     use tracing_subscriber::prelude::*;
 
+    let wants_metrics = crate::otel::wants_metrics(&otel);
+    let wants_logs = crate::otel::wants_logs(&otel);
+
     let filter = tracing_env_filter(&config);
-    let tracer = crate::otel::install_otlp_tracer(otel)?;
+    let tracer = crate::otel::install_otlp_tracer(otel.clone())?;
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
-    let registry = tracing_subscriber::registry().with(filter).with(otel_layer);
+    // Metrics: build the OTLP pipeline and join the facade fanout as a
+    // member alongside (or instead of) the Prometheus recorder.
+    if wants_metrics {
+        let meter = crate::otel::install_otlp_meter(&otel)?;
+        metrics_export::ensure_global_composite();
+        metrics_export::add_recorder_member(Arc::new(metrics_export::OtelMetricsBridge::new(
+            meter,
+        )));
+        metrics_export::describe_framework_metrics();
+    }
+
+    // Logs: bridge every `tracing::*!` event into the OTLP log pipeline.
+    // `Option<L>` implements `Layer`, so the registry shape stays uniform.
+    let logs_layer = if wants_logs {
+        let provider = crate::otel::install_otlp_logger(&otel)?;
+        Some(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&provider))
+    } else {
+        None
+    };
+
+    let registry = tracing_subscriber::registry()
+        .with(filter)
+        .with(otel_layer)
+        .with(logs_layer);
     let result = match config.format {
         TracingFormat::Pretty => registry
             .with(tracing_subscriber::fmt::layer().pretty())
@@ -1376,8 +1425,14 @@ impl MicroserviceApplication {
 
         run_destroy_phase(&registry, hook_timeout).await;
         #[cfg(feature = "otel")]
-        if OTEL_INSTALLED.get().is_some() {
-            crate::otel::shutdown_tracer_provider();
+        {
+            // Meter/logger shutdowns are no-ops when those pipelines were
+            // never installed (their providers are absent).
+            crate::otel::shutdown_meter_provider();
+            crate::otel::shutdown_logger_provider();
+            if OTEL_INSTALLED.get().is_some() {
+                crate::otel::shutdown_tracer_provider();
+            }
         }
     }
 }
@@ -1787,6 +1842,10 @@ impl NestApplication {
     /// Exposes `GET` at `path` (default `"/metrics"` if you pass an empty string) at the **server root**,
     /// not under [`Self::enable_uri_versioning`] or [`Self::set_global_prefix`]. Registers:
     /// `http_requests_total{method,status}`, `http_request_duration_seconds{method}`, `http_requests_in_flight`.
+    ///
+    /// With the `otel` feature, `OpenTelemetryConfig::metrics()` additionally fans the **same**
+    /// instruments (yours and the framework's) out over OTLP — both backends run side by side
+    /// from one recording surface.
     pub fn enable_metrics(mut self, path: impl Into<String>) -> Self {
         let s = path.into();
         let p = if s.trim().is_empty() {
@@ -1892,7 +1951,11 @@ impl NestApplication {
         self
     }
 
-    /// Like [`Self::configure_tracing`], but also exports spans to an OTLP collector (OpenTelemetry).
+    /// Like [`Self::configure_tracing`], but also exports to an OTLP collector (OpenTelemetry):
+    /// **spans** always; **metrics** and **logs** when opted into on the
+    /// [`OpenTelemetryConfig`] (`.metrics()` / `.logs()`). Metrics fan out to
+    /// OTLP *in addition to* the Prometheus `/metrics` recorder when both are
+    /// enabled — one recording surface, two backends.
     ///
     /// Feature-gated behind `otel`.
     #[cfg(feature = "otel")]
@@ -2509,8 +2572,14 @@ impl NestApplication {
 
         run_destroy_phase(&registry, shutdown_hook_timeout).await;
         #[cfg(feature = "otel")]
-        if OTEL_INSTALLED.get().is_some() {
-            crate::otel::shutdown_tracer_provider();
+        {
+            // Meter/logger shutdowns are no-ops when those pipelines were
+            // never installed (their providers are absent).
+            crate::otel::shutdown_meter_provider();
+            crate::otel::shutdown_logger_provider();
+            if OTEL_INSTALLED.get().is_some() {
+                crate::otel::shutdown_tracer_provider();
+            }
         }
     }
 

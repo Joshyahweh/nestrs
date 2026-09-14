@@ -7,6 +7,47 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — full-stack OTLP observability (traces + metrics + logs, feature `otel`)
+
+- **OTLP metrics export** — `OpenTelemetryConfig::metrics()` pushes every
+  `metrics`-facade instrument (the framework's RED metrics *and* your own)
+  to the OTLP collector via a `SdkMeterProvider` + `PeriodicReader`
+  pipeline (`otel::install_otlp_meter` / `shutdown_meter_provider` for
+  direct lifecycle control).
+- **OTLP logs export** — `OpenTelemetryConfig::logs()` bridges the
+  `tracing` facade into the OTLP log pipeline
+  (`opentelemetry-appender-tracing`), so every `tracing::*!` event becomes
+  an OpenTelemetry log record correlated with the active trace/span
+  (`otel::install_otlp_logger` / `shutdown_logger_provider`).
+- **Composite metrics fan-out** — nestrs now owns the process-global
+  `metrics` recorder slot with a fan-out recorder. `enable_metrics` and the
+  OTLP metrics bridge register as members in any order; an app with both
+  gets Prometheus pull **and** OTLP push from one recording surface
+  (labels → OTel attributes, `Unit::Seconds`→`s` / `Unit::Count`→`1`,
+  facade gauge deltas accumulate to absolute OTel gauges, counter
+  `absolute` maps to monotonic `add(v - last)`).
+- **`nestrs::metrics`** — the `metrics` facade re-exported so apps can
+  instrument with `nestrs::metrics::counter!(...)` without adding the
+  dependency; with `otel`, `nestrs::opentelemetry` re-exports the OTel API
+  for custom instruments on the same pipeline.
+- Framework RED metrics are now declared (unit + description) via
+  `metrics::describe_*` so both backends render them with metadata from the
+  first scrape/export.
+- Graceful shutdown (`listen*` paths) flushes and stops the meter and
+  logger pipelines alongside the existing tracer shutdown.
+
+### Tests — 3 new (unit fan-out/bridge + integration dual-export)
+
+- `metrics_export` unit tests: fan-out forwards registrations and
+  recordings to every member (counters, gauges, histograms); the OTel
+  bridge exports counters (u64 sums with attributes), gauge
+  delta→absolute conversion, and histogram records through the SDK's
+  `InMemoryMetricExporter`.
+- `tests/otel_metrics.rs`: offline install of the meter/logger pipelines
+  from async context, and a dual-export integration test — OTLP opt-ins +
+  `enable_metrics` + real middleware traffic renders the framework RED
+  metrics at `/metrics` with both backends attached.
+
 ## [1.0.0] - 2026-09-12
 
 First stable release. Everything since 0.5.2 is in this version: the

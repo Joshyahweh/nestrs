@@ -97,6 +97,8 @@ Use decorators when liveness should depend on something the app actually does; u
 
 Enable the **`otel`** feature and use [`configure_tracing_opentelemetry`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.configure_tracing_opentelemetry) instead of (or after the same pattern as) `configure_tracing`. This keeps [`TracingConfig`](https://docs.rs/nestrs/latest/nestrs/struct.TracingConfig.html) formatting and adds a `tracing-opentelemetry` layer that exports spans (including `http.server.request`) to an OTLP endpoint.
 
+**Spans export by default; metrics and logs are per-signal opt-ins** on [`OpenTelemetryConfig`](https://docs.rs/nestrs/latest/nestrs/otel/struct.OpenTelemetryConfig.html): `.metrics()` pushes every `metrics`-facade instrument to the collector, `.logs()` bridges every `tracing::*!` event into the OTLP log pipeline (correlated with the active trace/span). Local stdout output is unchanged — OTLP is an additional destination.
+
 **`Cargo.toml`:**
 
 ```toml
@@ -117,7 +119,9 @@ async fn main() {
     let tracing = TracingConfig::builder().format(TracingFormat::Json);
     let otel = OpenTelemetryConfig::new("my-service")
         .endpoint("http://localhost:4317")
-        .sample_ratio(1.0);
+        .sample_ratio(1.0)
+        .metrics()   // also push metrics over OTLP
+        .logs();     // also push logs over OTLP
 
     NestFactory::create::<AppModule>()
         .configure_tracing_opentelemetry(tracing, otel)
@@ -129,9 +133,16 @@ async fn main() {
 }
 ```
 
+### Dual metrics export (Prometheus pull + OTLP push)
+
+There is exactly **one** metrics recording surface — the `metrics` facade — and nestrs owns it with a fan-out recorder. `enable_metrics("/metrics")` registers the Prometheus backend; `OpenTelemetryConfig::metrics()` registers the OTLP backend. Both can run side by side (in either order): the framework's RED metrics **and** your own instruments (`nestrs::metrics::counter!(...)` — the facade is re-exported, no extra dependency) land identical series in Prometheus and in the collector. Facade labels become OTel attributes 1:1, and units translate (`Unit::Seconds` → `s`, `Unit::Count` → `1`).
+
+**Runtime notes:** the OTLP pipelines are lazy (a missing collector never fails startup) but must be **constructed from async context** — call `configure_tracing_opentelemetry` from `#[tokio::main]`, as above. Metric pushes are periodic (every 60 s by default; `OTEL_METRIC_EXPORT_INTERVAL` in ms). The `listen*` methods flush and stop all OTLP pipelines on graceful shutdown.
+
 ### Environment variables
 
 - **`OTEL_EXPORTER_OTLP_ENDPOINT`**: used when `OpenTelemetryConfig::endpoint(...)` is not set (default collector address falls back to `http://localhost:4317`).
+- **`OTEL_METRIC_EXPORT_INTERVAL`**: OTLP metric push cadence in milliseconds (default 60000).
 
 See also: [Production runbook](production.md) for deployment-oriented notes.
 
@@ -142,6 +153,8 @@ See also: [Production runbook](production.md) for deployment-oriented notes.
 | No log lines at all | `configure_tracing` must run **before** `listen`; verify `NESTRS_LOG` / `RUST_LOG` and that nothing else installs a conflicting subscriber. |
 | `/metrics` floods access logs | Add `/metrics` to `RequestTracingOptions::skip_paths` (shown above). |
 | Spans missing in Jaeger/Tempo | Confirm `otel` feature, endpoint URL, and sampling ratio; verify the collector receives traffic on the expected gRPC/HTTP port. |
+| OTel metrics/logs missing | Confirm `.metrics()` / `.logs()` on the config (spans export without them). Metric pushes are periodic — wait one `OTEL_METRIC_EXPORT_INTERVAL` before concluding failure. |
+| `there is no reactor running` panic | OTLP pipelines need a current Tokio reactor at construction: call `configure_tracing_opentelemetry` from inside `#[tokio::main]`, not from plain `fn main`. |
 | High cardinality in `http.route` | Expected: path is literal at this layer; add a custom layer or business metric if you need template-level labels. |
 
 ## Environment variables (quick reference)
@@ -151,6 +164,7 @@ See also: [Production runbook](production.md) for deployment-oriented notes.
 | `NESTRS_LOG` | Preferred filter directive for nestrs tracing when set (overrides default in `TracingConfig`). |
 | `RUST_LOG` | Fallback if `NESTRS_LOG` is unset (standard `tracing-subscriber` semantics). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector address when not set explicitly in `OpenTelemetryConfig`. |
+| `OTEL_METRIC_EXPORT_INTERVAL` | OTLP metric push cadence in ms (default 60000). | |
 
 ## Local development vs production
 

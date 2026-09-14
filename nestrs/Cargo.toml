@@ -61,6 +61,7 @@ otel = [
   "dep:opentelemetry_sdk",
   "dep:opentelemetry-otlp",
   "dep:tracing-opentelemetry",
+  "dep:opentelemetry-appender-tracing",
 ]
 ## First-class authentication: `JwtService` (EdDSA via `jsonwebtoken`), `Argon2idPasswordHasher`,
 ## `Principal`/`OptionalPrincipal` extractors, `AuthnGuard` (with `#[roles(...)]` enforcement), and
@@ -135,8 +136,12 @@ tokio-cron-scheduler = { version = "0.15.1", optional = true }
 linkme = { version = "0.3", optional = true }
 opentelemetry = { version = "0.32.0", features = ["trace"], optional = true }
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"], optional = true }
-opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace", "grpc-tonic"], optional = true }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace", "metrics", "logs", "grpc-tonic"], optional = true }
 tracing-opentelemetry = { version = "0.33.0", default-features = false, optional = true }
+# Bridges the `tracing` facade to the OTLP logger provider: with
+# `OpenTelemetryConfig::logs()`, every tracing event additionally becomes an
+# OpenTelemetry log record exported over the same OTLP pipeline as traces.
+opentelemetry-appender-tracing = { version = "0.32", optional = true }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "any", "macros", "postgres", "sqlite"], optional = true }
 ## Query-string parsing for the `#[nestrs::crud]` proc-macro's list endpoint
 ## (`?filter[field]=x&sort=field:DIR&page=2&per_page=10`). Bracketed-key syntax
@@ -178,6 +183,10 @@ josekit = "0.10"
 jsonwebtoken = { workspace = true }
 url = "2"
 wiremock = "0.6"
+# In-memory OTel metric/log exporters for offline bridge tests
+# (`tests/otel_metrics.rs` + in-module tests). Feature-unifies with the
+# optional main dependency whenever the `otel` feature is enabled.
+opentelemetry_sdk = { version = "0.32.1", features = ["testing"] }
 
 [[bench]]
 name = "router_hot_path"

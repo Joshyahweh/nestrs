@@ -23,6 +23,7 @@ nestrs::NestApplication::enable_api_versioning
 nestrs::NestApplication::enable_default_fallback
 nestrs::NestApplication::enable_graphql_with_path
 nestrs::NestApplication::enable_health_check
+nestrs::NestApplication::enable_metrics
 nestrs::NestApplication::enable_openapi_with_options
 nestrs::NestApplication::enable_production_errors
 nestrs::NestApplication::enable_readiness_check
@@ -222,7 +223,11 @@ nestrs::otel
 nestrs::otel::OpenTelemetryConfig
 nestrs::otel::OtlpProtocol
 nestrs::otel::OtlpProtocol::Grpc
+nestrs::otel::install_otlp_logger
+nestrs::otel::install_otlp_meter
 nestrs::otel::install_otlp_tracer
+nestrs::otel::shutdown_logger_provider
+nestrs::otel::shutdown_meter_provider
 nestrs::otel::shutdown_tracer_provider
 nestrs::pipes::ParseIntPipe
 nestrs::pipes::TrimPipe

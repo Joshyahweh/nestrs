@@ -40,13 +40,19 @@ SNAPSHOT_DIR = REPO_ROOT / "tests" / "api-snapshots"
 # Crates the snapshot covers. Matches STABILITY.md "primarily" list plus
 # the extension crates named in the same paragraph. nestrs-macros is
 # excluded: proc-macro symbol surface is unstable across rustc versions
-# and not what users depend on.
+# and not what users depend on. nestrs-oauth2 was added when its
+# `authorization-server` feature landed: published at 1.0.0, a large
+# security-sensitive public surface, and no snapshot meant no drift gate
+# at all. The remaining published extension crates (nestrs-openapi,
+# nestrs-microservices, nestrs-storage, ...) are a deliberate gap for a
+# future decision, not an oversight.
 TARGET_CRATES = [
     "nestrs",
     "nestrs-core",
     "nestrs-graphql",
     "nestrs-ws",
     "nestrs-mcp",
+    "nestrs-oauth2",
 ]
 
 

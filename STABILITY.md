@@ -61,7 +61,7 @@ CI runs `cargo test --workspace --all-features`, which enables `test-hooks` for 
 
 ## Public-API snapshot test (CI gate)
 
-The **`public-api-snapshot`** job in **`.github/workflows/ci.yml`** regenerates `tests/api-snapshots/<crate>.txt` for each published crate (`nestrs`, `nestrs-core`, `nestrs-graphql`, `nestrs-ws`, `nestrs-mcp`) by reading `rustdoc --output-format json` on the nightly toolchain (rustdoc JSON is nightly-only), and fails the build on drift from the committed snapshots. The extractor (`scripts/ci/public_api_snapshot.py`) filters out `#[doc(hidden)]` items and `__nestrs_*` macro-internal helpers — both are explicitly **not** stable per this document.
+The **`public-api-snapshot`** job in **`.github/workflows/ci.yml`** regenerates `tests/api-snapshots/<crate>.txt` for each covered crate (`nestrs`, `nestrs-core`, `nestrs-graphql`, `nestrs-ws`, `nestrs-mcp`, `nestrs-oauth2` — the last added alongside its `authorization-server` feature) by reading `rustdoc --output-format json` on the nightly toolchain (rustdoc JSON is nightly-only), and fails the build on drift from the committed snapshots. The extractor (`scripts/ci/public_api_snapshot.py`) filters out `#[doc(hidden)]` items and `__nestrs_*` macro-internal helpers — both are explicitly **not** stable per this document.
 
 **Escape hatch (intended for non-breaking expansion):** edit the affected snapshot file directly and commit alongside the code change, with a one-line note in the PR description explaining the additions.
 

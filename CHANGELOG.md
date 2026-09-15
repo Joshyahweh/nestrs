@@ -7,6 +7,73 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — nestrs as an OAuth2 **authorization server** (`nestrs-oauth2`, feature `authorization-server`)
+
+The third OAuth2 role alongside the existing client and resource
+server: the IdP itself (RFC 6749), for apps that want nestrs to be
+their identity provider — first-party auth without an external
+Auth0/Keycloak. Issues **Ed25519-signed (`EdDSA`) access JWTs** with
+the standard claims plus `scope`/`client_id`, verifiable by any
+compliant resource server including this crate's own
+`JwtVerifier`/`JwksCache`.
+
+- **Endpoints** — `GET /oauth/authorize` (§4.1.1 + PKCE RFC 7636,
+  S256 only), `POST /oauth/token` (authorization_code, rotating
+  refresh_token, client_credentials), `POST /oauth/introspect`
+  (RFC 7662), `POST /oauth/revoke` (RFC 7009), RFC 8414 discovery at
+  `/.well-known/oauth-authorization-server`, and `/.well-known/jwks.json`
+  (Ed25519 `OKP` JWK). Mount via `OAuth2AuthorizationServerModule`
+  (nestrs DI) or `routes::router` into any axum app; every path and TTL
+  is configurable (`AuthorizationServerConfig` builders).
+- **Security model** — PKCE S256 required for public clients and (by
+  default, OAuth 2.1 posture) confidential ones too; authorization
+  codes are single-use, 32 random bytes, stored SHA-256-hashed, and
+  **replaying one revokes the refresh family it seeded**; refresh
+  tokens rotate on every use with **reuse detection** — a reused token
+  is theft with high probability, so the entire family dies, including
+  outstanding access JWTs (via the `jti` revocation list). Client
+  secrets and PKCE verifiers are stored hashed and compared
+  constant-time.
+- **Open-redirect safe** — `/authorize` never redirects until client +
+  `redirect_uri` are validated, and then only to a byte-for-byte
+  registered URI; client-auth mistakes (unknown client, wrong secret,
+  Basic+form at once, mismatched ids) are answered in place, never via
+  redirect.
+- **Pluggable state** — clients, codes, refresh tokens, and the
+  access-token revocation list live behind four small async traits
+  (`stores`); in-memory implementations ship for dev/tests/single
+  instance, Postgres/Redis-backed ones compose for production scale.
+  Codes and refresh tokens are only ever handled hashed — a store
+  compromise yields unredeemable digests.
+
+### Fixed — introspection and revocation never validated access JWTs (`authorization-server`)
+
+jsonwebtoken 10's `Validation::new(EdDSA)` defaults `validate_aud: true`
+with no expected audience, and per RFC 7519 rejects any token carrying
+an `aud` claim against an empty expected set — so every
+`/oauth/introspect` call returned `active: false` for valid access
+JWTs, and `/oauth/revoke` silently no-oped for them. Both endpoints now
+disable audience validation: the signature check against the server's
+own key is the authenticity proof, and `aud` is client-specific data
+echoed back (RFC 7662 §2.2), not something these server-side endpoints
+validate against a configured value. Caught by the new integration
+suite's introspection round-trips.
+
+### Tests — 22 integration + 4 model tests (feature `authorization-server`)
+
+- Every security-critical transition: PKCE enforcement (missing/plain
+  verifier/wrong verifier burns the code), single-use codes with
+  replay → family revocation (while a *different* family survives),
+  refresh rotation + reuse → family + access-JWT death, scope narrowing
+  allowed / widening rejected, open-redirect matrix (unregistered URI,
+  unknown client, query-string mismatches, cross-client redirect),
+  client-auth failures (401 + `WWW-Authenticate`, Basic+form rejection,
+  public-client-with-secret), revocation semantics (idempotent, kills
+  refresh families), refresh-token client binding, RFC 8414 discovery,
+  the Ed25519 `OKP` JWKS document, and a full round-trip: tokens minted
+  by the authorization server verified over real HTTP by this crate's
+  own `JwtVerifier::from_url` (tampered signature rejected).
+
 ### Added — full-stack OTLP observability (traces + metrics + logs, feature `otel`)
 
 - **OTLP metrics export** — `OpenTelemetryConfig::metrics()` pushes every

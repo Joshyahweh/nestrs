@@ -1,12 +1,16 @@
 //! OAuth2 client (4 grant types incl. PKCE), JWKS-backed resource server,
-//! social providers (Google / GitHub / Microsoft / Apple), and
-//! `OAuth2Guard` for nestrs route protection.
+//! social providers (Google / GitHub / Microsoft / Apple),
+//! `OAuth2Guard` for nestrs route protection, and — behind the
+//! `authorization-server` feature — nestrs **as the IdP itself**:
+//! issue Ed25519-signed tokens, not just verify them.
 //!
 //! Gated by feature flags so users opt in to the surface they need.
 //! Default: no features. To use the OAuth2 client, opt in to `client`.
 //! To use the JWKS resource server, opt in to `resource-server`. To use
 //! the social provider wrappers, opt in to `social`. The guard + module
-//! are only meaningful with at least one of the above.
+//! are only meaningful with at least one of the above. To run the full
+//! authorization server (authorize/token/introspect/revoke/discovery/
+//! JWKS), opt in to `authorization-server`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -14,6 +18,9 @@ pub mod client;
 pub mod error;
 pub mod resource_server;
 pub mod social;
+
+#[cfg(feature = "authorization-server")]
+pub mod authorization_server;
 
 #[cfg(feature = "guard")]
 pub mod guard;

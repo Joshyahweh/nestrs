@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 readme = "README.md"
-description = "OAuth2 client (4 grant types incl. PKCE) + JWKS-backed resource server + social providers (Google/GitHub/Microsoft/Apple) + OAuth2Guard for nestrs."
+description = "OAuth2 client (4 grant types incl. PKCE) + JWKS-backed resource server + social providers (Google/GitHub/Microsoft/Apple) + OAuth2Guard + full OAuth2 authorization server (issue Ed25519-signed JWTs) for nestrs."
 keywords = ["oauth2", "oidc", "auth", "nest", "axum"]
 categories = ["authentication", "api-bindings", "web-programming"]
 
@@ -28,16 +28,19 @@ arc-swap = "1"
 parking_lot = "0.12"
 url = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+ed25519-dalek = { version = "2", features = ["pem"], optional = true }
+sha2 = { version = "0.10", optional = true }
+pkcs8 = { version = "0.10", features = ["pem"], optional = true }
 
 [dev-dependencies]
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-ed25519-dalek = { version = "2", features = ["pkcs8"] }
+ed25519-dalek = { version = "2", features = ["pem"] }
 pkcs8 = { version = "0.10", features = ["pem"] }
 josekit = "0.10"
 sha2 = "0.10"
-async-trait = "0.1"
+rand = "0.8"
 
 [features]
 default = []
@@ -50,5 +53,11 @@ social = []
 ## OAuth2Guard + install_oauth2_middleware + OAuth2Module (requires client +
 ## resource-server so the module can export something useful)
 guard = ["client", "resource-server"]
+## Full OAuth2 authorization server: /authorize (PKCE S256) + /token
+## (authorization_code, refresh_token with rotation + reuse detection,
+## client_credentials), RFC 7662 introspection, RFC 7009 revocation,
+## RFC 8414 discovery, and a JWKS endpoint — issues Ed25519-signed JWTs
+## verifiable by any `JwtVerifier` (incl. this crate's).
+authorization-server = ["dep:ed25519-dalek", "dep:sha2", "dep:pkcs8"]
 ## All-in convenience feature for users who want everything
-all = ["client", "resource-server", "social", "guard"]
+all = ["client", "resource-server", "social", "guard", "authorization-server"]

@@ -93,6 +93,13 @@ ws-authz = ["ws", "authz", "database-sqlx"]
 ## underlying crate is `nestrs-oauth2`; the main crate re-exports its
 ## public types and provides `NestApplication::use_oauth2(OAuth2Options)`.
 oauth2 = ["dep:nestrs-oauth2"]
+## nestrs **as the IdP**: the full OAuth2 authorization server —
+## `/authorize` (PKCE S256), `/token` (authorization_code + rotating
+## refresh, client_credentials), RFC 7662 introspection, RFC 7009
+## revocation, RFC 8414 discovery, JWKS — issuing Ed25519-signed JWTs
+## any `JwtVerifier` (incl. this framework's) can check. Reachable as
+## `nestrs::oauth2::authorization_server::*`.
+oauth2-authorization-server = ["oauth2", "nestrs-oauth2/authorization-server"]
 ## Compound: OAuth2 + the `authn` `Principal` extractor so a route can
 ## use `Principal` to read either a JWT or an OAuth2 token identity.
 authn-oauth2 = ["authn", "oauth2"]

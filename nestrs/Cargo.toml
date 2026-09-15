@@ -43,6 +43,10 @@ cache-redis = ["dep:redis"]
 schedule = ["dep:tokio-cron-scheduler", "dep:linkme"]
 queues = ["dep:linkme"]
 queues-redis = ["queues", "dep:redis"]
+## Hot-reload watcher for file-based `ConfigSource`s: rebuilds the
+## `ConfigService` snapshot when any watched file changes (150 ms
+## debounce). Pulls in the `notify` crate only when enabled.
+config-hot-reload = ["dep:notify"]
 database-sqlx = ["dep:sqlx", "dep:serde_qs"]
 mongo = ["dep:mongodb"]
 # Enables DNS/SRV resolution (`mongodb+srv://`, Atlas-style seed lists). Pulls **`hickory-*`** (see upstream MongoDB driver advisories).
@@ -141,6 +145,16 @@ redis = { version = "0.29", features = ["tokio-comp"], optional = true }
 async-nats = { version = "0.47", optional = true }
 tokio-cron-scheduler = { version = "0.15.1", optional = true }
 linkme = { version = "0.3", optional = true }
+## File-format parsers for `ConfigSource::File` (TOML + YAML); `serde_json`
+## is already a direct dep so JSON parsing needs no extra entry. These are
+## unconditional — every `FileFormat::*` variant must be wired up so the
+## `ConfigOptions` builder typechecks.
+toml = "0.8"
+serde_yaml = "0.9"
+## Filesystem watcher for `ConfigWatcher` under the `config-hot-reload`
+## feature flag. Pulled in only when the flag is on so apps that don't
+## need hot-reload pay no compile cost.
+notify = { version = "6.1", optional = true }
 opentelemetry = { version = "0.32.0", features = ["trace"], optional = true }
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace", "metrics", "logs", "grpc-tonic"], optional = true }

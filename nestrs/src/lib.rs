@@ -170,10 +170,12 @@ pub use cache::RedisCacheOptions;
 pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
 pub use client_ip::{ClientIp, ClientIpMissing};
 pub use config::{
-    build_overlay, load_config, parse_namespaced, resolve_env_overlay, Config, ConfigError,
-    ConfigModule, ConfigNamespace, ConfigService, NamespacedConfig, TypedConfigModule,
-    DEFAULT_CONFIG_PREFIX,
+    build_overlay, build_sources_overlay, load_config, parse_namespaced, resolve_env_overlay, Config,
+    ConfigError, ConfigModule, ConfigNamespace, ConfigOptions, ConfigService, ConfigSource,
+    FileFormat, NamespacedConfig, TypedConfigModule, DEFAULT_CONFIG_PREFIX,
 };
+#[cfg(feature = "config-hot-reload")]
+pub use config::ConfigWatcher;
 #[cfg(feature = "database-sqlx")]
 pub use database_sqlx::{install_default_drivers, SqlxDatabaseModule, SqlxDatabaseService};
 pub use exception_filter::ExceptionFilter;
@@ -373,23 +375,23 @@ pub mod prelude {
         use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards,
         use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes,
         ApiVersioningPolicy, BadGatewayException, BadRequestException, CacheError, CacheModule,
-        CacheOptions, CacheService, ClientIp, ClientIpMissing, ConfigError, ConfigModule,
-        ConfigService, ConflictException, CorsOptions, ExceptionFilter, ExecutionContextMissing,
-        ForbiddenException, GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus,
-        HttpException, HttpExecutionContext, I18n, I18nMissing, I18nModule, I18nOptions,
-        I18nService, Interceptor, InternalServerErrorException, Locale, LoggingInterceptor,
-        MethodNotAllowedException, NestApiVersion, NestApplication, NestConfig, NestDto,
-        NestFactory, NotAcceptableException, NotFoundException, NotImplementedException,
-        ParseIntPipe, PathNormalization, PayloadTooLargeException, PaymentRequiredException,
-        PipedBody1, PipedBody2, PipedBody3, PipedBody4, PipedPath1, PipedPath2, PipedPath3,
-        PipedPath4, PipedQuery1, PipedQuery2, PipedQuery3, PipedQuery4, ProblemDetails,
-        RateLimitOptions, RawBody, ReadinessContext, RequestContext, RequestContextMissing,
-        RequestScoped, RequestScopedMissing, RequestTimeoutException, RequestTracingOptions,
-        SecurityHeaders, ServiceUnavailableException, TestClient, TestRequest, TestingModule,
-        TestingModuleBuilder, TooManyRequestsException, TracingConfig, TracingFormat, TrimPipe,
-        TypedConfigModule, UnauthorizedException, UnprocessableEntityException,
-        UnsupportedMediaTypeException, ValidatedBody, ValidatedPath, ValidatedQuery,
-        ValidationPipe, VersioningType,
+        CacheOptions, CacheService, ClientIp, ClientIpMissing, ConfigError, ConfigModule, ConfigOptions,
+        ConfigService, ConfigSource, ConflictException, CorsOptions, ExceptionFilter,
+        ExecutionContextMissing, FileFormat, ForbiddenException, GatewayTimeoutException,
+        GoneException, HealthIndicator, HealthStatus, HttpException, HttpExecutionContext, I18n,
+        I18nMissing, I18nModule, I18nOptions, I18nService, Interceptor,
+        InternalServerErrorException, Locale, LoggingInterceptor, MethodNotAllowedException,
+        NestApiVersion, NestApplication, NestConfig, NestDto, NestFactory, NotAcceptableException,
+        NotFoundException, NotImplementedException, ParseIntPipe, PathNormalization,
+        PayloadTooLargeException, PaymentRequiredException, PipedBody1, PipedBody2, PipedBody3,
+        PipedBody4, PipedPath1, PipedPath2, PipedPath3, PipedPath4, PipedQuery1, PipedQuery2,
+        PipedQuery3, PipedQuery4, ProblemDetails, RateLimitOptions, RawBody, ReadinessContext,
+        RequestContext, RequestContextMissing, RequestScoped, RequestScopedMissing,
+        RequestTimeoutException, RequestTracingOptions, SecurityHeaders, ServiceUnavailableException,
+        TestClient, TestRequest, TestingModule, TestingModuleBuilder, TooManyRequestsException,
+        TracingConfig, TracingFormat, TrimPipe, TypedConfigModule, UnauthorizedException,
+        UnprocessableEntityException, UnsupportedMediaTypeException, ValidatedBody, ValidatedPath,
+        ValidatedQuery, ValidationPipe, VersioningType, build_sources_overlay,
     };
     #[cfg(feature = "authn")]
     pub use crate::{
@@ -397,6 +399,8 @@ pub mod prelude {
         AuthnGuard, AuthnModule, AuthnOptions, JwtService, OptionalPrincipal, PasswordHasher,
         Principal, PrincipalIdentity,
     };
+    #[cfg(feature = "config-hot-reload")]
+    pub use crate::ConfigWatcher;
     #[cfg(feature = "authz")]
     pub use crate::{
         check_policies, install_policies_middleware, parse_policy_entries, Ability, AbilityBuilder,

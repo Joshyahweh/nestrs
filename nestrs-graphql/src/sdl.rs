@@ -60,7 +60,12 @@ where
     write_sdl_to_file(&export_schema_sdl_with_options(schema, options), path)
 }
 
-fn write_sdl_to_file(sdl: &str, path: impl AsRef<Path>) -> Result<usize, String> {
+/// Wave 7.12 — internal helper shared with the federation module so
+/// `export_subgraph_v2_sdl_to_file` and `export_sdl_with_options_to_file`
+/// can both write to disk through a single `create_dir_all` +
+/// `File::create` + `write_all` sequence. `pub(crate)` — not part of the
+/// public API surface.
+pub(crate) fn write_sdl_to_file(sdl: &str, path: impl AsRef<Path>) -> Result<usize, String> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {

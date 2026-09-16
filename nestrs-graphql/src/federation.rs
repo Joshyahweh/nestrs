@@ -442,7 +442,81 @@ fn build_router(
     }
 }
 
-/// Build the merged SDL + executable [`Schema`] from the subgraph specs.
+// ---------------------------------------------------------------------------
+// Wave 7.12 — Federation v2 subgraph SDL helpers
+// ---------------------------------------------------------------------------
+
+/// Wave 7.12. Emit the federation v2 subgraph SDL for an
+/// `async_graphql::Schema`. Wraps
+/// [`crate::sdl::export_schema_sdl_with_options`] with
+/// [`SDLExportOptions::default()`].federation().compose_directive()` so
+/// the output contains:
+/// - `@link(url: "https://specs.apollo.dev/link/v1.0")` (the v2 link
+///   directive that namespaces federation-specific types)
+/// - `@key(fields: "...")` directives for every entity
+/// - the `_Entity` union type and `_service` query field the
+///   Apollo Router expects
+/// - directive composition (`@composeDirective`) for custom
+///   directives you want to expose to the router
+///
+/// Use this when generating the SDL file you'll hand to an Apollo
+/// Router / GraphOS Studio deployment — the output is the spec-
+/// compliant shape, not the legacy federation v1 `@key`-only form.
+///
+/// Pair with [`export_subgraph_v2_sdl_to_file`] for the disk variant.
+pub fn export_subgraph_v2_sdl<Q, M, S>(schema: &Schema<Q, M, S>) -> String
+where
+    Q: async_graphql::ObjectType + 'static,
+    M: async_graphql::ObjectType + 'static,
+    S: async_graphql::SubscriptionType + 'static,
+{
+    let raw = crate::sdl::export_schema_sdl_with_options(
+        schema,
+        SDLExportOptions::default()
+            .federation()
+            .compose_directive(),
+    );
+    let mut out = String::with_capacity(raw.len() + 64);
+    out.push_str("# Federation v2 subgraph SDL — emitted by nestrs-graphql (Wave 7.12)\n");
+    out.push_str(&raw);
+    out
+}
+
+/// Wave 7.12. Disk variant of [`export_subgraph_v2_sdl`]. Creates
+/// parent directories as needed and returns the number of bytes
+/// written.
+pub fn export_subgraph_v2_sdl_to_file<Q, M, S>(
+    schema: &Schema<Q, M, S>,
+    path: impl AsRef<std::path::Path>,
+) -> Result<usize, String>
+where
+    Q: async_graphql::ObjectType + 'static,
+    M: async_graphql::ObjectType + 'static,
+    S: async_graphql::SubscriptionType + 'static,
+{
+    let sdl = export_subgraph_v2_sdl(schema);
+    crate::sdl::write_sdl_to_file(&sdl, path)
+}
+
+/// Wave 7.12. Detect whether a federation v2 SDL string was emitted
+/// by [`export_subgraph_v2_sdl`]. Used by the CLI's
+/// `nestrs-cli graphql federation export` to sanity-check the
+/// response from a running subgraph before writing it to disk —
+/// catching the case where the user points at a non-federation
+/// endpoint by mistake.
+///
+/// Returns `true` if the SDL contains the federation v2 `@link`
+/// directive. The federation v1 SDL never contains `@link`; v2
+/// always does.
+pub fn is_federation_v2_sdl(sdl: &str) -> bool {
+    // The `@link` directive is the federation-v2 signature. It can
+    // appear as `@link(url: "...")` or as part of a directive
+    // declaration like `directive @link(...) on FIELD_DEFINITION`.
+    // Both forms ship in the spec-compliant shape.
+    sdl.contains("@link")
+}
+
+
 ///
 /// Steps:
 /// 1. Validate every subgraph's SDL with `parse_schema`. First parse
@@ -519,4 +593,92 @@ fn build_schema(
         schema.sdl_with_options(SDLExportOptions::default().federation().compose_directive());
 
     Ok((schema, merged_sdl_exported))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Wave 7.12 — verify the federation v2 subgraph SDL helpers.
+    //!
+    //! `is_federation_v2_sdl` is the only pure function — tested with
+    //! string fixtures. The two `export_subgraph_v2_sdl*` helpers need
+    //! a real `async_graphql::Schema`, so we build a minimal one
+    //! (single `ping: String` query) inline.
+    use super::*;
+    use async_graphql::{EmptyMutation, EmptySubscription, Object, Schema};
+
+    /// Trivial query root used by the SDL-emission tests. A single
+    /// `ping` field so the schema has at least one type — `Schema::build`
+    /// would accept an empty root but the emitted SDL would then have
+    /// nothing useful for humans or routers to inspect.
+    struct PingQuery;
+
+    #[Object]
+    impl PingQuery {
+        async fn ping(&self) -> &'static str {
+            "pong"
+        }
+    }
+
+    #[test]
+    fn is_federation_v2_sdl_detects_at_link_directive() {
+        // Federation v2 SDLs always contain a `@link` directive — either
+        // as a directive declaration or as an application.
+        let sdl_v2 =
+            "directive @link(url: String) on FIELD_DEFINITION\ntype Query { ping: String }\n";
+        assert!(
+            is_federation_v2_sdl(sdl_v2),
+            "should detect `@link` as federation v2"
+        );
+    }
+
+    #[test]
+    fn is_federation_v2_sdl_rejects_v1_or_non_federation_sdl() {
+        // Pre-Apollo-v2 federation and plain GraphQL SDLs never include
+        // the `@link` directive.
+        let sdl_plain = "type Query { ping: String }\n";
+        let sdl_v1 = "type User @key(fields: \"id\") { id: ID! }\ntype Query { me: User }\n";
+        assert!(!is_federation_v2_sdl(sdl_plain));
+        assert!(!is_federation_v2_sdl(sdl_v1));
+    }
+
+    #[test]
+    fn is_federation_v2_sdl_handles_empty_input() {
+        assert!(!is_federation_v2_sdl(""));
+    }
+
+    #[test]
+    fn export_subgraph_v2_sdl_emits_at_link_header_and_body() {
+        let schema = Schema::build(PingQuery, EmptyMutation, EmptySubscription).finish();
+        let sdl = export_subgraph_v2_sdl(&schema);
+        // Header comment our helper prepends.
+        assert!(
+            sdl.starts_with("# Federation v2 subgraph SDL"),
+            "expected the Wave 7.12 header comment, got: {sdl}"
+        );
+        // Federation v2 SDL signature directive.
+        assert!(
+            is_federation_v2_sdl(&sdl),
+            "expected `@link` directive in federation v2 SDL, got: {sdl}"
+        );
+        // The schema's query type survives the round-trip.
+        assert!(sdl.contains("type Query"));
+        assert!(sdl.contains("ping"));
+    }
+
+    #[test]
+    fn export_subgraph_v2_sdl_to_file_writes_and_returns_byte_count() {
+        let schema = Schema::build(PingQuery, EmptyMutation, EmptySubscription).finish();
+        // Use a process-id-scoped tmp filename to avoid cross-test
+        // collisions when `cargo test` runs multiple tests in parallel.
+        let tmp = std::env::temp_dir().join(format!(
+            "nestrs_wave_7_12_federation_test_{}.graphql",
+            std::process::id()
+        ));
+        let bytes = export_subgraph_v2_sdl_to_file(&schema, &tmp).expect("write");
+        assert!(bytes > 0, "byte count must be positive");
+        let on_disk = std::fs::read_to_string(&tmp).expect("read back");
+        assert!(is_federation_v2_sdl(&on_disk));
+        assert!(on_disk.contains("Federation v2 subgraph SDL"));
+        let _ = std::fs::remove_file(&tmp);
+    }
 }

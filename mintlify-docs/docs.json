@@ -49,6 +49,7 @@
               "guides/microservices",
               "guides/graphql-websockets",
               "graphql/sdl-export",
+              "graphql/federation-v2",
               "guides/mcp"
             ]
           },

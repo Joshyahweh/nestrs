@@ -386,6 +386,98 @@ Wave 7.11. Two complementary SDL-export paths:
   when-to-use-which, programmatic-access example, see-also) +
   `docs.json` entry under `Guides`.
 
+### Added — GraphQL Federation v2 subgraph SDL helpers (`nestrs-graphql` + `nestrs-cli graphql federation export`, Tier 3.4)
+
+Wave 7.12. The Apollo Federation v2 shape (`@link` / `@key` /
+`_Entity` / `_service`) — the form Apollo Router and GraphOS
+Studio expect — gets first-class helpers on both the build-time
+and CLI side, plus a strict-by-default validation gate so CI
+catches the common mistake of exporting from a federation v1 or
+non-federation endpoint.
+
+- **Build-time** — `nestrs_graphql::export_subgraph_v2_sdl<Q,M,S>(schema) -> String`
+  emits a federation v2 SDL with a Wave 7.12 header comment. The
+  output contains the `@link(url: "https://specs.apollo.dev/link/v1.0")`
+  directive, `@key(fields: "...")` on every entity, the `_Entity`
+  union type and `_service { sdl }` query field, and
+  `@composeDirective` plumbing for custom directives you want to
+  expose to the router. `export_subgraph_v2_sdl_to_file(schema, path)`
+  is the disk variant — creates parent dirs and returns the byte
+  count. `is_federation_v2_sdl(sdl)` is the substring check helper
+  for embedding in custom tooling. All three are re-exported at the
+  umbrella `nestrs::graphql::*` path behind the `federation-gateway`
+  feature.
+- **Runtime** — `nestrs-cli graphql federation export --url <http>
+  --out <path> [--bearer-token <token>] [--lenient]` fetches the
+  federation v2 subgraph SDL via `{_service{sdl}}` (Apollo
+  Federation v2 introspection) and **validates the response
+  contains `@link`** before writing to disk. Strict-by-default:
+  SDLs without `@link` are rejected with an actionable error
+  pointing at `--lenient`. The CLI reuses `graphql_sdl::fetch_sdl`
+  for the HTTP fetch (still `curl`, no Rust HTTP client dep) and
+  duplicates the trivial `is_federation_v2_sdl` substring check
+  inline (no need to pull `nestrs-graphql` into the CLI).
+- **Files** —
+  - `nestrs-graphql/src/federation.rs` — added
+    `export_subgraph_v2_sdl<Q,M,S>(schema) -> String`,
+    `export_subgraph_v2_sdl_to_file<Q,M,S>(schema, path) -> Result<usize, String>`,
+    and `is_federation_v2_sdl(sdl) -> bool`.
+  - `nestrs-graphql/src/sdl.rs` — `write_sdl_to_file` is now
+    `pub(crate)` so `federation.rs` can reuse the same
+    `create_dir_all` + `File::create` + `write_all` sequence.
+  - `nestrs-graphql/src/lib.rs` — re-exports the three new helpers
+    behind `#[cfg(feature = "federation-gateway")]`.
+  - `nestrs-cli/src/graphql_federation.rs` — new module. `run`
+    dispatches `--url` / `--out` / `--bearer-token` / `--lenient`,
+    reuses `graphql_sdl::fetch_sdl` + `graphql_sdl::write_sdl`,
+    and duplicates the trivial `is_federation_v2_sdl` substring
+    check. `dispatch` is the sub-dispatch entry point wired into
+    `main.rs`. Module exposes `pub` so integration tests can
+    import it. 3 unit tests for the substring check.
+  - `nestrs-cli/src/main.rs` — added `pub mod graphql_federation;`,
+    reworked `"graphql"` arm to sub-dispatch on
+    `sdl` / `federation` (bare `graphql` still routes to
+    `graphql_sdl` for back-compat — SDL exporter errors with
+    missing-flags message). New help line for the
+    `nestrs-cli graphql federation export` subcommand.
+- **Tests** —
+  - Unit tests in `nestrs_graphql::federation` (5 tests):
+    `is_federation_v2_sdl_detects_at_link_directive` (v2 fixture),
+    `is_federation_v2_sdl_rejects_v1_or_non_federation_sdl`
+    (v1 + plain fixtures),
+    `is_federation_v2_sdl_handles_empty_input`,
+    `export_subgraph_v2_sdl_emits_at_link_header_and_body` (real
+    `Schema` round-trip via `Schema::build(PingQuery, EmptyMutation,
+    EmptySubscription)`),
+    `export_subgraph_v2_sdl_to_file_writes_and_returns_byte_count`
+    (process-id-scoped tmp file write).
+  - Unit tests in `nestrs_cli::graphql_federation` (3 tests):
+    substring check fixtures for `@link` / v1 / plain / empty.
+  - `nestrs-cli/tests/graphql_federation_cli.rs` (10 tests):
+    dispatch tests for unknown subcommand / missing subcommand /
+    `export` routing; flag-validation tests for missing `--url`,
+    missing `--out`, unknown option; the
+    `run_rejects_non_federation_v2_sdl_by_default` test calls the
+    helper directly to confirm rejection; end-to-end tests with a
+    Python mock server that returns the SDL payload from a tmp
+    file (avoiding shell-quoting issues with the multiline
+    fixture): `run_writes_federation_v2_sdl_when_at_link_present`
+    (strict accept), `run_rejects_v1_sdl_in_strict_mode` (asserts
+    error mentions `--lenient` and no file is written),
+    `run_accepts_v1_sdl_in_lenient_mode` (v1 written when
+    `--lenient`), and `run_with_bearer_token_succeeds` (bearer
+    plumbing). Mock server checks for `python3 --version` and
+    skips cleanly when Python is unavailable.
+- **Deps** — no new external deps. `write_sdl_to_file` was
+  already private inside `sdl.rs`; promoting it to `pub(crate)` is
+  a visibility-only change with no compile-time impact on
+  downstream crates.
+- **Docs** — `mintlify-docs/graphql/federation-v2.mdx` (full
+  reference with code examples for both build-time and CLI paths,
+  flag table, when-to-use-which, the federation-gateway vs
+  subgraph distinction, see-also linking the existing
+  `sdl-export` doc) + `docs.json` entry under `Guides`.
+
 ## [1.0.0] - 2026-09-12
 
 First stable release. Everything since 0.5.2 is in this version: the

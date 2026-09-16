@@ -1,0 +1,146 @@
+---
+title: "Federation v2 — `export_subgraph_v2_sdl` and `nestrs-cli graphql federation export`"
+description: "Emit and validate federation v2 subgraph SDLs for Apollo Router / GraphOS."
+---
+
+nestrs ships federation v2 as the spec-compliant shape Apollo Router,
+GraphOS Studio, and any `@link`-aware gateway expect. Federation v1
+(the legacy `@key`-only form without `@link`) is supported for
+back-compat through the `--lenient` CLI flag.
+
+## At build time: `export_subgraph_v2_sdl`
+
+The primary path is a runtime helper in
+[`nestrs-graphql`](https://crates.io/crates/nestrs-graphql). It wraps
+async-graphql's SDL printer with the federation v2 options:
+
+```rust
+use nestrs::prelude::*;
+use nestrs::graphql::export_subgraph_v2_sdl;
+
+#[tokio::main]
+async fn main() {
+    let schema = Schema::build(Query, Mutation, EmptySubscription).finish();
+    let sdl = export_subgraph_v2_sdl(&schema);
+    println!("{sdl}");
+}
+```
+
+The output contains:
+
+- A `# Federation v2 subgraph SDL — emitted by nestrs-graphql (Wave 7.12)` header comment.
+- `@link(url: "https://specs.apollo.dev/link/v1.0")` directive.
+- `@key(fields: "...")` directives on every entity.
+- The `_Entity` union type and `_service { sdl }` query field the Apollo Router expects.
+- Directive composition (`@composeDirective`) plumbing for custom directives you want to expose to the router.
+
+For the disk variant:
+
+```rust
+use nestrs::graphql::export_subgraph_v2_sdl_to_file;
+
+let bytes = export_subgraph_v2_sdl_to_file(&schema, "schemas/v1/user.graphql")?;
+println!("wrote {bytes} bytes");
+```
+
+`export_subgraph_v2_sdl_to_file` creates parent directories as needed
+and returns the byte count written. Pair with a dedicated
+`bin/print_schema.rs` so `cargo run --bin print_schema` regenerates
+the SDL on every schema change.
+
+## Detecting federation v2 SDLs: `is_federation_v2_sdl`
+
+If you're embedding the SDL into custom tooling — CI lint jobs,
+schema-registry uploads, GraphOS Studio automation — the validator
+helper tells you whether a string is federation v2:
+
+```rust
+use nestrs::graphql::is_federation_v2_sdl;
+
+if !is_federation_v2_sdl(&received_sdl) {
+    return Err("expected federation v2 SDL with @link directive".into());
+}
+```
+
+The check is a one-liner: federation v2 SDLs always contain the
+`@link` directive; v1 SDLs never do.
+
+## At runtime: `nestrs-cli graphql federation export`
+
+For CI jobs that hit a running federation v2 subgraph, the CLI
+ships a thin exporter that fetches and validates the SDL before
+writing it to disk:
+
+```bash
+nestrs-cli graphql federation export \
+    --url http://localhost:3000/graphql \
+    --out schemas/v1/user.graphql
+```
+
+The subcommand:
+
+1. POSTs `{ _service { sdl } }` (Apollo Federation v2 introspection)
+   to the GraphQL endpoint.
+2. Validates the response is federation v2 by checking for the
+   `@link` directive.
+3. Writes the SDL string to the `--out` path, creating parent
+   directories as needed.
+
+By default the CLI **rejects** SDLs without `@link` — this catches
+the common CI mistake of pointing the export at a federation v1
+endpoint by accident. To accept v1 or non-federation SDLs, pass
+`--lenient`:
+
+```bash
+nestrs-cli graphql federation export \
+    --url http://localhost:3000/graphql \
+    --out schemas/v1/user.graphql \
+    --lenient
+```
+
+Flags:
+
+- `--url <http>` — required. The GraphQL endpoint.
+- `--out <path>` — required. Output file. Parent directories are
+  created automatically.
+- `--bearer-token <token>` — optional. Adds an
+  `Authorization: Bearer <token>` header.
+- `--lenient` — optional. Accepts SDLs without `@link` (federation
+  v1 or non-federation). Default behavior is strict — federation
+  v2 only.
+
+## When to use which
+
+- **Build-time (`export_subgraph_v2_sdl` / `*_to_file`)** — when
+  you control the schema construction code. Use this in your
+  binary's startup or in a dedicated `bin/print_schema.rs` so `cargo
+  run --bin print_schema` regenerates SDL on every change.
+- **Runtime (`nestrs-cli graphql federation export`)** — when you
+  need SDL from a service you don't own (a remote federation v2
+  subgraph, a staging environment) or when you want to verify that
+  the live schema still matches what you expected.
+
+The CLI shells out to `curl` rather than pulling a Rust HTTP
+client, so the CLI stays light. `curl` is on every macOS / Linux
+dev box.
+
+## Federation gateway
+
+`nestrs-graphql::federation` (behind the `federation-gateway`
+feature) is the **gateway** side — it stitches multiple subgraph
+SDLs behind one Axum router and exposes `_service { sdl }` plus
+`_entities(representations: [_Any!]!) -> [_Any]` for cross-subgraph
+entity resolution. The helpers in this doc are the **subgraph**
+side — they produce the SDL you'd hand to an Apollo Router
+fronting your gateway, or run as a standalone subgraph.
+
+## See also
+
+- [`mintlify-docs/graphql/sdl-export`](/graphql/sdl-export) —
+  non-federation SDL export (build-time + CLI).
+- `nestrs-graphql::federation` — the federation gateway module
+  (gateway side).
+- `nestrs-graphql::SDLExportOptions` — federation / formatting
+  flags passed to `export_sdl_with_options_to_file`.
+- `nestrs-cli graphql federation export --help` — flag reference
+  at the CLI.

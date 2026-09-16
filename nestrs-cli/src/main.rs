@@ -5,6 +5,7 @@ mod db_migrate;
 #[cfg(feature = "db")]
 mod db_seed;
 mod doctor;
+pub mod graphql_federation;
 pub mod graphql_sdl;
 pub mod repl;
 mod resource_templates;
@@ -54,7 +55,23 @@ fn run() -> Result<(), String> {
         "g" | "generate" => generate(&args[1..]),
         "new" => create_new_project(&args[1..]),
         "repl" => repl::run(&args[1..]),
-        "graphql" => graphql_sdl::run(&args[1..]),
+        "graphql" => match args.get(1).map(|s| s.as_str()) {
+            // Back-compat: bare `nestrs-cli graphql` routes to the
+            // SDL exporter. The exporter errors out with a friendly
+            // missing-flags message if `--url` / `--out` weren't
+            // supplied, so users get redirected to the right help
+            // without us needing a separate "subcommand required"
+            // error.
+            None => graphql_sdl::run(&[]),
+            Some("sdl") => graphql_sdl::run(&args[2..]),
+            Some("federation") => graphql_federation::dispatch(&args[2..]),
+            Some(other) => {
+                return Err(format!(
+                    "unknown `nestrs-cli graphql {other}` subcommand; \
+                     currently: `sdl`, `federation`"
+                ));
+            }
+        },
         "doctor" => doctor::run(),
         "db" => {
             #[cfg(feature = "db")]
@@ -89,6 +106,8 @@ fn print_help() -> Result<(), String> {
     println!("    Static source-level DI graph explorer. Scans the crate for #[module]/#[controller]/#[injectable]/#[dto]/impl_routes! without launching the app.");
     println!("  nestrs-cli graphql sdl --url <http> --out <path> [--bearer-token <token>] [--federation|--no-federation]");
     println!("    Federation-aware SDL exporter. POSTs `{_service{sdl}}` (Apollo Federation v2 introspection) and writes the SDL string to disk. Shells out to `curl`.");
+    println!("  nestrs-cli graphql federation export --url <http> --out <path> [--bearer-token <token>] [--lenient]");
+    println!("    Fetch a federation v2 subgraph SDL (Apollo Federation v2 introspection). Validates the response contains `@link`; `--lenient` accepts v1 / non-federation SDLs.");
     println!("  nestrs-cli g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs-cli g <res|s|co|mo|dto|gu|pi|fi|in|st|r|ga|ms|tr> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs-cli g resource <name> [--transport rest|graphql|ws|grpc|microservice] [--style nest|rust] [--path <dir>] [--no-interactive] [--dry-run] [--force] [--quiet]");

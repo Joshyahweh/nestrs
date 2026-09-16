@@ -48,6 +48,7 @@
               "guides/api-versioning",
               "guides/microservices",
               "guides/graphql-websockets",
+              "graphql/sdl-export",
               "guides/mcp"
             ]
           },

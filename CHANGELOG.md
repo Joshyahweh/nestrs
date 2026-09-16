@@ -316,6 +316,76 @@ via regex (no `syn` dependency).
   examples, flag table, limitations) + `docs.json` entry under
   `CLI`.
 
+### Added — GraphQL SDL export (`nestrs-graphql` + `nestrs-cli graphql sdl`, Tier 3.3)
+
+Wave 7.11. Two complementary SDL-export paths:
+
+1. **Build-time** (`nestrs_graphql::export_sdl_to_file`,
+   `export_sdl_with_options_to_file`) — wraps
+   `async_graphql::Schema::sdl()` /
+   `schema.sdl_with_options(SDLExportOptions)` and writes the SDL
+   to disk. Federation v2 subgraphs use
+   `SDLExportOptions::default().federation().compose_directive()`
+   to emit the `@link` / `@key` directives and `_Entity` /
+   `_service` plumbing an Apollo Router expects. Re-exported at
+   the umbrella `nestrs::graphql::*` path via the existing
+   `pub use nestrs_graphql as graphql;`.
+2. **Runtime** (`nestrs-cli graphql sdl --url <http> --out
+   <path>`) — POSTs the standard federation introspection query
+   (`{_service{sdl}}`) against a running subgraph and writes the
+   response SDL to disk. Shells out to `curl` (no Rust HTTP
+   client dep) with `--max-time 15`. `--bearer-token` adds an
+   `Authorization` header for protected endpoints.
+
+- **Files** —
+  - `nestrs-graphql/src/sdl.rs` — added
+    `export_sdl_to_file<Q,M,S>(schema, path) -> Result<usize, String>`
+    and `export_sdl_with_options_to_file<Q,M,S>(schema, options,
+    path)`. Internal helper `write_sdl_to_file` creates parent
+    dirs as needed.
+  - `nestrs-graphql/src/lib.rs` — re-exports the two new helpers
+    alongside the existing `export_schema_sdl` /
+    `export_schema_sdl_with_options`.
+  - `nestrs-cli/src/graphql_sdl.rs` — new module. `run` dispatches
+    `--url` / `--out` / `--bearer-token` / `--federation` /
+    `--no-federation`. `fetch_sdl` shells to `curl`. `write_sdl`
+    creates parent dirs and writes bytes. `parse_sdl_body` is a
+    pure helper for embedding in custom tooling. Module exposes
+    `pub` so integration tests can import it.
+  - `nestrs-cli/src/main.rs` — added `mod graphql_sdl;`, dispatcher
+    arm `"graphql" => graphql_sdl::run(&args[1..])`, and a help
+    line describing the subcommand.
+
+- **Tests** —
+  - Unit tests in `nestrs_cli::graphql_sdl` (3 tests):
+    `parse_sdl_body_extracts_federation_sdl_field`,
+    `parse_sdl_body_rejects_missing_service_field`,
+    `parse_sdl_body_rejects_malformed_json`.
+  - `nestrs-cli/tests/graphql_sdl_cli.rs` (8 tests):
+    `parse_sdl_body_extracts_federation_sdl_field`,
+    `parse_sdl_body_rejects_missing_service_field`,
+    `write_sdl_creates_parent_dirs_and_writes_bytes`,
+    `write_sdl_overwrites_existing_file`,
+    `run_rejects_missing_url`,
+    `run_rejects_missing_out`,
+    `run_rejects_unknown_option`,
+    `fetch_sdl_against_mock_server` (smoke test against a local
+    Python HTTP server that responds to the federation SDL query),
+    `run_full_subcommand_writes_file` (end-to-end through the
+    `run` entry point), `run_full_subcommand_with_bearer_token`
+    (verifies the bearer-token flag doesn't break the path). The
+    Python mock server checks for `python3 --version` and skips
+    cleanly when Python is unavailable.
+
+- **Deps** — no new external deps. The CLI reuses its existing
+  `serde_json` for response parsing; the SDL writer is hand-rolled
+  to avoid pulling a heavy HTTP-client crate into the CLI.
+
+- **Docs** — `mintlify-docs/graphql/sdl-export.mdx` (full
+  reference with code examples for both paths, flag table,
+  when-to-use-which, programmatic-access example, see-also) +
+  `docs.json` entry under `Guides`.
+
 ## [1.0.0] - 2026-09-12
 
 First stable release. Everything since 0.5.2 is in this version: the

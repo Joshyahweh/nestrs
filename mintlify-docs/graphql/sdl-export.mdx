@@ -1,0 +1,114 @@
+---
+title: "SDL export — `export_schema_sdl` and `nestrs-cli graphql sdl`"
+description: "Export your GraphQL schema as SDL for CI, federation gateways, and codegen."
+---
+
+nestrs ships two complementary paths for exporting your GraphQL
+schema as SDL — the canonical GraphQL Schema Definition Language
+text that Apollo Router, GraphOS Studio, GraphQL Code Generator,
+and federation gateways consume.
+
+## At build time: `export_schema_sdl`
+
+The primary path is a runtime helper that lives in
+[`nestrs-graphql`](https://crates.io/crates/nestrs-graphql). It wraps
+`async-graphql`'s built-in SDL printer (`Schema::sdl()`).
+
+```rust
+use nestrs::prelude::*;
+use nestrs::graphql::{export_schema_sdl, export_sdl_to_file, SDLExportOptions};
+
+#[tokio::main]
+async fn main() {
+    let schema = Schema::build(Query, Mutation, EmptySubscription).finish();
+    let sdl = export_schema_sdl(&schema);
+    println!("{sdl}");
+
+    // Or write directly to disk:
+    export_sdl_to_file(&schema, "schemas/v1/schema.graphql")
+        .expect("write");
+}
+```
+
+For federation v2 subgraphs, pass `SDLExportOptions::default()
+.federation().compose_directive()`:
+
+```rust
+let options = SDLExportOptions::default()
+    .federation()
+    .compose_directive();
+export_sdl_with_options_to_file(&schema, options, "schemas/v1/user.graphql")?;
+```
+
+The output SDL includes `@link` / `@key` directives and the
+`_Entity` / `_service` plumbing an Apollo Router expects.
+
+## At runtime: `nestrs-cli graphql sdl`
+
+For CI jobs that hit a running federation subgraph, the CLI ships
+a thin exporter. It POSTs the standard federation introspection
+query (`{_service{sdl}}`) and writes the response to disk.
+
+```bash
+nestrs-cli graphql sdl \
+    --url http://localhost:3000/graphql \
+    --out schemas/v1/user.graphql
+```
+
+With an auth bearer token:
+
+```bash
+nestrs-cli graphql sdl \
+    --url https://api.example.com/graphql \
+    --out user.graphql \
+    --bearer-token "$PROD_GRAPHQL_TOKEN"
+```
+
+Flags:
+
+- `--url <http>` — required. The GraphQL endpoint.
+- `--out <path>` — required. Output file. Parent directories are
+  created automatically.
+- `--bearer-token <token>` — optional. Adds an
+  `Authorization: Bearer <token>` header.
+- `--federation` (default) — query `{_service{sdl}}` (Apollo
+  Federation v2 introspection).
+- `--no-federation` — query standard introspection instead. Note:
+  standard introspection does not return SDL directly; this mode
+  exists for live-schema validation, not for SDL export.
+
+## When to use which
+
+- **Build-time (`export_sdl_to_file`)** — when you control the
+  schema construction code. Use this in your binary's startup or
+  in a dedicated `bin/print_schema.rs` so `cargo run --bin
+  print_schema` regenerates SDL on every change.
+- **Runtime (`nestrs-cli graphql sdl`)** — when you need SDL
+  from a service you don't own (a remote federation subgraph, a
+  staging environment) or when you want to verify that the live
+  schema still matches what you expected.
+
+The CLI shells out to `curl` rather than pulling a Rust HTTP
+client, so the CLI stays light. `curl` is on every macOS / Linux
+dev box.
+
+## Programmatic access
+
+The same parser the CLI uses (`parse_sdl_body`) is exposed for
+embedding in custom tooling:
+
+```rust
+use nestrs_cli::graphql_sdl;
+
+let sdl = graphql_sdl::parse_sdl_body(response_body)?;
+fs::write("schema.graphql", sdl)?;
+```
+
+## See also
+
+- [`mintlify-docs/guides/graphql-websockets`](/guides/graphql-websockets)
+  — the GraphQL HTTP surface.
+- `nestrs-graphql::federation` — the federation gateway and the
+  `_service { sdl }` field on the gateway itself.
+- `nestrs-graphql::SDLExportOptions` — federation / formatting
+  flags passed to `export_sdl_with_options_to_file`.

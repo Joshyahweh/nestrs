@@ -32,7 +32,10 @@ pub use federation::{
 };
 pub use limits::{with_default_limits, Analyzer, DEFAULT_MAX_COMPLEXITY, DEFAULT_MAX_DEPTH};
 pub use router_options::{graphql_router_with_options, GraphQlHttpOptions};
-pub use sdl::{export_schema_sdl, export_schema_sdl_with_options, SDLExportOptions};
+pub use sdl::{
+    export_schema_sdl, export_schema_sdl_with_options, export_sdl_to_file,
+    export_sdl_with_options_to_file, SDLExportOptions,
+};
 
 pub use async_graphql::{
     BatchRequest, BatchResponse, Error, ObjectType, Request, Response, Schema, SubscriptionType,

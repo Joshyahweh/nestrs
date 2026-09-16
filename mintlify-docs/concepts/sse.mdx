@@ -1,0 +1,187 @@
+---
+title: "Server-Sent Events — `nestrs_core::sse`"
+description: "Stream events to the browser with `SseResponse<S>` and the `IntoSseEvent` trait. One wrapper, no axum dep at the handler site."
+---
+
+`nestrs-core` ships a thin Server-Sent Events wrapper behind the `sse`
+feature. The intent is the same as the `nestrs-oauth2::cookies` surface:
+re-export the axum primitive (`Sse<S>`), give it a stable, axum-agnostic
+return type (`SseResponse<S>`), and add a trait (`IntoSseEvent`) that
+covers the payload shapes handler authors actually reach for — `&str`,
+`String`, `Bytes`, anything `Serialize`. Handlers can stream events
+without ever naming `axum::response::sse`.
+
+## Enable the feature
+
+```toml
+[dependencies]
+nestrs-core = { version = "1.0.0", features = ["sse"] }
+```
+
+The flag pulls in `bytes`, `futures-core`, and `serde` (for the
+`IntoSseEvent for T: Serialize` blanket impl) on top of the axum SSE
+plumbing, which is on by default in axum 0.7. Enable it only if you
+actually emit SSE streams; outbound clients that *consume* SSE payloads
+don't need this flag.
+
+## Return an SSE stream
+
+```rust
+use axum::response::sse::{Event, KeepAlive};
+use futures_util::stream::Stream;
+use nestrs_core::sse::{IntoSseEvent, SseResponse};
+
+async fn tick_handler() -> SseResponse<impl Stream<Item = Event>> {
+    let stream = async_stream::stream! {
+        for i in 0..5 {
+            yield i.to_string().into_sse_event().unwrap();
+        }
+    };
+    SseResponse::from_stream(stream).keep_alive(KeepAlive::new())
+}
+```
+
+`SseResponse<S>` is a newtype around `axum::response::sse::Sse<S>` that
+implements `IntoResponse` directly, so handlers can return it without
+naming axum's SSE type. The wrapper delegates the response conversion to
+axum, so behavior (the `text/event-stream` content-type, chunked
+transfer encoding, retry semantics) stays identical.
+
+## `IntoSseEvent` — payload shapes
+
+The trait covers the four shapes handler authors reach for. The blanket
+impl for `T: Serialize` is the one most production handlers use:
+
+```rust
+use nestrs_core::sse::IntoSseEvent;
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct Tick {
+    id: u32,
+    text: String,
+}
+
+// Renders as `event: message\ndata: {"id":1,"text":"hi"}\n\n`.
+let evt: Event = Tick { id: 1, text: "hi".into() }
+    .into_sse_event()
+    .expect("ok");
+```
+
+| Payload | Event name | Notes |
+|---|---|---|
+| `&str` / `String` | (default — no `event:` field) | Plain `data:` line, e.g. `data: hello` |
+| `Bytes` | (default) | Raw byte payload — useful for binary-over-SSE protocols |
+| `T: Serialize` | `message` | Auto-JSON-encoded via `serde_json` |
+| `Event` | (passthrough) | Already an event; returned as-is |
+
+### Errors fall back to a structured `error` event
+
+A `Serialize` failure on the producer side (e.g. a `f64::NAN` that
+`serde_json` rejects) is **not** a stream crash — `IntoSseEvent` emits
+an `event: error` event with the failure message instead:
+
+```rust
+use nestrs_core::sse::IntoSseEvent;
+
+// serde_json rejects NaN — the stream does NOT die, it emits an
+// `error` event so the consumer can detect and react.
+let bad: f64 = f64::NAN;
+let evt: Event = bad.into_sse_event().unwrap();
+assert_eq!(evt.event.as_deref(), Some("error"));
+```
+
+This is a deliberately conservative default — SSE consumers typically
+expect a long-lived stream and treat any termination as an implicit
+error. If you'd rather crash the stream on serialization failure, build
+the `Event` yourself with `serde_json::to_string(...)` and surface the
+`Err` from your stream directly.
+
+## Fallible streams
+
+For producers that want a structured error path (a network drop, a
+serialization failure the caller does want to crash on), use
+`SseResponse::from_fallible_stream` instead:
+
+```rust
+use axum::Error as AxumError;
+use axum::response::sse::Event;
+use futures_core::Stream;
+
+fn handler() -> SseResponse<impl Stream<Item = Result<Event, AxumError>>> {
+    let stream = futures_core::stream::iter(vec![
+        Ok(Event::default().data("ok")),
+        Err(AxumError::new("simulated")),
+    ]);
+    SseResponse::from_fallible_stream(stream)
+}
+```
+
+`Result<Event, axum::Error>` is axum's contract — error events get
+serialized into the stream as `event: error` automatically.
+
+## `KeepAlive`
+
+Attach a heartbeat policy with `.keep_alive(...)`. The default
+`KeepAlive::new()` sends a comment line every 15 seconds — long enough
+to keep middlebox connections warm, short enough that the consumer
+sees activity when the producer goes quiet:
+
+```rust
+use axum::response::sse::KeepAlive;
+use nestrs_core::sse::SseResponse;
+
+let response = SseResponse::from_stream(stream)
+    .keep_alive(KeepAlive::new());
+```
+
+## Conversion from an existing `Sse`
+
+If you've already constructed an `axum::response::sse::Sse<S>` (e.g.
+from third-party code), wrap it via `From`:
+
+```rust
+use axum::response::sse::Sse;
+use nestrs_core::sse::SseResponse;
+
+let sse: Sse<MyStream> = Sse::new(stream);
+let response: SseResponse<MyStream> = SseResponse::from(sse);
+```
+
+## Accessors
+
+When the wrapper hides something you need (a custom header, a
+non-standard content-type), drop down to the inner `Sse<S>` with
+`into_inner` or borrow it with `as_inner`:
+
+```rust
+let inner: Sse<MyStream> = wrapper.into_inner();
+let inner_ref: &Sse<MyStream> = wrapper.as_inner();
+```
+
+## Why these choices
+
+- **Stable return type** — handlers return `SseResponse<S>` regardless
+  of which crate (`nestrs`, `nestrs-http`) wired the response. Tests
+  can construct a response directly without depending on the full
+  runtime.
+- **`IntoSseEvent` instead of a per-crate adapter** — one trait covers
+  `&str` / `String` / `Bytes` / `Serialize`. Handlers don't have to
+  reach for `axum::response::sse::Event::default().data(...)` boilerplate
+  every time they want to send a string.
+- **Serialize-failure → `error` event** — SSE consumers treat stream
+  termination as a connection drop, so silently emitting an error event
+  keeps the stream alive and lets the consumer decide what to do.
+  Crashing the producer would be the more disruptive default.
+- **Behind a feature flag** — `sse` is off by default. Apps that emit
+  SSE streams opt in; apps that consume SSE payloads from upstream
+  services stay on the default feature set.
+
+## See also
+
+- [`axum::response::sse`](https://docs.rs/axum/latest/axum/response/sse/index.html)
+  — the underlying primitive.
+- [`mintlify-docs/concepts/middleware-pipeline`](/concepts/middleware-pipeline)
+  — for per-request hooks that emit progress events to an SSE stream.
+- [`mintlify-docs/concepts/controllers`](/concepts/controllers) — for
+  the handler wiring that returns `SseResponse<S>`.

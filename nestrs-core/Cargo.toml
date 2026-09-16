@@ -14,9 +14,23 @@ default = []
 ## Clears process-global registries (`RouteRegistry`, `MetadataRegistry`). For **tests and benches only**;
 ## see `STABILITY.md` in the workspace root. Never enable in production binaries.
 test-hooks = []
+## Server-Sent Events response wrapper. Wave 7.15 (Tier 3.7).
+## Pulls in `axum::response::sse::{Sse, Event, KeepAlive}` (already on
+## by default in axum 0.7) plus minimal `bytes` / `futures-core` /
+## `serde` deps so the module compiles in isolation. Enable on
+## `nestrs-core` only if you actually emit SSE streams; users who
+## only consume SSE payloads from upstream services don't need
+## this flag.
+sse = ["dep:bytes", "dep:futures-core", "dep:serde"]
 
 [dependencies]
 axum.workspace = true
 async-trait = "0.1"
 serde_json = "1"
 tokio.workspace = true
+bytes = { version = "1", optional = true }
+futures-core = { version = "0.3", optional = true }
+serde = { version = "1", optional = true }
+
+[dev-dependencies]
+http-body-util = "0.1"

@@ -23,6 +23,9 @@ mod route_registry;
 mod strategy;
 mod trace;
 
+#[cfg(feature = "sse")]
+pub mod sse;
+
 pub use admin_snapshot::AdminSnapshot;
 pub use client_ip::{
     best_effort_client_ip, rate_limit_key_ip_or_unknown, trusted_hops_from_parts, RateLimitKey,
@@ -39,6 +42,9 @@ pub use platform::{AxumHttpEngine, HttpServerEngine};
 pub use route_registry::{OpenApiResponseDesc, OpenApiRouteSpec, RouteInfo, RouteRegistry};
 pub use strategy::{AuthError, AuthStrategy};
 pub use trace::{current_trace_context, parse_traceparent, with_trace_context, TraceContext};
+
+#[cfg(feature = "sse")]
+pub use sse::{IntoSseEvent, SseEvent, SseKeepAlive, SseResponse};
 
 type CustomFactoryFn =
     std::sync::Arc<dyn Fn(&ProviderRegistry) -> Arc<dyn Any + Send + Sync> + Send + Sync>;

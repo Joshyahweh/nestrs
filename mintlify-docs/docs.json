@@ -33,7 +33,8 @@
               "concepts/controllers",
               "concepts/providers",
               "concepts/dependency-injection",
-              "concepts/middleware-pipeline"
+              "concepts/middleware-pipeline",
+              "concepts/sse"
             ]
           },
           {

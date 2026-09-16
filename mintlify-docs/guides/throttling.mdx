@@ -1,0 +1,174 @@
+---
+title: "Throttling — `nestrs-throttler` crate"
+description: "Per-route rate limits with pluggable key generators, skipper, and backend (in-memory or Redis) — the @nestjs/throttler analogue."
+---
+
+Rate limiting lives in the `nestrs-throttler` workspace member. It is
+the in-tree analogue of `@nestjs/throttler`: a `ThrottlerGuard` for
+declarative per-route limits, a `throttler_middleware` for global
+limits, a `ThrottlerService` for manual checks from inside a handler,
+and pluggable storage (`InMemoryThrottler` for single-instance,
+`RedisThrottler` for distributed).
+
+## Define a spec, register the module
+
+```rust
+use nestrs_throttler::{
+    ThrottleSpec, ThrottlerModule, ThrottlerOptions, ThrottlerBackendKind,
+};
+use nestrs::core::Module;
+
+#[module(imports = [ThrottlerModule::register(ThrottlerOptions {
+    backend: ThrottlerBackendKind::InMemory,
+    default_spec: Some(ThrottleSpec { limit: 60, window_ms: 60_000 }),
+    ..Default::default()
+})])]
+pub struct AppModule;
+```
+
+The default spec applies to every route that doesn't carry an
+explicit `@Throttle(...)` override. The backend chooses where the
+counters live — `InMemory` for a single process, `Redis` when several
+instances share a limit.
+
+## Per-route limits
+
+```rust
+use nestrs_macros::{controller, get, Throttle};
+use nestrs_throttler::ThrottleSpec;
+
+#[controller("/users", prefix = "/api")]
+pub struct UsersController;
+
+#[get("/:id")]
+#[Throttle(ThrottleSpec { limit: 5, window_ms: 60_000 })]
+pub async fn show(id: u32) -> Json<User> {
+    /* ... */
+}
+```
+
+`#[Throttle(...)]` (a route attribute macro from `nestrs-macros`)
+overrides the module default for that one handler. Multiple `#[Throttle]`
+attributes stack — each spec has its own counter, so a route can have a
+1/second burst limit AND a 100/hour sustained limit, both enforced
+simultaneously.
+
+## Manual checks
+
+When a rate-limit decision depends on something the module can't see
+(resource ownership, tenant tier), reach for the service directly:
+
+```rust
+use nestrs_throttler::{ThrottlerService, ThrottleSpec};
+
+pub struct ApiKeyAuth {
+    throttler: ThrottlerService,
+}
+
+impl ApiKeyAuth {
+    pub async fn validate(&self, key: &str) -> Result<Principal, AuthError> {
+        let outcome = self.throttler.check(
+            &ThrottleSpec { limit: 10, window_ms: 1_000 },
+            format!("api_key:{key}"),
+        ).await;
+
+        if outcome.is_blocked() {
+            return Err(AuthError::TooManyRequests);
+        }
+        /* ... look up the principal ... */
+    }
+}
+```
+
+`check(spec, key)` returns a `ThrottleOutcome` (`Allow` / `Block` plus
+metadata for headers like `Retry-After`). The key string is whatever
+you want it to be — the service doesn't care whether you derive it
+from an IP, a user id, or a hash of the request body.
+
+## Custom key generators
+
+The default key is the client IP (resolved via the same `client_ip`
+helpers the rest of `nestrs` uses — see
+[`nestrs_core::client_ip`](/concepts/dependency-injection)). To
+rate-limit by API key instead, swap in a different generator:
+
+```rust
+use nestrs_throttler::{
+    ThrottleKeyGenerator, ThrottlerRequest, PrincipalId,
+    ApiKeyHeaderKeyGenerator, PrincipalKeyGenerator,
+};
+
+#[module(imports = [ThrottlerModule::register_with_key_generator(
+    ThrottlerOptions::default(),
+    Arc::new(ApiKeyHeaderKeyGenerator { header: "x-api-key" }),
+)])]
+pub struct AppModule;
+```
+
+`ThrottleKeyGenerator` is a trait over `ThrottlerRequest<'a>` —
+anything you can pull off the request (`headers`, URI, peer addr) is
+available. Stack multiple modules if you need different keys for
+different sub-trees; the middleware picks the generator that matches
+the handler's owning module.
+
+## Skip on demand
+
+Internal services, health-check endpoints, and authenticated admins
+typically shouldn't count against the limit. Implement `ThrottleSkipper`:
+
+```rust
+use nestrs_throttler::{ThrottleSkipper, ThrottlerRequest};
+
+pub struct SkipAdminRoutes;
+
+impl ThrottleSkipper for SkipAdminRoutes {
+    fn should_skip(&self, req: &ThrottlerRequest<'_>) -> bool {
+        req.path.starts_with("/admin/")
+            || req.header("x-internal-token").is_some()
+    }
+}
+```
+
+`NeverSkip` is the default impl that always returns `false`. Skipped
+requests neither consume counters nor generate blocks — the request
+flows straight through.
+
+## Distributed limits
+
+```rust
+ThrottlerOptions {
+    backend: ThrottlerBackendKind::Redis {
+        url: "redis://10.0.0.1:6379".into(),
+    },
+    default_spec: Some(ThrottleSpec { limit: 1000, window_ms: 60_000 }),
+    ..Default::default()
+}
+```
+
+`RedisThrottler` uses an atomic INCR + EXPIRE pattern per spec key,
+so concurrent processes see the same counter. Sliding-window and
+token-bucket are not built in — pick `Redis` when the limit must
+survive a restart and stick with `InMemory` (cheaper, single-process)
+when it doesn't.
+
+## When to use what
+
+- **`#[Throttle(...)]` on a route** — the default. Limit, window, and
+  counter location are explicit and visible.
+- **`ThrottlerService::check` from inside a handler** — when the
+  limit depends on handler-side state (per-tenant, per-resource).
+- **`ThrottleSkipper`** — bypass for internal probes and admin paths,
+  never for "important" routes (that's a different concern — make those
+  limits higher, not skipped).
+- **Custom `ThrottleKeyGenerator`** — when the IP-derived key is
+  wrong for your traffic shape (NAT'd mobile clients, single egress
+  proxy, per-tenant SaaS).
+
+## See also
+
+- [Guides: authorization](/guides/authorization) — for combining
+  auth principal with throttling key generation.
+- [Concepts: middleware-pipeline](/concepts/middleware-pipeline) —
+  the global `throttler_middleware` runs before handlers.
+- [`@nestjs/throttler`](https://docs.nestjs.com/security/rate-limiting)
+  — upstream documentation for comparison.

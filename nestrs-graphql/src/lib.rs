@@ -27,8 +27,9 @@ pub mod sdl;
 pub use builder_help::with_production_graphql_limits;
 #[cfg(feature = "federation-gateway")]
 pub use federation::{
-    federation_router, federation_router_with_hook, federation_router_with_options, EntityResolver,
-    FederationConfig, FederationError, SubgraphSpec,
+    export_subgraph_v2_sdl, export_subgraph_v2_sdl_to_file, federation_router,
+    federation_router_with_hook, federation_router_with_options, is_federation_v2_sdl,
+    EntityResolver, FederationConfig, FederationError, SubgraphSpec,
 };
 pub use limits::{with_default_limits, Analyzer, DEFAULT_MAX_COMPLEXITY, DEFAULT_MAX_DEPTH};
 pub use router_options::{graphql_router_with_options, GraphQlHttpOptions};

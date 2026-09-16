@@ -1,17 +1,6 @@
-//! Security building blocks: auth helpers, optional CSRF (feature **`csrf`**), and docs for threat model.
+//! Security building blocks — thin re-export shim over the `nestrs-security`
+//! workspace member. Real implementation lives in `nestrs-security`; the
+//! umbrella crate keeps the same paths so existing apps do not need to
+//! change imports.
 
-pub mod auth;
-
-#[cfg(feature = "csrf")]
-pub mod csrf;
-
-pub use auth::{
-    parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
-    DemoXRoleMetadataGuard, OptionalBearerToken,
-};
-// Consumed only by the `policies` module (feature `authz`).
-#[cfg(feature = "authz")]
-pub use auth::route_metadata_csv;
-
-#[cfg(feature = "csrf")]
-pub use csrf::{csrf_double_submit_middleware, CsrfProtectionConfig};
+pub use nestrs_security::*;

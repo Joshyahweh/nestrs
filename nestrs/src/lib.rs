@@ -150,6 +150,7 @@ mod serialization;
 mod server_timing;
 pub mod sse;
 mod testing;
+#[cfg(feature = "throttler")]
 mod throttler;
 mod trace_context;
 #[cfg(feature = "database-sqlx")]
@@ -274,12 +275,15 @@ pub use security::{
 pub use serialization::strip_null_json_value;
 pub use server_timing::{ServerTiming, ServerTimingConfig};
 pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
-#[cfg(feature = "cache-redis")]
-pub use throttler::RedisThrottler;
+#[cfg(feature = "throttler")]
 pub use throttler::{
-    InMemoryThrottler, ThrottleOutcome, ThrottleSpec, ThrottlerBackend, ThrottlerBackendKind,
-    ThrottlerGuard, ThrottlerModule, ThrottlerOptions, ThrottlerService, ThrottlerState,
+    ApiKeyHeaderKeyGenerator, InMemoryThrottler, IpKeyGenerator, NeverSkip, PrincipalId,
+    PrincipalKeyGenerator, ThrottleKeyGenerator, ThrottleOutcome, ThrottleSkipper,
+    ThrottleSpec, ThrottleSpecFor, ThrottlerBackend, ThrottlerBackendKind, ThrottlerGuard,
+    ThrottlerModule, ThrottlerOptions, ThrottlerRequest, ThrottlerService, ThrottlerState,
 };
+#[cfg(feature = "throttler-redis")]
+pub use throttler::RedisThrottler;
 pub use trace_context::{current_trace, install_trace_context_middleware};
 #[cfg(feature = "database-sqlx")]
 pub use transactional::{
@@ -1023,6 +1027,7 @@ pub struct NestApplication {
     cors_options: Option<CorsOptions>,
     security_headers: Option<SecurityHeaders>,
     rate_limit_options: Option<RateLimitOptions>,
+    #[cfg(feature = "throttler")]
     throttler_options: Option<ThrottlerOptions>,
     #[cfg(feature = "oauth2")]
     oauth2_verifier: Option<Arc<nestrs_oauth2::resource_server::JwtVerifier>>,
@@ -1107,6 +1112,7 @@ impl NestApplication {
             cors_options: None,
             security_headers: None,
             rate_limit_options: None,
+            #[cfg(feature = "throttler")]
             throttler_options: None,
             #[cfg(feature = "oauth2")]
             oauth2_verifier: None,
@@ -1600,6 +1606,7 @@ impl NestApplication {
     /// `#[throttle(n, "per")]` overrides). Adds a 429 layer
     /// with `Retry-After` + `X-RateLimit-Remaining` headers.
     /// The chosen [`ThrottlerService`] is registered for `ThrottlerGuard`.
+    #[cfg(feature = "throttler")]
     pub fn use_throttler(mut self, options: ThrottlerOptions) -> Self {
         self.throttler_options = Some(options);
         self
@@ -2054,6 +2061,7 @@ impl NestApplication {
         #[cfg(feature = "csrf")]
         let csrf = self.csrf.clone();
         let mut registry = self.registry;
+        #[cfg(feature = "throttler")]
         let throttler_options = self.throttler_options;
         let uri_version = self.uri_version;
         let api_versioning = self.api_versioning.clone();
@@ -2209,6 +2217,7 @@ impl NestApplication {
             ));
         }
 
+        #[cfg(feature = "throttler")]
         if let Some(mut options) = throttler_options {
             // Same proxy-trust inheritance as the rate limiter above: the
             // throttler keys on the app topology unless it set its own.

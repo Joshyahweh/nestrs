@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use axum::Router;
 
 mod admin_snapshot;
+pub mod client_ip;
 mod database;
 mod discovery;
 mod execution_context;
@@ -23,6 +24,10 @@ mod strategy;
 mod trace;
 
 pub use admin_snapshot::AdminSnapshot;
+pub use client_ip::{
+    best_effort_client_ip, rate_limit_key_ip_or_unknown, trusted_hops_from_parts, RateLimitKey,
+    TrustedProxyHops, X_FORWARDED_FOR, X_REAL_IP,
+};
 pub use database::DatabasePing;
 pub use discovery::DiscoveryService;
 pub use execution_context::{ExecutionContext, HostType, HttpExecutionArguments};

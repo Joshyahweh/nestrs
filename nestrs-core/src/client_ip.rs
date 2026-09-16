@@ -1,0 +1,335 @@
+//! Client IP resolution shared by the rate limiter and the throttler.
+//!
+//! The shape of this module is intentionally minimal so it can live in
+//! `nestrs-core` without pulling axum's response types. Platform-specific
+//! helpers ([`crate::client_ip::ClientIp`] extractor, [`crate::client_ip::ClientIpMissing`]
+//! rejection) stay in `nestrs/src/client_ip.rs`, which re-exports the
+//! shared pieces from here.
+//!
+//! Resolution order:
+//!
+//! 1. Forwarded headers (`x-forwarded-for`, then `x-real-ip`) — **only** when a trusted-proxy
+//!    hop count has been configured.
+//! 2. Connection metadata from Axum `ConnectInfo<SocketAddr>` when available (the host-side
+//!    peer address, set by `NestApplication::listen*`).
+//!
+//! Forwarded headers are client-controlled. Trusting them without knowing your proxy topology
+//! lets callers spoof their IP (bypassing IP-based rate limits, poisoning other clients'
+//! windows). When `hops` is configured, each of the `hops` trusted proxies appends exactly one
+//! entry (its peer) to `x-forwarded-for`, so the client IP as seen by your outermost proxy is
+//! the entry `hops` positions from the end of the list; entries further left are
+//! client-controlled and are never selected.
+
+use axum::extract::connect_info::{ConnectInfo, MockConnectInfo};
+use axum::http::request::Parts;
+use axum::http::Extensions;
+use axum::http::{HeaderMap, HeaderName};
+use std::net::{IpAddr, SocketAddr};
+
+/// `x-forwarded-for` header name (static so we never re-allocate it).
+pub static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+/// `x-real-ip` header name (static so we never re-allocate it).
+pub static X_REAL_IP: HeaderName = HeaderName::from_static("x-real-ip");
+
+/// Extension carrying the configured trusted-proxy hop count (installed per request by
+/// `NestApplication::use_trusted_proxy_headers`).
+#[derive(Clone, Copy, Debug)]
+pub struct TrustedProxyHops(pub u16);
+
+fn parse_forwarded_ip(raw: &str) -> Option<IpAddr> {
+    // Some proxies include a port (e.g. `1.2.3.4:1234`). Try SocketAddr first.
+    if let Ok(sa) = raw.parse::<SocketAddr>() {
+        return Some(sa.ip());
+    }
+    raw.parse::<IpAddr>().ok()
+}
+
+/// Resolves the client IP given the optional trusted-proxy hop count.
+///
+/// - `None` / `Some(0)` — connection metadata only; forwarded headers are ignored.
+/// - `Some(n)` with `n >= 1` — take the `x-forwarded-for` entry `n` positions from the *end*
+///   of the chain (the value appended by the outermost trusted proxy); fall back to
+///   `x-real-ip` (set by the outermost proxy) only when the XFF chain is shorter than the
+///   hop count.
+pub fn best_effort_client_ip(
+    headers: &HeaderMap,
+    extensions: &Extensions,
+    trusted_hops: Option<u16>,
+) -> Option<IpAddr> {
+    // `MockConnectInfo` is stored as its own extension type until Axum's `ConnectInfo` extractor
+    // maps it (see axum `ConnectInfo::from_request_parts`). It represents the *actual* peer in
+    // test setups (no proxy in front), so it keeps precedence over forwarded headers.
+    if let Some(MockConnectInfo(addr)) = extensions.get::<MockConnectInfo<SocketAddr>>() {
+        return Some(addr.ip());
+    }
+
+    let hops = trusted_hops.unwrap_or(0);
+
+    // When a trusted-proxy topology is declared, connection metadata is the *proxy's* address,
+    // not the client's — forwarded headers must take precedence.
+    if hops == 0 {
+        if let Some(ConnectInfo(addr)) = extensions.get::<ConnectInfo<SocketAddr>>() {
+            return Some(addr.ip());
+        }
+        return None;
+    }
+
+    // Duplicate XFF headers are legal; proxies may emit several. Join them so hop indexing
+    // covers the full chain rather than a truncated list.
+    let xff_values: Vec<&str> = headers
+        .get_all(&X_FORWARDED_FOR)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    if !xff_values.is_empty() {
+        let v = xff_values.join(",");
+        let entries: Vec<&str> = v
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        // Each of the `hops` trusted proxies appended exactly one entry (its peer), so the
+        // client IP as seen by the outermost trusted proxy sits at `len - hops`. Entries to
+        // its left are client-controlled and must never be selected.
+        if let Some(idx) = entries.len().checked_sub(hops as usize) {
+            if let Some(ip) = parse_forwarded_ip(entries[idx]) {
+                return Some(ip);
+            }
+        }
+    }
+
+    headers
+        .get(&X_REAL_IP)
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_forwarded_ip)
+}
+
+/// Client IP for a rate-limit / throttle key, with the shared `"unknown"`
+/// fallback.
+///
+/// Resolution fails when no forwarded header parses and no peer address is
+/// available (e.g. a malformed `x-forwarded-for` under a trusted topology, or
+/// a transport without socket metadata). Every such request lands in ONE
+/// shared `unknown` bucket, coupling the rate limits of unrelated clients —
+/// so callers typically log when this fallback fires (see
+/// [`nestrs::client_ip::rate_limit_key_ip`] for the wrapper that does so).
+pub fn rate_limit_key_ip_or_unknown(
+    headers: &HeaderMap,
+    extensions: &Extensions,
+    trusted_hops: Option<u16>,
+) -> String {
+    best_effort_client_ip(headers, extensions, trusted_hops)
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Result of [`rate_limit_key_ip_or_unknown`]: the key string plus whether
+/// the `"unknown"` fallback was used. Callers that want to warn on
+/// unkeyable traffic (rate limiter, throttler) consume this and emit the
+/// diagnostic themselves — `nestrs-core` stays free of the `tracing`
+/// dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RateLimitKey {
+    pub key: String,
+    pub fell_back: bool,
+}
+
+impl RateLimitKey {
+    pub fn resolve(
+        headers: &HeaderMap,
+        extensions: &Extensions,
+        trusted_hops: Option<u16>,
+    ) -> Self {
+        match best_effort_client_ip(headers, extensions, trusted_hops) {
+            Some(ip) => Self {
+                key: ip.to_string(),
+                fell_back: false,
+            },
+            None => Self {
+                key: "unknown".to_string(),
+                fell_back: true,
+            },
+        }
+    }
+}
+
+/// Convenience: read the per-request trusted-proxy hop count from `Parts.extensions`,
+/// falling back to the supplied default when the extension is absent.
+pub fn trusted_hops_from_parts(parts: &Parts, fallback: Option<u16>) -> Option<u16> {
+    parts
+        .extensions
+        .get::<TrustedProxyHops>()
+        .map(|h| h.0)
+        .or(fallback)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        best_effort_client_ip, rate_limit_key_ip, trusted_hops_from_parts, TrustedProxyHops,
+        X_FORWARDED_FOR, X_REAL_IP,
+    };
+    use axum::extract::connect_info::{ConnectInfo, MockConnectInfo};
+    use axum::http::{Extensions, HeaderMap, HeaderValue};
+    use std::net::{IpAddr, SocketAddr};
+
+    fn xff() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            &X_FORWARDED_FOR,
+            HeaderValue::from_static("203.0.113.10, 198.51.100.10"),
+        );
+        headers.insert(&X_REAL_IP, HeaderValue::from_static("198.51.100.20"));
+        headers
+    }
+
+    #[test]
+    fn configured_hops_override_connect_info_behind_proxy() {
+        // Behind a reverse proxy, ConnectInfo is the *proxy's* address; with a declared
+        // trusted-proxy topology the forwarded chain must win.
+        let headers = xff();
+        let mut extensions = Extensions::new();
+        extensions.insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4321))));
+        extensions.insert(TrustedProxyHops(2));
+
+        assert_eq!(
+            best_effort_client_ip(&headers, &extensions, Some(2)),
+            Some(IpAddr::from([203, 0, 113, 10]))
+        );
+    }
+
+    #[test]
+    fn forwarded_headers_are_ignored_without_trusted_proxies() {
+        // Secure default: spoofable forwarded headers are not consulted unless configured.
+        let mut headers = HeaderMap::new();
+        headers.insert(&X_FORWARDED_FOR, HeaderValue::from_static("203.0.113.10"));
+        headers.insert(&X_REAL_IP, HeaderValue::from_static("198.51.100.20"));
+
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new(), None),
+            None
+        );
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new(), Some(0)),
+            None
+        );
+    }
+
+    #[test]
+    fn one_trusted_proxy_uses_rightmost_xff_entry() {
+        // Client -> our LB (appends "198.51.100.10") -> app.
+        let headers = xff();
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new(), Some(1)),
+            Some(IpAddr::from([198, 51, 100, 10]))
+        );
+    }
+
+    #[test]
+    fn two_trusted_proxies_use_second_from_right() {
+        let headers = xff();
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new(), Some(2)),
+            Some(IpAddr::from([203, 0, 113, 10]))
+        );
+    }
+
+    #[test]
+    fn real_ip_fallback_when_xff_shorter_than_hop_count() {
+        let mut headers = HeaderMap::new();
+        headers.insert(&X_REAL_IP, HeaderValue::from_static("198.51.100.20"));
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new(), Some(1)),
+            Some(IpAddr::from([198, 51, 100, 20]))
+        );
+    }
+
+    #[test]
+    fn spoofed_left_entries_cannot_override_trusted_resolution() {
+        // Attacker prepends a fake IP; with one trusted hop it must be ignored.
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            &X_FORWARDED_FOR,
+            HeaderValue::from_static("6.6.6.6, 203.0.113.10"),
+        );
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new(), Some(1)),
+            Some(IpAddr::from([203, 0, 113, 10]))
+        );
+    }
+
+    #[test]
+    fn honest_single_hop_traffic_resolves_the_appended_entry() {
+        // Client -> our LB (appends the client IP) -> app: the only XFF entry is the client's
+        // and must be selected (regression: `len - 1 - hops` underflowed here and fell through
+        // to `x-real-ip`, or panicked on `len == hops` arithmetic).
+        let mut headers = HeaderMap::new();
+        headers.insert(&X_FORWARDED_FOR, HeaderValue::from_static("198.51.100.7"));
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new(), Some(1)),
+            Some(IpAddr::from([198, 51, 100, 7]))
+        );
+    }
+
+    #[test]
+    fn duplicate_xff_headers_are_joined_before_hop_indexing() {
+        // Two separate XFF header lines (legal per RFC 7239 predecessors): hop indexing must
+        // see the full chain, not just the first line.
+        let mut headers = HeaderMap::new();
+        headers.append(&X_FORWARDED_FOR, HeaderValue::from_static("6.6.6.6"));
+        headers.append(&X_FORWARDED_FOR, HeaderValue::from_static("198.51.100.10"));
+        assert_eq!(
+            best_effort_client_ip(&headers, &Extensions::new(), Some(1)),
+            Some(IpAddr::from([198, 51, 100, 10]))
+        );
+    }
+
+    #[test]
+    fn mock_connect_info_is_visible_to_best_effort() {
+        let mut extensions = Extensions::new();
+        extensions.insert(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4321))));
+
+        assert_eq!(
+            best_effort_client_ip(&HeaderMap::new(), &extensions, None),
+            Some(IpAddr::from([127, 0, 0, 1]))
+        );
+    }
+
+    // --- rate-limit key fallback -----------------------------------------
+
+    #[test]
+    fn rate_limit_key_ip_formats_a_resolved_ip() {
+        let mut extensions = Extensions::new();
+        extensions.insert(MockConnectInfo(SocketAddr::from(([203, 0, 113, 9], 443))));
+
+        assert_eq!(
+            rate_limit_key_ip(&HeaderMap::new(), &extensions, None),
+            "203.0.113.9"
+        );
+    }
+
+    #[test]
+    fn rate_limit_key_ip_falls_back_to_unknown_when_unresolvable() {
+        assert_eq!(
+            rate_limit_key_ip(&HeaderMap::new(), &Extensions::new(), None),
+            "unknown"
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(&X_FORWARDED_FOR, HeaderValue::from_static("not-an-ip"));
+        assert_eq!(
+            rate_limit_key_ip(&headers, &Extensions::new(), Some(1)),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn trusted_hops_from_parts_prefers_extension_then_fallback() {
+        let mut parts = axum::http::Request::new(()).into_parts();
+        assert_eq!(trusted_hops_from_parts(&parts, None), None);
+        assert_eq!(trusted_hops_from_parts(&parts, Some(0)), Some(0));
+
+        parts.extensions.insert(TrustedProxyHops(3));
+        assert_eq!(trusted_hops_from_parts(&parts, None), Some(3));
+        assert_eq!(trusted_hops_from_parts(&parts, Some(0)), Some(3));
+    }
+}

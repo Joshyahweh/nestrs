@@ -5,6 +5,7 @@ mod db_migrate;
 #[cfg(feature = "db")]
 mod db_seed;
 mod doctor;
+pub mod repl;
 mod resource_templates;
 
 use std::env;
@@ -51,6 +52,7 @@ fn run() -> Result<(), String> {
     match args[0].as_str() {
         "g" | "generate" => generate(&args[1..]),
         "new" => create_new_project(&args[1..]),
+        "repl" => repl::run(&args[1..]),
         "doctor" => doctor::run(),
         "db" => {
             #[cfg(feature = "db")]
@@ -81,6 +83,8 @@ fn print_help() -> Result<(), String> {
     println!("  nestrs-cli new <name>                                   # alias for `new app`");
     println!("    --strict: generated src/main.rs starts with #![deny(unsafe_code)]");
     println!("  nestrs-cli doctor   (toolchain + nestrs feature hints for the current crate)");
+    println!("  nestrs-cli repl <graph|routes|providers|dtos> [--path <dir>] [--format text|json]");
+    println!("    Static source-level DI graph explorer. Scans the crate for #[module]/#[controller]/#[injectable]/#[dto]/impl_routes! without launching the app.");
     println!("  nestrs-cli g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs-cli g <res|s|co|mo|dto|gu|pi|fi|in|st|r|ga|ms|tr> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
     println!("  nestrs-cli g resource <name> [--transport rest|graphql|ws|grpc|microservice] [--style nest|rust] [--path <dir>] [--no-interactive] [--dry-run] [--force] [--quiet]");

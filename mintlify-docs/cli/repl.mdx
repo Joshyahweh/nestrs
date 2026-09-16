@@ -1,0 +1,106 @@
+---
+title: "CLI REPL — nestrs-cli repl"
+description: "Static DI graph explorer — modules, controllers, routes, providers, and DTOs from your crate's source."
+---
+
+`nestrs-cli repl` introspects a nestrs crate by reading its source —
+no need to launch the binary, no runtime hook required. Useful for:
+
+- answering "what routes does this app expose?" without booting it
+- auditing which module owns which providers / controllers
+- generating a Markdown table of every DTO
+- piping graph data into a script via `--format json`
+
+The parser is regex-driven (no `syn` dependency). It recognises
+`#[module(...)]`, `#[controller(prefix = "/...")]`, `#[injectable]`,
+`#[dto]`, and HTTP-method macros (`#[get]` / `#[post]` / `#[put]` /
+`#[patch]` / `#[delete]`). Struct names are captured positionally —
+only types that immediately follow the attribute are added to the
+graph.
+
+## Subcommands
+
+### `nestrs-cli repl graph`
+
+Prints a tree of modules, their imports / controllers / providers,
+and every controller's routes.
+
+```
+nestrs DI graph (2 modules, 2 controllers, 2 providers, 2 DTOs)
+
+module UsersModule  (src/users/module.rs)
+  controllers: UsersController
+  providers:   UsersService
+    controller UsersController (prefix = /users)
+         GET /users              -> UsersController::list
+       POST /users              -> UsersController::create
+      PATCH /users/:id          -> UsersController::update
+
+module AppModule  (src/app/module.rs)
+  imports:    UsersModule
+```
+
+### `nestrs-cli repl routes`
+
+Flattened, sorted route table — handy for piping into a Markdown
+doc or an OpenAPI generation script.
+
+```
+METHOD  PATH                                     HANDLER
+   GET  /                                        AppController::root
+   GET  /health                                  AppController::health
+   GET  /users                                   UsersController::list
+  POST  /users                                   UsersController::create
+ PATCH  /users/:id                               UsersController::update
+```
+
+### `nestrs-cli repl providers`
+
+Groups `#[injectable]` types by the module that declares them.
+Providers that aren't referenced by any module (orphan services)
+fall under `unassigned:`.
+
+### `nestrs-cli repl dtos`
+
+Lists every `#[dto]`-decorated struct (heuristic: name ends with
+`Dto`, `Entity`, or `Model`).
+
+## Flags
+
+- `--path <dir>` — source root to scan. Defaults to `./src`. Use
+  this when your crate's source lives somewhere non-standard
+  (`src-tauri/`, `services/<name>/src/`, etc.).
+- `--format text|json` — `text` (default) is human-readable;
+  `json` is machine-readable and round-trips through
+  `serde_json`.
+
+## Examples
+
+```bash
+# show every HTTP route the current crate exposes
+nestrs-cli repl routes
+
+# dump the full DI graph as JSON for a tooling pipeline
+nestrs-cli repl graph --format json | jq '.modules[] | .name'
+
+# audit a sub-crate
+nestrs-cli repl providers --path services/payments/src
+
+# list DTOs across the whole workspace
+nestrs-cli repl dtos --path .
+```
+
+## Limitations
+
+- The scanner is **static** — it does not run your code. Conditional
+  providers (e.g. `if cfg!(feature = "x") { ... }`) are not
+  modelled.
+- `impl_routes!` blocks that declare routes without `#[get("/")]`
+  attributes are not extracted (rare in 1.0.0; the common
+  `#[controller] + impl + #[get]` pattern is fully covered).
+- Multi-line `#[module(controllers = [\n    Foo,\n    Bar,\n])]`
+  lists parse correctly via `[^]]*` capture; nested generics in
+  provider types are not parsed.
+
+For these cases, prefer the live HTTP route listing or run the app
+in dev mode and inspect via your existing logging.

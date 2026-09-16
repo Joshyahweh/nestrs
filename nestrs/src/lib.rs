@@ -634,40 +634,11 @@ pub struct NestFactory;
 pub trait NestDto {}
 pub trait NestConfig {}
 
-/// Result of a single [`HealthIndicator::check`].
-#[derive(Debug, Clone)]
-pub enum HealthStatus {
-    Up,
-    Down { message: String },
-}
-
-impl HealthStatus {
-    pub fn down(message: impl Into<String>) -> Self {
-        Self::Down {
-            message: message.into(),
-        }
-    }
-}
-
-/// Pluggable readiness check (database ping, broker, external HTTP, etc.).
-#[async_trait]
-pub trait HealthIndicator: Send + Sync {
-    fn name(&self) -> &'static str;
-
-    async fn check(&self) -> HealthStatus;
-}
-
-/// Holds indicators for [`NestApplication::enable_readiness_check`]; exposed so apps can reuse or test checks.
-#[derive(Clone)]
-pub struct ReadinessContext {
-    indicators: Vec<std::sync::Arc<dyn HealthIndicator>>,
-}
-
-impl ReadinessContext {
-    pub fn indicators(&self) -> &[std::sync::Arc<dyn HealthIndicator>] {
-        &self.indicators
-    }
-}
+/// Result of a single [`HealthIndicator::check`], the [`HealthIndicator`]
+/// trait, and [`ReadinessContext`] live in the `nestrs-health` workspace
+/// member; the umbrella re-exports them so `nestrs::HealthIndicator`,
+/// `nestrs::HealthStatus`, and `nestrs::ReadinessContext` keep working.
+pub use nestrs_health::{HealthIndicator, HealthStatus, ReadinessContext};
 
 #[derive(Clone, Debug, Default)]
 pub struct RequestTracingOptions {

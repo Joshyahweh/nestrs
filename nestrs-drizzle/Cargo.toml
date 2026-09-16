@@ -1,0 +1,36 @@
+[package]
+name = "nestrs-drizzle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Typed SQL query builder for nestrs — Drizzle ORM integration (postgres / mysql / sqlite via sqlx)."
+keywords = ["drizzle", "sql", "query-builder", "orm", "nest"]
+categories = ["database", "api-bindings", "web-programming"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "1.0.0" }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio.workspace = true
+tracing = "0.1"
+url = "2"
+drizzle-orm = { version = "0.36", default-features = false, features = ["sqlx"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []
+## Postgres backend (sqlx postgres).
+postgres = ["drizzle-orm/postgres"]
+## MySQL backend (sqlx mysql).
+mysql = ["drizzle-orm/mysql"]
+## SQLite backend (sqlx sqlite).
+sqlite = ["drizzle-orm/sqlite"]
+## All three backends. Larger compile but convenient for tools.
+all = ["postgres", "mysql", "sqlite"]

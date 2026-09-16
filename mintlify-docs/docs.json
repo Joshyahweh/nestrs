@@ -95,7 +95,8 @@
               "recipes/grpc-microservice",
               "recipes/message-brokers",
               "recipes/event-driven",
-              "recipes/mongodb"
+              "recipes/mongodb",
+              "recipes/drizzle"
             ]
           }
         ]

@@ -155,6 +155,35 @@ Wave 7.6. The third ORM in the persistence layer alongside
   feature flags, full CRUD surface table) + `docs.json` entry under
   `recipes` "Backend stacks".
 
+### Added — Drizzle ORM adapter (`nestrs-drizzle`)
+
+Wave 7.7. The fourth persistence option alongside `nestrs-prisma`,
+`nestrs-storage`, and `nestrs-mongodb` — typed SQL query builder
+for apps that prefer Drizzle's query-first DSL.
+
+- **New workspace member `nestrs-drizzle`** — `DrizzleModule::for_root(url)`
+  / `for_root_with_options(opts)` static setters, `DrizzleService`
+  injectable handle with `url()`, `is_postgres()`, `is_mysql()`,
+  `is_sqlite()`, `parsed_url()`. `DrizzleOptions` builder wraps the URL
+  with auto-detected driver (`postgres` / `postgresql` / `mysql` /
+  `mariadb` / `sqlite` / `sqlite:`) plus `max_pool_size` and
+  `connect_timeout`. `DrizzleError` enum (`NotConfigured` /
+  `InvalidUrl` / `Driver` / `Timeout`). `drizzle_orm` re-exported at
+  the crate root so callers don't need a direct dep. `schema::table!`
+  re-exports `drizzle_orm::table!` plus common column types
+  (`Int4`, `Int8`, `Int2`, `Text`, `Bool`, `Timestamp`, `Varchar`).
+- **Feature flags** — `postgres` / `mysql` / `sqlite` / `all` map
+  directly to `drizzle-orm/*` features. Default is empty (base
+  crate, no SQL backend enabled — pick at least one).
+- **Tests** — `nestrs-drizzle/tests/drizzle_module.rs` (6 tests):
+  `for_root` sets options, URL-scheme auto-detection for all three
+  backends, builder overrides for `max_pool_size` / `connect_timeout`,
+  `parsed_url` resolves scheme / host / port / path.
+- **Docs** — `mintlify-docs/recipes/drizzle.mdx` (full reference
+  with install, boot, schema definition, query-builder usage,
+  configuration, API surface table) + `docs.json` entry under
+  `recipes` "Backend stacks".
+
 ## [1.0.0] - 2026-09-12
 
 First stable release. Everything since 0.5.2 is in this version: the

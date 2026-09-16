@@ -19,8 +19,10 @@ members = [
   "nestrs-throttler",
   "nestrs-health",
   "nestrs-mongodb",
-  "nestrs-drizzle",
   "nestrs-http",
+  # nestrs-drizzle excluded from the workspace until upstream `drizzle-orm 0.36`
+  # is published on crates.io. The crate directory stays on disk for re-introduction
+  # once that dep resolves; see CHANGELOG and project-memory for the carve-out.
   "examples/hello-app",
   "examples/lab",
 ]

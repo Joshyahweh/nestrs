@@ -34,7 +34,8 @@
               "concepts/providers",
               "concepts/dependency-injection",
               "concepts/middleware-pipeline",
-              "concepts/sse"
+              "concepts/sse",
+              "concepts/als"
             ]
           },
           {

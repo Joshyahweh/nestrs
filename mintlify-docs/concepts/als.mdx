@@ -1,0 +1,193 @@
+---
+title: "Async-local-storage — `#[als]` and `nestrs_core::als`"
+description: "Carry per-request context through every .await with #[als] generated cells and FromRequestParts extractors."
+---
+
+`nestrs` ships a small async-local-storage (ALS) surface — a typed cell
+that propagates a value through every `.await` on the current task
+without threading it through every function signature. The NestJS
+analogue is `nestjs-cls` / `cls-hooked`: middleware installs the value
+once, downstream handlers and services read it without injecting it.
+In Rust the primitive is `tokio::task_local!`, and the `#[als]`
+proc-macro in `nestrs-macros` wraps it into the shape every handler
+actually wants: a typed cell, install/read helpers, and an axum
+extractor.
+
+## Define an ALS type
+
+```rust
+use nestrs_macros::als;
+
+#[derive(Clone)]
+#[als]
+pub struct RequestContext {
+    pub user_id: u32,
+    pub tenant: String,
+}
+```
+
+`#[als]` is an attribute macro — it generates, **per type**:
+
+- a `task_local!` cell, scoped to the type so different ALS values
+  never share state,
+- `with_<snake_case>(value, future)` — install the value for the
+  duration of `future`,
+- `current_<snake_case>()` — read it (returns `Option<Self>`, requires
+  `Self: Clone`),
+- `impl axum::extract::FromRequestParts<()>` and
+  `FromRequestParts<Parts>` returning `Result<Self, AlsError>`.
+
+`RequestContext` becomes `request_context`, `UserID` becomes
+`user_id`, `HTTPRequest` becomes `http_request`. The conversion is
+the same `lower_snake_case` you'd get from `heck` minus the
+dependency.
+
+## Install it from middleware
+
+```rust
+async fn ctx_middleware(
+    token: String,
+    next: Next,
+) -> Response {
+    let ctx = RequestContext {
+        user_id: decode_user_id(&token),
+        tenant: "acme".into(),
+    };
+    RequestContext::with_request_context(ctx, next.run()).await
+}
+```
+
+`with_request_context` opens a scope; when the future it wraps
+completes (success, error, or panic), the prior value — or absence
+of one — is restored. Nesting joins the outer scope rather than
+forking it: an inner `with_*` opens a new layer, and the outer value
+is visible again when the inner one ends. `tokio::task_local`
+semantics, just under a typed name.
+
+## Read it from a handler
+
+Handlers extract the value as a normal axum extractor — no
+`Arc<RequestContext>` plumbing through every layer:
+
+```rust
+async fn handler(ctx: RequestContext) -> String {
+    format!("user={}, tenant={}", ctx.user_id, ctx.tenant)
+}
+```
+
+The generated `FromRequestParts` impl reads from the task-local cell
+and ignores the request `Parts` entirely. If middleware forgot to
+install the value, the extractor rejects with `AlsError::NotSet`,
+which axum turns into a 500 (or whatever your framework maps to).
+The intent: a missing ALS value is a wiring bug, not a request-shape
+bug — surface it as an internal error, not a 400 / 404.
+
+## Read it from anywhere on the task
+
+The cell is a task-local, so any future awaited inside the scope can
+read it without being threaded through:
+
+```rust
+async fn log_event(ctx: &RequestContext, event: &str) {
+    let tenant = RequestContext::current_request_context()
+        .map(|c| c.tenant)
+        .unwrap_or_default();
+    tracing::info!(tenant = %tenant, event, "audit");
+}
+```
+
+`current_*` returns `None` outside any active scope — the typical
+case is a background task spawned with bare `tokio::spawn`. ALS values
+don't cross the `spawn` boundary; either pass them in explicitly, or
+spawn with `nestrs_core::spawn_with_request_scope` to carry the
+request scope forward.
+
+## The runtime helper
+
+If you don't want the proc-macro (a small project, a one-off cell,
+a code path where the macro's `to_snake_case` would pick the wrong
+boundary), `nestrs_core::als::AlsContext` is the same primitive
+without the codegen:
+
+```rust
+use nestrs_core::als::{AlsContext, AlsError};
+
+tokio::task_local! {
+    static CTX: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+let als = AlsContext::new(&CTX);
+let observed = als.with(String::from("hello"), async {
+    als.current()
+}).await;
+```
+
+`AlsContext::with` and `current` mirror `#[als]`'s `with_*` /
+`current_*` exactly — pick whichever fits your codebase.
+
+## `AlsError`
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlsError {
+    /// No value for the requested ALS key is installed on the current task.
+    NotSet,
+}
+```
+
+The error is `Clone + Copy + Eq` so handler tests can `assert_eq!(res, Err(AlsError::NotSet))` without any wrapping. The `Display` impl names the fix in the failure message:
+
+> async-local-storage value is not installed on this task —
+> middleware should set it via `with_<name>(value, future).await`
+
+## Multiple ALS types, independent cells
+
+`#[als]` declares a per-type static cell, so two ALS types never
+share state:
+
+```rust
+#[derive(Clone)] #[als] pub struct RequestCtx { /* ... */ }
+#[derive(Clone)] #[als] pub struct TraceCtx   { /* ... */ }
+```
+
+Setting one doesn't affect the other. The cell names (`REQUEST_CTX_ALS`,
+`TRACE_CTX_ALS`) are also unique per type, so tests and nested scopes
+don't collide.
+
+## `tokio::task_local` re-export
+
+The macro emits `::nestrs_core::als::task_local!` — a re-export of
+`tokio::task_local!`. That gives the codegen a stable path that
+doesn't require the user to add `tokio` as a direct dependency
+(transitive visibility from `nestrs-core` isn't enough on its own).
+Reach for `tokio::task_local!` directly when you want it; the re-export
+is just there so the macro's generated code has somewhere to point.
+
+## Why these choices
+
+- **Per-type cell** — names derived from the type itself, not from a
+  string the author had to keep in sync. Two types can't collide
+  because they emit distinct statics.
+- **`FromRequestParts` for both `()` and `Parts`** — handlers that
+  don't need the request still get the extractor at no cost; handlers
+  that do can use `Parts` as their state type.
+- **One `AlsError` variant** — missing value, full stop. Anything more
+  elaborate (decoding errors, auth-failed scope installs) is a
+  different concern that belongs in the middleware, not the cell.
+- **Returns `Self`, not `Arc<Self>`** — the cell already clones on
+  read; cloning once more at the extractor is the same cost, and
+  handler signatures stay simple.
+- **Macro is sugar over `AlsContext`** — pick the macro for the
+  per-type generated names and the extractor; reach for `AlsContext`
+  when the codegen would be in the way.
+
+## See also
+
+- [`tokio::task_local!`](https://docs.rs/tokio/latest/tokio/macro.task_local.html)
+  — the underlying primitive.
+- [`axum::extract::FromRequestParts`](https://docs.rs/axum/latest/axum/extract/trait.FromRequestParts.html)
+  — the extractor trait the generated impl satisfies.
+- [`mintlify-docs/concepts/middleware-pipeline`](/concepts/middleware-pipeline)
+  — for the per-request hook that installs the ALS value before
+  handlers run.

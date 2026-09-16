@@ -1,0 +1,34 @@
+[package]
+name = "nestrs-mongodb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Mongoose-style MongoDB adapter for nestrs — typed schemas, #[schema]/#[prop] derive, MongoRepository<T>, MongoModule::for_root / for_root_async. Mirrors @nestjs/mongoose."
+keywords = ["mongodb", "mongoose", "orm", "nest", "axum"]
+categories = ["database", "api-bindings", "web-programming"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "1.0.0" }
+mongodb = { version = "3", default-features = false, features = ["compat-3-0-0", "rustls-tls"] }
+bson = "2"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio.workspace = true
+tracing = "0.1"
+futures = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []
+## DNS/SRV resolution (`mongodb+srv://`, Atlas-style seed lists).
+## Adds the driver's `dns-resolver` stack — pulls hickory-* transitively.
+dns-resolver = ["mongodb/dns-resolver"]
+## Convenience feature for everything enabled.
+all = ["dns-resolver"]

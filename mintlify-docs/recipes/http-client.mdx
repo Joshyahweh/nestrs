@@ -1,0 +1,85 @@
+---
+title: "Outbound HTTP with nestrs-http"
+description: "HttpModule / HttpService / HttpServiceOptions — shared reqwest client with sane default timeouts (30s whole-request, 10s connect)."
+---
+
+`nestrs-http` is the Rust analogue of NestJS's
+[`@nestjs/axios`](https://docs.nestjs.com/techniques/http-module). It
+exposes a singleton `reqwest::Client` with bounded default timeouts and the
+standard `HttpModule` boot shape.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.1", features = ["http-client"] }
+nestrs-http = "1.1"
+```
+
+The `http-client` feature on the umbrella re-exports the `nestrs-http` types
+so existing code (`nestrs::HttpService`, `HttpServiceOptions`, `HttpModule`)
+keeps compiling unchanged.
+
+## Why default timeouts matter
+
+`reqwest` has **no** default timeout. Without an outbound deadline, a
+TCP-connected but unresponsive upstream hangs the calling handler's future
+forever and concurrent hung calls accumulate until the runtime is
+saturated. `HttpService` enforces a 30s whole-request / 10s connect
+default — tunable per-deployment via `HttpServiceOptions`.
+
+## Boot
+
+```rust
+use nestrs::prelude::*;
+use nestrs::http_client::{HttpModule, HttpService};
+
+#[module(imports = [HttpModule::register()])]
+struct AppModule;
+
+async fn fetch_user(svc: &HttpService) -> Result<serde_json::Value, reqwest::Error> {
+    svc.get("https://api.example.com/users/1")
+        .send()
+        .await?
+        .json()
+        .await
+}
+```
+
+The `HttpService` is injectable — resolve it through the DI container the
+same way you would `nestrs::MongoService`.
+
+## Configuration
+
+```rust
+use std::time::Duration;
+use nestrs::http_client::{HttpService, HttpServiceOptions};
+
+let options = HttpServiceOptions {
+    request_timeout: Duration::from_secs(5),
+    connect_timeout: Duration::from_secs(2),
+};
+let svc = HttpService::from_options(&options);
+```
+
+`DEFAULT_REQUEST_TIMEOUT` (30 s) and `DEFAULT_CONNECT_TIMEOUT` (10 s) are
+public constants — tests and docs can assert against them.
+
+## API surface
+
+| Symbol | Purpose |
+|--------|---------|
+| `HttpService` | Singleton wrapper around `reqwest::Client` with bounded default timeouts. |
+| `HttpModule::register()` | Boot helper that registers the singleton provider. |
+| `HttpServiceOptions` | `request_timeout` / `connect_timeout` builder. |
+| `HttpService::from_options(&opts)` | Build a tuned service. |
+| `HttpService::client()` | Borrow the underlying `reqwest::Client`. |
+| `HttpService::get(url)` / `post` / `put` / `patch` / `delete` | Return `reqwest::RequestBuilder`. |
+| `DEFAULT_REQUEST_TIMEOUT` | 30 s whole-request default. |
+| `DEFAULT_CONNECT_TIMEOUT` | 10 s connect default. |
+
+## Feature flags
+
+- `default = []` — base crate.
+- `reqwest` — re-exports `reqwest` at the crate root so callers don't add a
+  direct dep.

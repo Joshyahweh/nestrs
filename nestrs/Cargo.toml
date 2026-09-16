@@ -51,7 +51,7 @@ database-sqlx = ["dep:sqlx", "dep:serde_qs"]
 mongo = ["dep:nestrs-mongodb"]
 # Enables DNS/SRV resolution (`mongodb+srv://`, Atlas-style seed lists). Pulls **`hickory-*`** (see upstream MongoDB driver advisories).
 mongo-dns = ["mongo", "nestrs-mongodb/dns-resolver"]
-http-client = ["dep:reqwest", "nestrs-health/http"]
+http-client = ["dep:nestrs-http", "nestrs-health/http"]
 # Disk-space readiness indicator (`nestrs::DiskSpaceIndicator`, unix only —
 # backed by `statvfs` via `libc::statvfs`). The `libc` dep lives on
 # `nestrs-health` (gated by its `disk` feature) so this crate doesn't need
@@ -150,6 +150,7 @@ nestrs-throttler = { version = "1.0.0", path = "../nestrs-throttler", optional =
 nestrs-health = { version = "1.0.0", path = "../nestrs-health", default-features = false }
 nestrs-mongodb = { version = "1.0.0", path = "../nestrs-mongodb", optional = true, default-features = false }
 nestrs-drizzle = { version = "1.0.0", path = "../nestrs-drizzle", optional = true, default-features = false }
+nestrs-http = { version = "1.0.0", path = "../nestrs-http", optional = true, default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1"
@@ -199,7 +200,6 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 ## `nestrs::crud_macro` wraps it behind the same `BadRequestException` /
 ## `UnprocessableEntityException` contract as `ValidatedQuery`.
 serde_qs = { version = "0.13", optional = true }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 tower-cookies = { version = "0.10", optional = true }
 subtle = { version = "2.6", optional = true }
 tower-sessions = { version = "0.10", default-features = false, features = ["memory-store"], optional = true }

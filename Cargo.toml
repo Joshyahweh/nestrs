@@ -17,6 +17,7 @@ members = [
   "nestrs-security",
   "nestrs-throttler",
   "nestrs-health",
+  "nestrs-mongodb",
   "examples/hello-app",
   "examples/lab",
 ]

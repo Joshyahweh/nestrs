@@ -8,12 +8,12 @@ use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 pub use nestrs_macros::{
     all, check_policies, config, controller, cron, dataloader, delete, dto, event_pattern,
     event_routes, get, head, http_code, injectable, interval, liveness, message_pattern,
-    micro_routes, module, on_event, openapi, options, patch, post, put, queue_processor, raw_body,
-    readiness, redirect, response_header, roles, routes, schedule_routes, serialize, set_metadata,
-    skip_throttle, sse, startup, subscribe_message, throttle, upload_to, use_filters, use_guards,
-    use_interceptors, use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes,
-    use_ws_guards, use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes,
-    NestConfig, NestDto,
+    micro_routes, module, omit_type, on_event, openapi, options, partial_type, patch, pick_type,
+    post, put, queue_processor, raw_body, readiness, redirect, response_header, roles, routes,
+    schedule_routes, serialize, set_metadata, skip_throttle, sse, startup, subscribe_message,
+    throttle, upload_to, use_filters, use_guards, use_interceptors, use_micro_guards,
+    use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards, use_ws_interceptors,
+    use_ws_pipes, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
 };
 #[doc(hidden)]
 pub use schemars;

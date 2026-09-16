@@ -114,7 +114,8 @@
             "pages": [
               "api/macros/routing",
               "api/macros/di",
-              "api/macros/validation"
+              "api/macros/validation",
+              "api/macros/mapped-types"
             ]
           },
           {

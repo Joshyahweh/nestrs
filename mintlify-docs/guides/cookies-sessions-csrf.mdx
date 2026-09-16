@@ -1,0 +1,261 @@
+---
+title: "Cookies, sessions, and CSRF protection"
+description: "Opt-in browser-facing state with `use_cookies`, `use_session_memory`, and `use_csrf_protection` — the @nestjs/csrf analogue built on tower-cookies + tower-sessions."
+---
+
+Three feature flags in the `nestrs` umbrella crate cover browser-facing
+state: **`cookies`** (signed cookie parsing), **`session`** (in-memory
+server-side sessions via tower-sessions), and **`csrf`** (double-submit
+CSRF protection on unsafe methods). All three are opt-in — API-only
+services don't pay for them, browser-facing apps get the layers on the
+exact routes they need.
+
+The model matches the @nestjs/csrf recipe: a `csrf_token` cookie is
+issued on first visit, the browser sends the same value as a header on
+mutations, the middleware compares them in constant time and rejects
+mismatches. Sessions ride on top of cookies via tower-sessions'
+`SessionManagerLayer` with a `MemoryStore` (swap to a persistent store
+in production — see below).
+
+## Feature flags and builder calls
+
+```toml
+# Cargo.toml
+[dependencies]
+nestrs = { version = "1.0.0", features = ["cookies", "session", "csrf"] }
+```
+
+```rust
+use nestrs::{NestFactory, Module};
+use nestrs::security::CsrfProtectionConfig;
+
+#[module(controllers = [/* ... */])]
+pub struct AppModule;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let app = NestFactory::create(AppModule).await?
+        .use_cookies()
+        .use_session_memory()
+        .use_csrf_protection(CsrfProtectionConfig::default());
+    app.listen(3000).await?;
+    Ok(())
+}
+```
+
+Each call is independent:
+
+- **`use_cookies()`** — installs `tower_cookies::CookieManagerLayer`.
+  Every route gets a `Cookies` extractor you can read and write.
+- **`use_session_memory()`** — installs `tower_sessions::SessionManagerLayer`
+  with a `MemoryStore` *plus* the cookie layer (session implies cookies).
+- **`use_csrf_protection(config)`** — installs the double-submit
+  middleware. Requires `use_cookies()`; the check reads the `Cookies`
+  extension populated by the cookie layer.
+
+## Read and write cookies
+
+```rust
+use nestrs_macros::{controller, get, post};
+use tower_cookies::Cookies;
+
+#[controller("/cart")]
+pub struct CartController;
+
+#[get("/")]
+pub async fn show(cookies: Cookies) -> Json<Cart> {
+    let cart_id = cookies
+        .get("cart_id")
+        .map(|c| c.value().to_string())
+        .unwrap_or_default();
+    /* ... */
+}
+```
+
+`Cookies` is the `tower_cookies::Cookies` extractor — pass it to a
+handler and the framework injects the request-scoped cookie jar. To
+set a cookie from a handler:
+
+```rust
+#[post("/init")]
+pub async fn init(cookies: Cookies) -> Json<&'static str> {
+    cookies.add(
+        tower_cookies::Cookie::build(("cart_id", uuid::Uuid::new_v4().to_string()))
+            .path("/")
+            .http_only(true)
+            .secure(true)
+            .same_site(tower_cookies::cookie::SameSite::Lax)
+            .max_age(tower_cookies::cookie::time::Duration::days(30))
+            .build(),
+    );
+    Json("ok")
+}
+```
+
+`http_only` keeps the cookie out of `document.cookie` (good for
+session/auth), `same_site=Lax` is the right CSRF-resistant default for
+top-level navigations, `secure` enforces HTTPS. Avoid `same_site=None`
+unless you genuinely need third-party embeds.
+
+## Use the session store
+
+Once `use_session_memory()` is on, every handler can pull a session
+extractor:
+
+```rust
+use tower_sessions::Session;
+
+#[get("/me")]
+pub async fn me(session: Session) -> Result<Json<Principal>, StatusCode> {
+    match session.get::<Principal>("user").await {
+        Ok(Some(user)) => Ok(Json(user)),
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+#[post("/login")]
+pub async fn login(session: Session, /* ... */) -> StatusCode {
+    session.insert("user", principal).await.unwrap();
+    StatusCode::NO_CONTENT
+}
+```
+
+`Session` is `tower_sessions::Session` — read/insert/remove typed
+values, the store handles serialization. `MemoryStore` is the right
+choice for single-process dev and tests; for multi-process prod, swap
+to `tower_sessions::MysqlStore` / `RedisStore` / `CachingStore`
+(whatever `tower-sessions` ships for your backing store) and wire it
+in place of the `MemoryStore::default()` the builder installs.
+
+## Issue a CSRF token on first visit
+
+The CSRF middleware doesn't issue tokens — it only checks the
+double-submit on unsafe methods. You issue the token from a handler
+that runs on GET (the cookie gets set, the browser keeps it):
+
+```rust
+use nestrs_macros::{controller, get};
+use tower_cookies::Cookies;
+
+#[get("/csrf")]
+pub async fn csrf_token(cookies: Cookies) -> &'static str {
+    if cookies.get("csrf_token").is_none() {
+        let token: String = (0..32)
+            .map(|_| format!("{:02x}", rand::random::<u8>()))
+            .collect();
+        cookies.add(
+            tower_cookies::Cookie::build(("csrf_token", token))
+                .path("/")
+                .http_only(false)            // must be readable by JS
+                .same_site(tower_cookies::cookie::SameSite::Lax)
+                .build(),
+        );
+    }
+    "ok"
+}
+```
+
+The cookie is `http_only: false` so the SPA can read it via
+`document.cookie` and mirror it into the `X-CSRF-Token` header on
+every POST/PUT/PATCH/DELETE. Never log the token value; never echo it
+back in the body of a response other than the issuing endpoint.
+
+## Mutations must send the header
+
+```js
+// browser / SPA
+const csrf = document.cookie
+  .split('; ')
+  .find(c => c.startsWith('csrf_token='))
+  ?.split('=')[1];
+
+await fetch('/api/orders', {
+  method: 'POST',
+  credentials: 'include',
+  headers: { 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+  body: JSON.stringify(order),
+});
+```
+
+A POST without `X-CSRF-Token`, or with a value that doesn't equal the
+cookie byte-for-byte (the comparison is constant-time), gets:
+
+```json
+{
+  "statusCode": 403,
+  "message": "CSRF token missing or invalid",
+  "error": "Forbidden"
+}
+```
+
+The `cookies` layer is **inside** the CSRF layer — if you remove
+`use_cookies()` while keeping `use_csrf_protection(...)`, you'll see
+`403` with `"message": "CSRF check requires CookieManagerLayer (use
+NestApplication::use_cookies)"` on every request. That's by design:
+the check has nothing to read without the cookie jar.
+
+## Custom cookie/header names
+
+The default `CsrfProtectionConfig` uses `csrf_token` /
+`x-csrf-token`. Override when your app integrates with a framework
+that names things differently:
+
+```rust
+use nestrs::security::CsrfProtectionConfig;
+use axum::http::HeaderName;
+
+CsrfProtectionConfig {
+    cookie_name: "x-csrf",
+    header_name: HeaderName::from_static("x-csrf"),
+}
+```
+
+The header name is a `HeaderName` (axum re-export) so you can use any
+valid HTTP header — `X-XSRF-TOKEN`, `X-CSRF-Token`, or your own. The
+cookie name is a `&'static str` because `tower_cookies::Cookies::get`
+takes a string literal for the lookup.
+
+## The security footgun you should not ignore
+
+If you turn on `cookies` or `session` *without* `csrf` (either by
+forgetting the feature flag, or by skipping `use_csrf_protection(...)`),
+`nestrs` emits a `tracing::warn!` at startup:
+
+> nestrs security: cookies or in-memory sessions are enabled, but CSRF
+> protection is not configured. Cookie-authenticated browser clients
+> remain vulnerable to cross-site request forgery on unsafe HTTP methods
+> until you call NestApplication::use_csrf_protection(...)
+
+This isn't a soft suggestion. Any browser-facing endpoint that mutates
+state behind a cookie-only session — without CSRF — is a forgeable
+endpoint. The warning is loud because the failure mode is silent: a
+malicious site can submit a form to your API on behalf of a logged-in
+user, and your server can't tell the difference. Either add CSRF, or
+restrict the cookie layer to non-mutating routes (e.g. analytics only).
+
+## When to use what
+
+- **`use_cookies()` alone** — read-only cookies (analytics ids,
+  locale preferences), or when your auth lives in a non-cookie scheme
+  (Bearer tokens, mTLS).
+- **`use_session_memory()` for single-process dev** — fast to wire,
+  no DB, sessions disappear on restart. Replace with a persistent
+  store before going to prod with more than one instance.
+- **`use_csrf_protection(...)` for every browser-mutation surface** —
+  the default config is fine. Custom names only when an upstream
+  constraint forces them.
+- **No cookies at all** — pure-API services that authenticate via
+  Bearer tokens. Don't pay for layers you don't use.
+
+## See also
+
+- [Guides: security](/guides/security) — the broader surface
+  (Helmet headers, auth) — this guide focuses on stateful browser
+  sessions specifically.
+- [Concepts: middleware-pipeline](/concepts/middleware-pipeline) —
+  how CSRF sits inside the cookie layer so the extractor is populated
+  before the check.
+- [`tower-cookies`](https://docs.rs/tower-cookies) and
+  [`tower-sessions`](https://docs.rs/tower-sessions) — the upstream
+  crates the layers are built on; their docs cover the persistent
+  store options for multi-process prod.

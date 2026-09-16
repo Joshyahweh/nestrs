@@ -171,6 +171,12 @@ trustworthy. No breaking changes to the builder API.
   issuance + double-submit pattern, custom cookie/header names, the
   startup warning) + `docs.json` entry under `Guides` next to
   `guides/security`.
+- **Tests** — `nestrs/tests/cookies_sessions_csrf.rs` (gated on
+  `cookies` + `session` + `csrf`) complements the focused
+  `csrf_middleware.rs`. 5 cases: `Cookies` extractor writes a
+  `Set-Cookie`, `Session` extractor round-trips a typed value across
+  requests, GET / HEAD bypass the CSRF check, and PUT / PATCH / DELETE
+  are gated alongside POST.
 
 ### Added — Wave 7.13: Password hashing helpers + `#[derive(HashOnNew)]` (`nestrs-oauth2`, feature `password`)
 

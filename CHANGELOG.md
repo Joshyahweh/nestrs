@@ -135,6 +135,43 @@ from upstream services don't pay the compile cost of `bytes` /
   `Sse<S>`, accessors, "why these choices") + `docs.json` entry
   under `Core Concepts` next to `middleware-pipeline`.
 
+### Added — Wave 7.14: Cookies + sessions + CSRF (umbrella `nestrs`, features `cookies` / `session` / `csrf`)
+
+The cookies / sessions / CSRF surface was always in `nestrs/src/lib.rs`
+behind three feature flags but lacked docs and tests. This wave keeps
+the existing implementation (extracted from Wave 7.3's
+`nestrs-security::csrf` module and the `nestrs/src/security` re-export)
+and adds the documentation + test coverage to make it discoverable and
+trustworthy. No breaking changes to the builder API.
+
+- **`use_cookies()`** — installs `tower_cookies::CookieManagerLayer`
+  so handlers can take a `tower_cookies::Cookies` extractor. Feature
+  flag `cookies` (single dep on `tower-cookies`).
+- **`use_session_memory()`** — installs
+  `tower_sessions::SessionManagerLayer::new(MemoryStore::default())`
+  on top of the cookie layer (session implies cookies). Feature
+  flag `session` (`cookies` + `tower-sessions`). Production should
+  swap the `MemoryStore` for a persistent backend before going
+  multi-process.
+- **`use_csrf_protection(CsrfProtectionConfig)`** — installs the
+  double-submit middleware from `nestrs-security::csrf`. Layer
+  ordering is CSRF *inside* `CookieManagerLayer` so the `Cookies`
+  extractor is populated before the check. Feature flag `csrf`
+  (`cookies` + `subtle`).
+- **`CsrfProtectionConfig`** — `{ cookie_name: &'static str,
+  header_name: HeaderName }`. Default `("csrf_token", "x-csrf-token")`.
+  Override for upstream-named tokens (`X-XSRF-TOKEN`, etc.).
+- **Footgun guard** — when `cookies` or `session` is enabled and
+  `csrf` is not (either the feature flag or the builder call),
+  `nestrs` emits a `tracing::warn!` at startup pointing at the
+  `use_csrf_protection(...)` builder call. Cookie-authenticated
+  browser clients without CSRF are forgeable on POST/PUT/PATCH/DELETE.
+- **Docs** — `mintlify-docs/guides/cookies-sessions-csrf.mdx` (feature
+  flags, builder calls, `Cookies` / `Session` extractors, CSRF token
+  issuance + double-submit pattern, custom cookie/header names, the
+  startup warning) + `docs.json` entry under `Guides` next to
+  `guides/security`.
+
 ### Added — Wave 7.13: Password hashing helpers + `#[derive(HashOnNew)]` (`nestrs-oauth2`, feature `password`)
 
 Bcrypt / Argon2id hashing with prefix auto-detection on verify, plus

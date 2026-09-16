@@ -48,6 +48,7 @@
               "guides/oauth2",
               "oauth2/hashing",
               "guides/security",
+              "guides/cookies-sessions-csrf",
               "guides/throttling",
               "guides/observability",
               "guides/health",

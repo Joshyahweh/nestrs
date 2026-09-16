@@ -95,3 +95,38 @@ pub async fn csrf_double_submit_middleware(
     let req = Request::from_parts(parts, body);
     next.run(req).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_unsafe_method_classification() {
+        assert!(is_unsafe_method(&Method::POST));
+        assert!(is_unsafe_method(&Method::PUT));
+        assert!(is_unsafe_method(&Method::PATCH));
+        assert!(is_unsafe_method(&Method::DELETE));
+        assert!(!is_unsafe_method(&Method::GET));
+        assert!(!is_unsafe_method(&Method::HEAD));
+        assert!(!is_unsafe_method(&Method::OPTIONS));
+    }
+
+    #[test]
+    fn constant_time_eq_handles_length_mismatch() {
+        assert!(!constant_time_eq_bytes(b"abc", b"abcd"));
+        assert!(!constant_time_eq_bytes(b"abcd", b"abc"));
+    }
+
+    #[test]
+    fn constant_time_eq_handles_equal_bytes() {
+        assert!(constant_time_eq_bytes(b"hello", b"hello"));
+        assert!(!constant_time_eq_bytes(b"hello", b"Hello"));
+    }
+
+    #[test]
+    fn default_config_uses_csrf_token_cookie() {
+        let cfg = CsrfProtectionConfig::default();
+        assert_eq!(cfg.cookie_name, "csrf_token");
+        assert_eq!(cfg.header_name.as_str(), "x-csrf-token");
+    }
+}

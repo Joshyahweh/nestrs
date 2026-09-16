@@ -56,7 +56,19 @@ http-client = ["dep:reqwest"]
 # backed by `statvfs`).
 health-disk = ["dep:libc"]
 cookies = ["dep:tower-cookies"]
-csrf = ["cookies", "dep:subtle"]
+## Security building blocks: Bearer token parsing, `BearerToken` /
+## `OptionalBearerToken` extractors, `AuthStrategyGuard`,
+## `DemoXRoleMetadataGuard`, route-metadata helpers, and the helmet-style
+## response-header middleware (`HelmetConfig` + `helmet_middleware`).
+## Kept as a no-op feature flag for backward compat with downstream
+## `#[cfg(feature = "security")]` code; the underlying `nestrs-security`
+## crate is a non-optional dep so the symbols are always re-exported
+## from `nestrs::security::*`.
+security = []
+## Double-submit CSRF middleware (`csrf_double_submit_middleware` +
+## `CsrfProtectionConfig`) on top of `security` — pulls in `tower-cookies`
+## and `subtle` via the underlying crate.
+csrf = ["security", "cookies", "dep:subtle"]
 session = ["cookies", "dep:tower-sessions"]
 mvc = ["dep:minijinja"]
 files = ["dep:tokio-util"]
@@ -192,6 +204,7 @@ jsonwebtoken = { workspace = true, optional = true }
 argon2 = { workspace = true, optional = true, features = ["rand"] }
 getrandom = { version = "0.2", optional = true }
 nestrs-oauth2 = { version = "1.0.0", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
+nestrs-security = { version = "1.0.0", path = "../nestrs-security", default-features = false }
 nestrs-throttler = { version = "1.0.0", path = "../nestrs-throttler", optional = true, default-features = false }
 
 [dev-dependencies]

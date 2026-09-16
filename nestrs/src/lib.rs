@@ -267,10 +267,11 @@ pub use request_scoped::{RequestScoped, RequestScopedMissing};
 #[cfg(feature = "schedule")]
 pub use schedule::{ScheduleModule, ScheduleRuntime};
 #[cfg(feature = "csrf")]
-pub use security::CsrfProtectionConfig;
+pub use security::{csrf_double_submit_middleware, CsrfProtectionConfig};
 pub use security::{
-    parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
-    DemoXRoleMetadataGuard, OptionalBearerToken,
+    helmet_middleware, parse_authorization_bearer, route_roles_csv, AuthStrategyGuard,
+    BearerToken, DemoXRoleMetadataGuard, HelmetConfig, OptionalBearerToken, SecurityRejection,
+    XRoleMetadataGuard,
 };
 pub use serialization::strip_null_json_value;
 pub use server_timing::{ServerTiming, ServerTimingConfig};

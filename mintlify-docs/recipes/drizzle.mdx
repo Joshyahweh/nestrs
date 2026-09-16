@@ -1,0 +1,117 @@
+---
+title: "Drizzle ORM with nestrs-drizzle"
+description: "Typed SQL query builder for nestrs — DrizzleModule, DrizzleService, table! macro re-exports. Pick postgres / mysql / sqlite via feature flags."
+---
+
+`nestrs-drizzle` is the Rust analogue of NestJS's
+[`@nestjs/typeorm`](https://docs.nestjs.com/techniques/database) when Drizzle
+is the chosen query builder. The crate re-exports `drizzle_orm::*` at the
+crate root and adds the boot-time module / service shape NestJS apps expect.
+
+## Install
+
+```toml
+[dependencies]
+nestrs-drizzle = { version = "1.1", features = ["postgres"] }
+# or features = ["mysql"], features = ["sqlite"], or features = ["all"]
+```
+
+Drivers are selected via feature flags — pick exactly one (or `all` for
+multi-driver tools):
+
+- `postgres` — sqlx postgres
+- `mysql` — sqlx mysql
+- `sqlite` — sqlx sqlite
+- `all` — all three (larger compile, but useful for CLI tools)
+
+## Boot
+
+```rust
+use nestrs_drizzle::{DrizzleModule, DrizzleService};
+
+fn main() {
+    DrizzleModule::for_root("postgres://user:pass@localhost/app");
+    NestFactory::create::<AppModule>().listen(3000).await;
+}
+```
+
+The driver is auto-detected from the URL scheme. `postgres://` and
+`postgresql://` flip on `is_postgres()`, `mysql://` and `mariadb://`
+flip on `is_mysql()`, `sqlite://` and `sqlite:` flip on `is_sqlite()`.
+
+## Define a schema
+
+`nestrs_drizzle::schema::table` re-exports `drizzle_orm::table!`:
+
+```rust
+use nestrs_drizzle::schema::table;
+
+table! {
+    users (id) {
+        id -> Int4,
+        email -> Text,
+        name -> Text,
+    }
+}
+```
+
+Common column types are re-exported under
+`nestrs_drizzle::schema::{Int4, Int8, Int2, Text, Bool, Timestamp, Varchar}`.
+
+## Use the typed query builder
+
+```rust
+use nestrs_drizzle::{DrizzleService, schema};
+use drizzle_orm::{QueryBuilder, postgres::Pg};
+
+async fn list_users(svc: &DrizzleService) -> Result<Vec<schema::User>, nestrs_drizzle::DrizzleError> {
+    let q = QueryBuilder::new()
+        .select((users::id, users::email, users::name))
+        .from(users::table)
+        .to_owned();
+    // Hand the query off to a sqlx pool resolved through `svc`.
+    // (Drizzle's typed `Db` wrapper lives at `drizzle_orm::postgres::PgDb`.)
+    todo!()
+}
+```
+
+## Configuration
+
+`DrizzleOptions` builder wraps the URL with the driver-tuning knobs the
+average app actually reaches for:
+
+```rust
+use std::time::Duration;
+use nestrs_drizzle::{DrizzleModule, DrizzleOptions};
+
+fn main() {
+    let opts = DrizzleOptions::new("postgres://user:pass@localhost/app")
+        .max_pool_size(8)
+        .connect_timeout(Duration::from_secs(5));
+    DrizzleModule::for_root_with_options(opts);
+}
+```
+
+`parsed()` returns a `url::Url` for the configured connection,
+surfacing `InvalidUrl` if the URL is malformed.
+
+## API surface
+
+| Symbol | Purpose |
+|--------|---------|
+| `DrizzleModule::for_root(url)` | Static URL setter; call once at boot. |
+| `DrizzleModule::for_root_with_options(opts)` | Same, with a [`DrizzleOptions`] builder. |
+| `DrizzleService` | Injectable handle: `url()`, `is_postgres()`, `is_mysql()`, `is_sqlite()`, `parsed_url()`. |
+| `DrizzleOptions` | Builder (URL, max_pool_size, connect_timeout) with URL-scheme auto-detection. |
+| `DrizzleError` | `NotConfigured` / `InvalidUrl` / `Driver` / `Timeout`. |
+| `schema::table!` | Re-export of `drizzle_orm::table!`. |
+| `schema::{Int4, Int8, Int2, Text, Bool, Timestamp, Varchar}` | Common column types. |
+| `pub use drizzle_orm` | Crate root re-export of `drizzle_orm::*`. |
+
+## Feature flags
+
+- `default = []` — base crate, no SQL backend enabled.
+- `postgres` — `drizzle-orm/postgres`.
+- `mysql` — `drizzle-orm/mysql`.
+- `sqlite` — `drizzle-orm/sqlite`.
+- `all` — convenience for all three backends.

@@ -149,6 +149,7 @@ nestrs-security = { version = "1.0.0", path = "../nestrs-security", default-feat
 nestrs-throttler = { version = "1.0.0", path = "../nestrs-throttler", optional = true, default-features = false }
 nestrs-health = { version = "1.0.0", path = "../nestrs-health", default-features = false }
 nestrs-mongodb = { version = "1.0.0", path = "../nestrs-mongodb", optional = true, default-features = false }
+nestrs-drizzle = { version = "1.0.0", path = "../nestrs-drizzle", optional = true, default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1"

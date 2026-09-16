@@ -12,8 +12,8 @@ categories = ["web-programming", "asynchronous", "network-programming"]
 [features]
 default = []
 microservices = ["dep:nestrs-microservices", "dep:nestrs-events"]
-microservices-nats = ["microservices", "nestrs-microservices/nats", "dep:async-nats"]
-microservices-redis = ["microservices", "nestrs-microservices/redis", "dep:redis"]
+microservices-nats = ["microservices", "nestrs-microservices/nats", "dep:async-nats", "nestrs-health/nats"]
+microservices-redis = ["microservices", "nestrs-microservices/redis", "dep:redis", "nestrs-health/redis"]
 microservices-grpc = ["microservices", "nestrs-microservices/grpc"]
 microservices-kafka = ["microservices", "nestrs-microservices/kafka"]
 microservices-mqtt = ["microservices", "nestrs-microservices/mqtt"]
@@ -51,10 +51,12 @@ database-sqlx = ["dep:sqlx", "dep:serde_qs"]
 mongo = ["dep:mongodb"]
 # Enables DNS/SRV resolution (`mongodb+srv://`, Atlas-style seed lists). Pulls **`hickory-*`** (see upstream MongoDB driver advisories).
 mongo-dns = ["mongo", "mongodb/dns-resolver"]
-http-client = ["dep:reqwest"]
+http-client = ["dep:reqwest", "nestrs-health/http"]
 # Disk-space readiness indicator (`nestrs::DiskSpaceIndicator`, unix only —
-# backed by `statvfs`).
-health-disk = ["dep:libc"]
+# backed by `statvfs` via `libc::statvfs`). The `libc` dep lives on
+# `nestrs-health` (gated by its `disk` feature) so this crate doesn't need
+# it directly.
+health-disk = ["nestrs-health/disk"]
 cookies = ["dep:tower-cookies"]
 ## Security building blocks: Bearer token parsing, `BearerToken` /
 ## `OptionalBearerToken` extractors, `AuthStrategyGuard`,
@@ -143,6 +145,9 @@ nestrs-events = { version = "1.0.0", path = "../nestrs-events", optional = true 
 nestrs-ws = { version = "1.0.0", path = "../nestrs-ws", optional = true }
 nestrs-graphql = { version = "1.0.0", path = "../nestrs-graphql", optional = true }
 nestrs-openapi = { version = "1.0.0", path = "../nestrs-openapi", optional = true }
+nestrs-security = { version = "1.0.0", path = "../nestrs-security", default-features = false }
+nestrs-throttler = { version = "1.0.0", path = "../nestrs-throttler", optional = true, default-features = false }
+nestrs-health = { version = "1.0.0", path = "../nestrs-health", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1"
@@ -194,7 +199,6 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 serde_qs = { version = "0.13", optional = true }
 mongodb = { version = "3", optional = true, default-features = false, features = ["compat-3-0-0", "rustls-tls"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
-libc = { version = "0.2", optional = true }
 tower-cookies = { version = "0.10", optional = true }
 subtle = { version = "2.6", optional = true }
 tower-sessions = { version = "0.10", default-features = false, features = ["memory-store"], optional = true }
@@ -204,8 +208,6 @@ jsonwebtoken = { workspace = true, optional = true }
 argon2 = { workspace = true, optional = true, features = ["rand"] }
 getrandom = { version = "0.2", optional = true }
 nestrs-oauth2 = { version = "1.0.0", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
-nestrs-security = { version = "1.0.0", path = "../nestrs-security", default-features = false }
-nestrs-throttler = { version = "1.0.0", path = "../nestrs-throttler", optional = true, default-features = false }
 
 [dev-dependencies]
 async-graphql = "=7.0.17"

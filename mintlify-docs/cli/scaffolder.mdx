@@ -1,0 +1,114 @@
+---
+title: "CLI scaffolder — nestrs-cli new"
+description: "nestrs-cli new app | lib | resource — generate binary crates, library crates, and full resource modules."
+---
+
+`nestrs-cli` (install with `cargo install nestrs-scaffold`) ships a
+scaffolder that handles the three most common bootstraps:
+
+- `nestrs-cli new app <name>` — generate a binary crate (controller +
+  service + DTO + boot sequence).
+- `nestrs-cli new lib <name>` — generate a library crate skeleton
+  (controllers / services / dto modules ready to fill in).
+- `nestrs-cli new resource <name>` — generate a full resource module
+  (controller + service + module + DTO + update DTO via
+  `#[nestrs::partial_type]`).
+
+The pre-1.1 signature `nestrs-cli new <name>` keeps working as an
+alias for `new app`.
+
+## `nestrs-cli new app <name>`
+
+Generates a binary crate at `./<name>/` with:
+
+- `Cargo.toml` declaring `nestrs` + `tokio` + `serde` dependencies
+  and release profile flags (`lto = "thin"`, `panic = "abort"`,
+  `strip = "symbols"`).
+- `src/main.rs` with `AppController`, `AppService`, `PingDto`, the
+  `NestFactory::create::<AppModule>().listen_graceful(port)` boot
+  sequence, and the standard middleware stack
+  (`set_global_prefix` / `use_request_id` / `use_request_tracing` /
+  `enable_metrics` / `enable_health_check` /
+  `enable_production_errors_from_env`).
+- `README.md`, `.env.example`, `.gitignore`, `Dockerfile` (multi-stage
+  `rust:1.75` → `debian:bookworm-slim`).
+
+```bash
+nestrs-cli new app my-service --no-git
+cd my-service
+cargo run
+```
+
+## `nestrs-cli new lib <name>`
+
+Generates a library crate at `./<name>/` with:
+
+- `Cargo.toml` declaring `nestrs` + `serde`.
+- `src/lib.rs` declaring `pub mod controllers; pub mod services;
+  pub mod dto;` so the library is ready to fill in.
+- `README.md`, `.gitignore`. No `src/main.rs` — this is a library.
+
+```bash
+nestrs-cli new lib my-shared --no-git
+cd my-shared
+cargo build
+```
+
+## `nestrs-cli new resource <name>`
+
+Generates a full resource module under `./<name>/src/<name>/`:
+
+- `dto.rs` — `<Name>` entity, `Create<Name>Dto` (uses `#[dto]`),
+  `Update<Name>Dto` (uses `#[nestrs::partial_type]` from Wave 7.5).
+- `service.rs` — `<Name>Service` with `#[injectable]`, `list()` and
+  `create()` stubs.
+- `controller.rs` — `<Name>Controller` with `#[controller(prefix =
+  "/<name>")]`, `list` (`GET /`), `create` (`POST /`, `#[http_code(201)]`),
+  `update` (`PATCH /:id`).
+- `module.rs` — `<Name>Module` with `controllers = [...]`,
+  `providers = [...]`, `exports = [...]` — drop it into `AppModule`'s
+  `imports`.
+- `mod.rs` — module-level re-exports.
+
+Drop the `src/<name>/` directory into an existing nestrs app's `src/`
+and import `<Name>Module` from `AppModule`:
+
+```rust
+#[module(
+    imports = [<Name>Module],
+    controllers = [...],
+    providers = [...],
+)]
+struct AppModule;
+```
+
+```bash
+nestrs-cli new resource widgets --no-git
+# move src/widgets/ into your app, then update AppModule
+```
+
+## Common flags
+
+- `--no-git` — skip `git init` in the generated directory.
+- `--strict` — generated `main.rs` / `lib.rs` starts with
+  `#![deny(unsafe_code)]`.
+- `--package-manager cargo` — only `cargo` is supported today.
+
+## Back-compat
+
+The pre-1.1 signature `nestrs-cli new <name>` (no `app` / `lib` /
+`resource` keyword) keeps working — it dispatches to `new app`. No
+existing scripts break.
+
+## See also
+
+- `nestrs-cli g|generate <kind> <name>` — generate individual
+  controller / service / module / DTO / guard / pipe / filter /
+  interceptor / strategy / resolver / gateway / microservice /
+  transport pieces inside an existing crate. See the CLI help
+  (`nestrs-cli --help`) for the full surface.
+- `nestrs-cli doctor` — environment sanity check (Rust toolchain,
+  optional dependencies).
+- `nestrs-cli db` (Cargo feature `db`) — migrations + seeding.
+</content>
+</invoke>

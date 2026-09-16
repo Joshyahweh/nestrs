@@ -65,6 +65,7 @@
             "group": "CLI",
             "pages": [
               "cli/overview",
+              "cli/scaffolder",
               "cli/generate"
             ]
           },

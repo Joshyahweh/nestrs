@@ -77,7 +77,8 @@ fn print_help() -> Result<(), String> {
     println!("Not a Nest CLI clone: no workspace wizard, library packages, or npm-style scripts — use Cargo workspaces, `cargo new --lib`, and cargo-make/just/shell.");
     println!();
     println!("Usage:");
-    println!("  nestrs-cli new <name> [--no-git] [--strict] [--package-manager cargo]");
+    println!("  nestrs-cli new <app|lib|resource> <name> [--no-git] [--strict] [--package-manager cargo]");
+    println!("  nestrs-cli new <name>                                   # alias for `new app`");
     println!("    --strict: generated src/main.rs starts with #![deny(unsafe_code)]");
     println!("  nestrs-cli doctor   (toolchain + nestrs feature hints for the current crate)");
     println!("  nestrs-cli g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");
@@ -98,15 +99,35 @@ fn print_help() -> Result<(), String> {
 
 fn create_new_project(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
-        return Err("expected `nestrs-cli new <name> ...`".to_string());
+        return Err(
+            "expected `nestrs-cli new <app|lib|resource> <name> ...`\n\n  nestrs-cli new app <name>          # binary crate with controller + service + DTO\n  nestrs-cli new lib <name>          # library crate skeleton\n  nestrs-cli new resource <name>     # controller + service + module + dto in src/<name>/"
+                .to_string(),
+        );
     }
 
-    let name = args[0].clone();
+    let kind = args[0].as_str();
+    let name = match kind {
+        "app" | "lib" | "resource" => {
+            if args.len() < 2 {
+                return Err(format!(
+                    "expected `nestrs-cli new {kind} <name> ...`"
+                ));
+            }
+            args[1].clone()
+        }
+        // Back-compat: `nestrs-cli new <name>` is the original "new app"
+        // signature; treat any unknown first arg as a name.
+        _ => kind.to_string(),
+    };
+
     let mut no_git = false;
     let mut strict = false;
     let mut package_manager = String::from("cargo");
 
-    let mut i = 1usize;
+    let mut i = match kind {
+        "app" | "lib" | "resource" => 2usize,
+        _ => 1usize,
+    };
     while i < args.len() {
         match args[i].as_str() {
             "--no-git" => no_git = true,
@@ -129,7 +150,19 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
         ));
     }
 
-    let root = PathBuf::from(&name);
+    match kind {
+        "app" => create_new_app(&name, no_git, strict)?,
+        "lib" => create_new_lib(&name, no_git, strict)?,
+        "resource" => create_new_resource(&name, no_git)?,
+        _ => create_new_app(&name, no_git, strict)?,
+    }
+    Ok(())
+}
+
+/// `nestrs-cli new app <name>` — generate a binary crate with a controller,
+/// service, DTO, and the boot sequence wired up.
+fn create_new_app(name: &str, no_git: bool, strict: bool) -> Result<(), String> {
+    let root = PathBuf::from(name);
     if root.exists() {
         return Err(format!("target path already exists: {}", root.display()));
     }
@@ -171,6 +204,134 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
 
     println!("created project {}", root.display());
     Ok(())
+}
+
+/// `nestrs-cli new lib <name>` — generate a library crate skeleton. No
+/// `src/main.rs`, no boot sequence — just `src/lib.rs` plus the standard
+/// `Cargo.toml` / `README.md` / `.gitignore`.
+fn create_new_lib(name: &str, no_git: bool, strict: bool) -> Result<(), String> {
+    let root = PathBuf::from(name);
+    if root.exists() {
+        return Err(format!("target path already exists: {}", root.display()));
+    }
+
+    fs::create_dir_all(root.join("src")).map_err(|e| e.to_string())?;
+
+    let cargo_toml = format!(
+        "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nnestrs = \"0.1\"\nserde = {{ version = \"1\", features = [\"derive\"] }}\n\n[profile.release]\nopt-level = 3\nlto = \"thin\"\ncodegen-units = 1\nstrip = \"symbols\"\npanic = \"abort\"\n"
+    );
+    fs::write(root.join("Cargo.toml"), cargo_toml).map_err(|e| e.to_string())?;
+
+    let crate_header = if strict {
+        "#![deny(unsafe_code)]\n\n"
+    } else {
+        ""
+    };
+    let lib_rs = format!(
+        "{crate_header}//! {name}\n//!\n//! Reusable nestrs module / controller / DTO library. Add the\n//! types you want to export here and `pub use` them at the crate root.\n\npub mod controllers;\npub mod services;\npub mod dto;\n"
+    );
+    fs::write(root.join("src/lib.rs"), lib_rs).map_err(|e| e.to_string())?;
+
+    let readme = format!(
+        "# {name}\n\nGenerated with `nestrs-cli new lib`.\n\nA reusable nestrs library crate — controllers, services, and DTOs that\nplug into a host app's `AppModule`.\n\n## Development\n\n```bash\ncargo build\ncargo test\n```\n"
+    );
+    fs::write(root.join("README.md"), readme).map_err(|e| e.to_string())?;
+    fs::write(root.join(".gitignore"), "/target\n.env\n").map_err(|e| e.to_string())?;
+
+    if !no_git {
+        let _ = Command::new("git").arg("init").current_dir(&root).status();
+    }
+
+    println!("created library project {}", root.display());
+    Ok(())
+}
+
+/// `nestrs-cli new resource <name>` — generate a full resource module
+/// (controller + service + module + dto) under `src/<name>/`. Designed
+/// to be moved into an existing app's source tree.
+fn create_new_resource(name: &str, no_git: bool) -> Result<(), String> {
+    let root = PathBuf::from(name);
+    if root.exists() {
+        return Err(format!("target path already exists: {}", root.display()));
+    }
+
+    let resource_dir = root.join("src").join(name);
+    fs::create_dir_all(&resource_dir).map_err(|e| e.to_string())?;
+
+    let pascal = to_pascal_case(name);
+    let module_name = format!("{pascal}Module");
+    let controller_name = format!("{pascal}Controller");
+    let service_name = format!("{pascal}Service");
+    let create_dto = format!("Create{pascal}Dto");
+    let update_dto = format!("Update{pascal}Dto");
+
+    // dto.rs
+    let dto_rs = format!(
+        "//! DTOs for the {pascal} resource.\n\nuse nestrs::prelude::*;\nuse serde::{{Deserialize, Serialize}};\n\n#[derive(Debug, Clone, Serialize, Deserialize, Default)]\npub struct {pascal} {{\n    pub id: String,\n    pub name: String,\n}}\n\n#[dto]\npub struct {create_dto} {{\n    #[IsString]\n    #[Length(min = 1, max = 255)]\n    pub name: String,\n}}\n\n#[nestrs::partial_type]\npub struct {update_dto} {{\n    #[IsString]\n    #[Length(min = 1, max = 255)]\n    pub name: String,\n}}\n"
+    );
+    fs::write(resource_dir.join("dto.rs"), dto_rs).map_err(|e| e.to_string())?;
+
+    // service.rs
+    let service_rs = format!(
+        "//! {pascal} business logic.\n\nuse nestrs::prelude::*;\nuse super::dto::{{{pascal}, {create_dto}}};\n\n#[derive(Default)]\n#[injectable]\npub struct {service_name};\n\nimpl {service_name} {{\n    pub async fn list(&self) -> Vec<{pascal}> {{\n        Vec::new()\n    }}\n\n    pub async fn create(&self, _input: {create_dto}) -> {pascal} {{\n        {pascal} {{\n            id: uuid::Uuid::new_v4().to_string(),\n            name: _input.name,\n        }}\n    }}\n}}\n"
+    );
+    fs::write(resource_dir.join("service.rs"), service_rs).map_err(|e| e.to_string())?;
+
+    // controller.rs
+    let controller_rs = format!(
+        "//! {pascal} HTTP surface.\n\nuse nestrs::prelude::*;\nuse super::dto::{{{pascal}, {create_dto}, {update_dto}}};\nuse super::service::{service_name};\n\n#[controller(prefix = \"/{name}\")]\npub struct {controller_name};\n\nimpl {controller_name} {{\n    #[get(\"/\")]\n    pub async fn list(svc: {service_name}) -> Json<Vec<{pascal}>> {{\n        Json(svc.list().await)\n    }}\n\n    #[post(\"/\")]\n    #[http_code(201)]\n    pub async fn create(\n        ValidatedBody(input): ValidatedBody<{create_dto}>,\n        svc: {service_name},\n    ) -> Json<{pascal}> {{\n        Json(svc.create(input).await)\n    }}\n\n    #[patch(\"/:id\")]\n    pub async fn update(\n        PathParam(id): PathParam<String>,\n        ValidatedBody(input): ValidatedBody<{update_dto}>,\n        svc: {service_name},\n    ) -> Json<{pascal}> {{\n        let _ = (id, input);\n        Json({pascal} {{ id: \"\".into(), name: \"\".into() }})\n    }}\n}}\n"
+    );
+    fs::write(resource_dir.join("controller.rs"), controller_rs).map_err(|e| e.to_string())?;
+
+    // module.rs
+    let module_rs = format!(
+        "//! {pascal} feature module — wire controller + service into the host app.\n\nuse nestrs::prelude::*;\nuse super::controller::{controller_name};\nuse super::service::{service_name};\n\n#[module(\n    controllers = [{controller_name}],\n    providers = [{service_name}],\n    exports = [{service_name}],\n)]\npub struct {module_name};\n"
+    );
+    fs::write(resource_dir.join("module.rs"), module_rs).map_err(|e| e.to_string())?;
+
+    // mod.rs
+    let mod_rs = format!(
+        "//! {pascal} resource — controller + service + dto + module wiring.\n\npub mod controller;\npub mod dto;\npub mod module;\npub mod service;\n"
+    );
+    fs::write(resource_dir.join("mod.rs"), mod_rs).map_err(|e| e.to_string())?;
+
+    let readme = format!(
+        "# {name} resource\n\nGenerated with `nestrs-cli new resource`. Drop the `src/{name}/`\ndirectory into an existing nestrs app's `src/` and import\n`{module_name}` from `AppModule`.\n\n## Files\n\n- `dto.rs` — `{pascal}` entity, `{create_dto}`, `{update_dto}` (uses\n  Wave 7.5 `#[nestrs::partial_type]`).\n- `service.rs` — `{service_name}` business logic.\n- `controller.rs` — `{controller_name}` with `list` / `create` /\n  `update` routes.\n- `module.rs` — `{module_name}` ready to import.\n- `mod.rs` — module-level re-exports.\n"
+    );
+    fs::write(root.join("README.md"), readme).map_err(|e| e.to_string())?;
+    fs::write(root.join(".gitignore"), "/target\n.env\n").map_err(|e| e.to_string())?;
+
+    if !no_git {
+        let _ = Command::new("git").arg("init").current_dir(&root).status();
+    }
+
+    println!(
+        "created resource {} (move src/{name}/ into your app to use it)",
+        root.display()
+    );
+    let _ = no_git; // silence unused warning if user passes --no-git
+    Ok(())
+}
+
+/// Convert `snake_case` or `kebab-case` to `PascalCase`. Used by
+/// `nestrs-cli new resource` to derive the entity / service / module
+/// type names from the resource name.
+fn to_pascal_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut capitalize_next = true;
+    for ch in s.chars() {
+        if ch == '_' || ch == '-' {
+            capitalize_next = true;
+            continue;
+        }
+        if capitalize_next {
+            out.extend(ch.to_uppercase());
+            capitalize_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn generate(args: &[String]) -> Result<(), String> {

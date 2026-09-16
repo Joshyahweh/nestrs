@@ -220,6 +220,54 @@ the same paths via a 1-line re-export shim.
 moved over) keeps compiling unchanged via the 1-line shim — the
 file's content already lives in `nestrs-http/tests/timeouts.rs`.
 
+### Added — `nestrs-cli new app|lib|resource` scaffolder (Tier 3.1)
+
+Wave 7.9. The pre-1.1 `nestrs-cli new <name>` signature kept
+working as an alias; this wave adds explicit subcommands and a
+third scaffolding shape (resource modules).
+
+- **`nestrs-cli new app <name>`** — generates a binary crate at
+  `./<name>/`: `Cargo.toml` (with release profile flags), `src/main.rs`
+  with `AppController` / `AppService` / `PingDto`, the standard
+  middleware stack (`set_global_prefix` / `use_request_id` /
+  `use_request_tracing` / `enable_metrics` / `enable_health_check` /
+  `enable_production_errors_from_env`), `README.md`,
+  `.env.example`, `.gitignore`, `Dockerfile` (multi-stage
+  `rust:1.75` → `debian:bookworm-slim`).
+- **`nestrs-cli new lib <name>`** — generates a library crate at
+  `./<name>/`: `Cargo.toml`, `src/lib.rs` declaring `pub mod
+  controllers; pub mod services; pub mod dto;`, `README.md`,
+  `.gitignore`.
+- **`nestrs-cli new resource <name>`** — generates a full resource
+  module under `./<name>/src/<name>/`: `dto.rs` (entity,
+  `Create<Name>Dto` with `#[dto]`, `Update<Name>Dto` with Wave
+  7.5's `#[nestrs::partial_type]`), `service.rs` (with
+  `#[injectable]`), `controller.rs` (with `#[controller(prefix =
+  "/<name>")]`, `list` / `create` / `update` handlers using
+  `ValidatedBody<>`), `module.rs` (with `#[module(...)]` listing
+  controllers / providers / exports), `mod.rs`. Drop the directory
+  into an existing app's `src/` and import `<Name>Module` from
+  `AppModule`.
+- **Back-compat** — `nestrs-cli new <name>` (no `app` / `lib` /
+  `resource` keyword) still dispatches to `new app`. No existing
+  scripts break.
+- **Common flags** — `--no-git` (skip `git init`), `--strict`
+  (generated crate starts with `#![deny(unsafe_code)]`).
+- **Tests** — `nestrs-cli/tests/scaffolder_cli.rs` (4 tests):
+  `new_app_creates_binary_crate` (asserts main.rs boots
+  `AppModule` + has `#[controller]` + `#[dto]`),
+  `new_lib_creates_library_crate` (asserts lib.rs declares
+  controllers / services / dto modules),
+  `new_resource_emits_controller_service_dto_module` (asserts
+  dto.rs uses `#[dto]` and `#[nestrs::partial_type]`, controller.rs
+  uses `#[controller]` and `ValidatedBody`, module.rs lists
+  controllers / providers / exports, service.rs uses
+  `#[injectable]`), `new_without_kind_keyword_still_creates_app`
+  (back-compat).
+- **Docs** — `mintlify-docs/cli/scaffolder.mdx` (full reference for
+  all three subcommands with examples, common flags, back-compat
+  section, see-also) + `docs.json` entry under `CLI`.
+
 ## [1.0.0] - 2026-09-12
 
 First stable release. Everything since 0.5.2 is in this version: the

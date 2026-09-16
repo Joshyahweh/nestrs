@@ -94,7 +94,8 @@
               "recipes/graphql-mongo",
               "recipes/grpc-microservice",
               "recipes/message-brokers",
-              "recipes/event-driven"
+              "recipes/event-driven",
+              "recipes/mongodb"
             ]
           }
         ]

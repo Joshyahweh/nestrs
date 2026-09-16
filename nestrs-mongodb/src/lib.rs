@@ -35,3 +35,12 @@ pub use schema::{Document, Schema};
 // directly for things like `Database`, `Collection`, `bson::doc!`.
 pub use bson;
 pub use mongodb;
+
+// Re-export the `Document` derive macro from `nestrs-macros` at the crate
+// root so callers can write `#[derive(nestrs_mongodb::Document)]` without
+// depending on `nestrs-macros` directly. The derive lives at
+// `nestrs_mongodb::Document` next to the trait of the same name; Rust keeps
+// derive macros and traits at the same path in separate namespaces so
+// `impl Document for T` (trait) and `#[derive(Document)]` (macro) both
+// resolve cleanly.
+pub use nestrs_macros::Document;

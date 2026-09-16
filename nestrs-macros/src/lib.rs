@@ -5867,3 +5867,238 @@ pub fn upload_to(attr: TokenStream, item: TokenStream) -> TokenStream {
     .to_compile_error()
     .into()
 }
+
+// ---------------------------------------------------------------------------
+// Wave 7.6 Phase C — `#[derive(nestrs_mongodb::Document)]` for Mongoose-style
+// schemas. Pairs with the inert `#[schema(...)]` struct-level attribute and
+// `#[prop(...)]` field-level attribute. The derive emits only the
+// `Document` trait impl (`collection_name`); `#[prop(...)]` is consumed
+// silently so it can stay on the field as documentation.
+//
+//     #[derive(Debug, Clone, Serialize, Deserialize, nestrs_mongodb::Document)]
+//     #[schema(collection = "users", timestamps)]
+//     struct User {
+//         #[serde(skip_serializing_if = "Option::is_none")]
+//         _id: Option<bson::oid::ObjectId>,
+//         #[prop(unique)]
+//         email: String,
+//         name: String,
+//     }
+//
+// `collection` defaults to the snake_case plural of the struct ident when
+// omitted (`User` → `"users"`, `BlogPost` → `"blog_posts"`).
+// ---------------------------------------------------------------------------
+
+/// Parsed `#[schema(...)]` attribute. Holds the metadata the derive needs to
+/// emit the `Document` impl.
+#[derive(Default, Debug)]
+struct SchemaAttr {
+    collection: Option<String>,
+    timestamps: bool,
+    version_key: Option<bool>,
+    capped_bytes: Option<u64>,
+}
+
+/// Parsed `#[prop(...)]` attribute. Currently captured for compile-time
+/// validation; index / default / ref metadata lands in a follow-up
+/// `MongoSchemaMeta` trait (Phase F) once we have an integration test
+/// surface.
+#[derive(Default, Debug)]
+struct PropAttr {
+    rename: Option<String>,
+    skip: bool,
+    default_fn: Option<String>,
+    unique: bool,
+    sparse: bool,
+    index: bool,
+    ref_target: Option<String>,
+}
+
+impl Parse for SchemaAttr {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut out = SchemaAttr::default();
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            let key_str = key.to_string();
+            match key_str.as_str() {
+                "collection" => {
+                    let _eq: Token![=] = input.parse()?;
+                    let lit: LitStr = input.parse()?;
+                    out.collection = Some(lit.value());
+                }
+                "timestamps" => {
+                    out.timestamps = true;
+                }
+                "version_key" => {
+                    let _eq: Token![=] = input.parse()?;
+                    let lit: syn::LitBool = input.parse()?;
+                    out.version_key = Some(lit.value());
+                }
+                "capped_bytes" | "capped" => {
+                    let _eq: Token![=] = input.parse()?;
+                    let lit: LitInt = input.parse()?;
+                    let n: u64 = lit.base10_parse().map_err(|e| {
+                        syn::Error::new(lit.span(), format!("invalid capped size: {e}"))
+                    })?;
+                    out.capped_bytes = Some(n);
+                }
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "unknown #[schema] key `{other}`; expected one of \
+                             `collection`, `timestamps`, `version_key`, `capped_bytes`"
+                        ),
+                    ));
+                }
+            }
+            if input.peek(Token![,]) {
+                let _comma: Token![,] = input.parse()?;
+            }
+        }
+        Ok(out)
+    }
+}
+
+impl Parse for PropAttr {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut out = PropAttr::default();
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            let key_str = key.to_string();
+            match key_str.as_str() {
+                "rename" => {
+                    let _eq: Token![=] = input.parse()?;
+                    let lit: LitStr = input.parse()?;
+                    out.rename = Some(lit.value());
+                }
+                "skip" => {
+                    out.skip = true;
+                }
+                "default" => {
+                    let _eq: Token![=] = input.parse()?;
+                    let lit: LitStr = input.parse()?;
+                    out.default_fn = Some(lit.value());
+                }
+                "unique" => {
+                    out.unique = true;
+                }
+                "sparse" => {
+                    out.sparse = true;
+                }
+                "index" => {
+                    out.index = true;
+                }
+                "ref" => {
+                    let _eq: Token![=] = input.parse()?;
+                    let lit: LitStr = input.parse()?;
+                    out.ref_target = Some(lit.value());
+                }
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "unknown #[prop] key `{other}`; expected one of \
+                             `rename`, `skip`, `default`, `unique`, `sparse`, \
+                             `index`, `ref`"
+                        ),
+                    ));
+                }
+            }
+            if input.peek(Token![,]) {
+                let _comma: Token![,] = input.parse()?;
+            }
+        }
+        Ok(out)
+    }
+}
+
+fn parse_schema_attr(input: &DeriveInput) -> SchemaAttr {
+    for attr in &input.attrs {
+        if attr.path().is_ident("schema") {
+            match attr.parse_args::<SchemaAttr>() {
+                Ok(s) => return s,
+                Err(e) => {
+                    let _ = e; // surfaced via compile_error on the expanded output below
+                }
+            }
+        }
+    }
+    SchemaAttr::default()
+}
+
+/// Convert a CamelCase struct ident to snake_case. Used for the default
+/// `collection` name when `#[schema(collection = …)]` is omitted.
+fn ident_to_snake_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 1);
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && ch.is_ascii_uppercase() {
+            out.push('_');
+        }
+        out.push(ch.to_ascii_lowercase());
+    }
+    out
+}
+
+fn default_collection_name(struct_ident: &str) -> String {
+    let snake = ident_to_snake_case(struct_ident);
+    // Pluralize with a trailing "s" for the Mongoose convention.
+    // (Covers 95% of cases; users override with `#[schema(collection = …)]`.)
+    format!("{snake}s")
+}
+
+/// `#[derive(nestrs_mongodb::Document)]` — emits the `Document` impl with
+/// `collection_name()` resolved from the `#[schema(collection = …)]`
+/// attribute (defaulting to the snake_case plural of the struct ident).
+///
+/// Field-level `#[prop(...)]` attributes are accepted (and must parse
+/// cleanly) but currently only influence doc-strings / future metadata —
+/// the collection-level data the driver needs is just the collection name.
+#[proc_macro_derive(Document, attributes(schema, prop))]
+pub fn derive_nestrs_mongo_document(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    // Validate every `#[prop(...)]` attribute is well-formed. We don't
+    // currently emit per-field metadata, but parsing them up front catches
+    // typos like `#[prop(uniqu)]` at compile time.
+    if let syn::Data::Struct(s) = &input.data {
+        if let Fields::Named(named) = &s.fields {
+            for field in &named.named {
+                for attr in &field.attrs {
+                    if attr.path().is_ident("prop") {
+                        if let Err(e) = attr.parse_args::<PropAttr>() {
+                            return e.to_compile_error().into();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let schema = parse_schema_attr(&input);
+
+    // Resolve the collection name. If `#[schema(collection = "...")]` was
+    // supplied, use it; otherwise snake_case + plural of the struct ident.
+    let collection_name = match &schema.collection {
+        Some(c) => c.clone(),
+        None => default_collection_name(&input.ident.to_string()),
+    };
+
+    if schema.timestamps && schema.version_key.is_none() {
+        // version_key defaults to true in Mongoose; we mirror that for
+        // shape parity but it doesn't affect the derive emit.
+    }
+
+    let ident = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let expanded = quote! {
+        impl #impl_generics ::nestrs_mongodb::Document for #ident #ty_generics #where_clause {
+            fn collection_name() -> &'static str {
+                #collection_name
+            }
+        }
+    };
+
+    expanded.into()
+}

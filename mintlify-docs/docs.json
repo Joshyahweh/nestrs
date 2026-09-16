@@ -66,6 +66,7 @@
             "pages": [
               "cli/overview",
               "cli/scaffolder",
+              "cli/repl",
               "cli/generate"
             ]
           },

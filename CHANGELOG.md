@@ -268,6 +268,54 @@ third scaffolding shape (resource modules).
   all three subcommands with examples, common flags, back-compat
   section, see-also) + `docs.json` entry under `CLI`.
 
+### Added — `nestrs-cli repl graph|routes|providers|dtos` (Tier 3.2)
+
+Wave 7.10. A static source-level DI graph explorer. Mirrors the
+NestJS "print application graph" debugging tool but works without
+launching the app — `nestrs-cli repl` reads the user's `.rs`
+files and extracts the module / controller / provider / DTO tree
+via regex (no `syn` dependency).
+
+- **Subcommands**
+  - `nestrs-cli repl graph [--path <dir>] [--format text|json]` —
+    tree view of modules with imports / controllers / providers
+    and each controller's routes. JSON output is serde-round-trip.
+  - `nestrs-cli repl routes` — flattened, sorted HTTP route table
+    (METHOD / PATH / HANDLER columns). Ideal for piping into a
+    Markdown doc or an OpenAPI generation script.
+  - `nestrs-cli repl providers` — every `#[injectable]` type,
+    grouped by the module that declares it (orphans fall under
+    `unassigned:`).
+  - `nestrs-cli repl dtos` — every `#[dto]`-decorated struct
+    (heuristic: name ends with `Dto` / `Entity` / `Model`).
+- **Static analysis** — the parser recognises `#[module(...)]`,
+  `#[controller(prefix = "/...")]`, `#[injectable]`, `#[dto]`,
+  and HTTP-method macros (`#[get]` / `#[post]` / `#[put]` /
+  `#[patch]` / `#[delete]`). Struct names are captured
+  positionally — only types immediately following the attribute
+  are added to the graph (no false positives from same-file
+  bystander structs). Multi-line `#[module(...)]` lists parse
+  correctly.
+- **Flags** — `--path <dir>` (defaults to `./src`),
+  `--format text|json`.
+- **Tests** — `nestrs-cli/tests/repl_cli.rs` (8 tests): the
+  `graph_finds_modules_with_imports_controllers_providers` test
+  verifies a two-module fixture with imports is parsed; the
+  `graph_finds_controllers_with_routes` test asserts GET / POST /
+  PATCH routes are extracted with handlers; the
+  `graph_finds_injectable_providers` test asserts both providers
+  are detected and bystander `AppController` is NOT marked as a
+  provider; the `graph_finds_dtos` test asserts CreateUserDto and
+  UpdateUserDto are captured. Dispatch tests cover unknown
+  subcommand errors, `graph` / `routes` path flag handling, and
+  the missing-path error.
+- **Deps** — added `regex = "1"` and `serde = { version = "1",
+  features = ["derive"] }` to `nestrs-cli/Cargo.toml`. Existing
+  `serde_json` dep powers JSON output.
+- **Docs** — `mintlify-docs/cli/repl.mdx` (full reference with
+  examples, flag table, limitations) + `docs.json` entry under
+  `CLI`.
+
 ## [1.0.0] - 2026-09-12
 
 First stable release. Everything since 0.5.2 is in this version: the

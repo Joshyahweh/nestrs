@@ -115,6 +115,46 @@ suite's introspection round-trips.
   `enable_metrics` + real middleware traffic renders the framework RED
   metrics at `/metrics` with both backends attached.
 
+### Added — Mongoose-style MongoDB adapter (`nestrs-mongodb`, feature `mongo`)
+
+Wave 7.6. The third ORM in the persistence layer alongside
+`nestrs-prisma` and `nestrs-storage`. Mirrors NestJS's
+`@nestjs/mongoose` in standalone-crate form.
+
+- **New workspace member `nestrs-mongodb`** — `MongoModule::for_root(uri)`
+  / `for_root_with_options(opts)` / `for_feature(db_name)`,
+  `MongoService` injectable, typed `MongoRepository<T>` CRUD wrapper
+  (`find_one` / `find_by_id` / `find` / `find_with_options` /
+  `count_documents` / `estimated_document_count` / `insert_one` /
+  `insert_many` / `update_one` / `update_many` / `find_one_and_update`
+  / `replace_one` / `delete_one` / `delete_many` / `delete_by_id`,
+  plus `from_service` and `for_feature` helpers), `MongoOptions` builder
+  (URI / app_name / timeouts / direct_connection / default_database),
+  `MongoError` enum wrapping `mongodb::error::Error` + `bson::ser::Error`
+  + `bson::de::Error` + `NotConfigured` / `Timeout` / `InvalidArgument`,
+  `Document` trait + `#[derive(Document)]` derive macro + `#[schema]`
+  / `#[prop]` attributes. The `bson` and `mongodb` crates are
+  re-exported from the crate root so callers don't need direct deps for
+  BSON documents or driver types.
+- **Umbrella `nestrs` (`feature = "mongo"`)** — `MongoModule` /
+  `MongoService` / `MongoRepository` / `MongoOptions` / `MongoError`
+  / `Document` / `Schema` / `Filter` / `Update` re-exported from
+  `nestrs::mongo::*`. The `mongo` feature now pulls
+  `dep:nestrs-mongodb` instead of the driver directly; `mongo-dns`
+  flips to `nestrs-mongodb/dns-resolver`. The legacy `mongodb` direct
+  dep is removed from the umbrella (Phase B's 1-line shim replaces
+  the inline `nestrs/src/mongo.rs`).
+- **Tests** — `nestrs-mongodb/tests/document_derive.rs` covers the
+  `#[derive(Document)]` emit, the `#[schema(collection = …)]`
+  override, the default snake_case-plural fallback
+  (`User` → `"users"`, `BlogPost` → `"blog_posts"`), `#[prop(...)]`
+  attribute parsing for `rename` / `unique` / `default` / `skip` /
+  `sparse` / `index` / `ref` keys, and the `to_bson` round-trip.
+- **Docs** — `mintlify-docs/recipes/mongodb.mdx` (full reference with
+  install, boot, schema, repository usage, `MongoOptions` builder,
+  feature flags, full CRUD surface table) + `docs.json` entry under
+  `recipes` "Backend stacks".
+
 ## [1.0.0] - 2026-09-12
 
 First stable release. Everything since 0.5.2 is in this version: the

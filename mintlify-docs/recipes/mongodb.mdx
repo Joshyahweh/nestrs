@@ -1,0 +1,180 @@
+---
+title: "MongoDB with nestrs-mongodb"
+description: "Mongoose-style adapter — MongoModule, Document derive, MongoRepository<T>, for_feature model registration."
+---
+
+`nestrs-mongodb` is the Rust analogue of NestJS's
+[`@nestjs/mongoose`](https://docs.nestjs.com/techniques/mongodb). It gives you a
+typed `MongoRepository<T>` over a `mongodb::Collection<T>`, a `Document` derive
+that reads `#[schema(...)]` / `#[prop(...)]` attributes, and the same
+`MongoModule::for_root` / `for_feature` boot pattern.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.1", features = ["mongo"] }
+nestrs-mongodb = "1.1"
+serde = { version = "1", features = ["derive"] }
+bson = "2"
+```
+
+The `mongo` feature on the umbrella re-exports the `nestrs-mongodb` types so
+you can write `nestrs::MongoModule` / `nestrs::MongoRepository` and skip the
+direct dep. Add `mongo-dns` for `mongodb+srv://` Atlas seed lists.
+
+## Boot
+
+```rust
+use nestrs::prelude::*;
+use nestrs::mongo::{MongoModule, MongoService};
+
+fn main() {
+    MongoModule::for_root("mongodb://127.0.0.1:27017");
+    NestFactory::create::<AppModule>().listen(3000).await;
+}
+
+#[module(imports = [MongoModule::for_feature("app")])]
+struct AppModule;
+```
+
+## Define a schema
+
+```rust
+use bson::oid::ObjectId;
+use nestrs::mongo::Document;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, Document)]
+#[schema(collection = "users", timestamps)]
+struct User {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    _id: Option<ObjectId>,
+
+    #[prop(rename = "email_address", unique)]
+    email: String,
+    name: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_at: Option<bson::DateTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    updated_at: Option<bson::DateTime>,
+}
+```
+
+- `#[schema(collection = "users", timestamps)]` — collection name override +
+  opt-in to `created_at` / `updated_at` BSON DateTime fields.
+- `#[prop(rename = "email_address", unique)]` — per-field metadata. The
+  derive parses every `#[prop(...)]` at compile time so typos fail the
+  build, not a deploy.
+- `Document::collection_name()` returns `"users"`.
+
+If `#[schema(collection = …)]` is omitted, the derive defaults to the
+snake_case + plural of the struct ident: `User` → `"users"`,
+`BlogPost` → `"blog_posts"`.
+
+## Use the typed repository
+
+`MongoRepository<T>` wraps `mongodb::Collection<T>` and gives you a typed
+CRUD surface that doesn't require reaching for `bson::doc!` for the
+common cases:
+
+```rust
+use nestrs::mongo::MongoRepository;
+
+async fn create_user(svc: &MongoService) -> Result<User, nestrs::mongo::MongoError> {
+    let users: MongoRepository<User> = MongoRepository::for_feature(svc).await?;
+    let mut doc = User {
+        _id: None,
+        email: "ada@example.com".into(),
+        name: "Ada".into(),
+        created_at: None,
+        updated_at: None,
+    };
+    users.insert_one(&mut doc).await?;
+    Ok(doc)
+}
+
+async fn find_by_email(svc: &MongoService, email: &str)
+    -> Result<Option<User>, nestrs::mongo::MongoError>
+{
+    let users: MongoRepository<User> = MongoRepository::for_feature(svc).await?;
+    users.find_one(bson::doc! { "email": email }).await
+}
+
+async fn delete_by_id(svc: &MongoService, id: ObjectId)
+    -> Result<u64, nestrs::mongo::MongoError>
+{
+    let users: MongoRepository<User> = MongoRepository::for_feature(svc).await?;
+    users.delete_by_id(id).await
+}
+```
+
+## Configuration
+
+`MongoOptions` builder exposes the driver tuning knobs the average app
+actually reaches for. Pass it through `MongoModule::for_root_with_options`
+when you need more than a plain URI:
+
+```rust
+use std::time::Duration;
+use nestrs::mongo::{MongoModule, MongoOptions};
+
+fn main() {
+    let opts = MongoOptions::new("mongodb://127.0.0.1:27017")
+        .app_name("nestrs-app")
+        .default_database("app")
+        .server_selection_timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(3));
+    MongoModule::for_root_with_options(opts);
+}
+```
+
+`default_database("app")` is what `MongoService::default_database()`
+reads; `MongoModule::for_feature("app")` is the same string and the
+two names should match in single-database apps.
+
+## Feature flags
+
+- `default = []` — TLS via `rustls`, BSON `compat-3-0-0` codec.
+- `dns-resolver` — `mongodb+srv://` Atlas-style seed lists (pulls
+  `hickory-*`).
+- `all` — convenience feature for everything.
+
+## API surface
+
+| Symbol | Purpose |
+|--------|---------|
+| `MongoModule::for_root(uri)` | Static URI setter; call once at boot. |
+| `MongoModule::for_root_with_options(opts)` | Same, with a [`MongoOptions`] builder. |
+| `MongoModule::for_feature(db_name)` | Register the default database name for [`MongoRepository::for_feature`]. |
+| `MongoService` | Injectable handle: `client()`, `database(name)`, `default_database()`, `ping()`, `list_databases()`. |
+| `MongoRepository<T>` | Typed CRUD wrapper (see below). |
+| `Document` | Trait + `#[derive(Document)]` macro. |
+| `MongoError` | Wraps `mongodb::error::Error`, `bson::ser::Error`, `bson::de::Error`, plus `NotConfigured` / `Timeout` / `InvalidArgument`. |
+
+### `MongoRepository<T>` CRUD methods
+
+| Method | Returns |
+|--------|---------|
+| `find_one(filter)` | `Option<T>` |
+| `find_by_id(id)` | `Option<T>` |
+| `find(filter)` | `Vec<T>` |
+| `find_with_options(filter, sort, limit)` | `Vec<T>` |
+| `count_documents(filter)` | `u64` |
+| `estimated_document_count()` | `u64` |
+| `insert_one(&mut doc)` | `Bson` (inserted `_id`) |
+| `insert_many(&mut docs)` | `Vec<Bson>` (inserted `_id`s) |
+| `update_one(filter, update)` | `u64` (modified count) |
+| `update_many(filter, update)` | `u64` |
+| `find_one_and_update(filter, update, return_after)` | `Option<T>` |
+| `replace_one(filter, replacement)` | `u64` |
+| `delete_one(filter)` | `u64` |
+| `delete_many(filter)` | `u64` |
+| `delete_by_id(id)` | `u64` |
+| `from_service(svc, db_name)` | `MongoRepository<T>` |
+| `for_feature(svc)` | `MongoRepository<T>` (uses `MongoModule::feature_db()`) |
+
+Filters and updates are typed aliases over `bson::Document` so any
+driver-level filter / update is reachable without depending on
+`mongodb` directly.

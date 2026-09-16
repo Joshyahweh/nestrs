@@ -8,7 +8,7 @@
 //! variants. Filters and updates are typed wrappers around
 //! `bson::Document` so the underlying driver API is reachable when needed.
 
-use crate::client::MongoService;
+use crate::client::{MongoModule, MongoService};
 use crate::error::{MongoError, Result};
 use crate::schema::{Document, Schema};
 use bson::{doc, Document as BsonDoc};
@@ -77,6 +77,29 @@ impl<T: Schema> MongoRepository<T> {
     pub async fn from_service(svc: &MongoService, db_name: &str) -> Result<Self> {
         let db = svc.database(db_name).await?;
         Self::new(&db, None)
+    }
+
+    /// Resolve a repository using the database name registered by
+    /// [`crate::client::MongoModule::for_feature`]. The default Mongoose
+    /// "feature module" pattern — the database name lives at the module
+    /// level, every typed repository reads it at injection time.
+    ///
+    /// ```ignore
+    /// // boot:
+    /// #[module(imports = [MongoModule::for_feature("app")])]
+    /// struct AppModule;
+    ///
+    /// // controller / service:
+    /// let users: MongoRepository<User> = MongoRepository::for_feature(&svc).await?;
+    /// ```
+    pub async fn for_feature(svc: &MongoService) -> Result<Self> {
+        let db_name = MongoModule::feature_db().ok_or_else(|| {
+            MongoError::InvalidArgument(
+                "MongoModule::for_feature(<db_name>) must be called before MongoRepository::for_feature"
+                    .into(),
+            )
+        })?;
+        Self::from_service(svc, db_name).await
     }
 
     // -----------------------------------------------------------------------

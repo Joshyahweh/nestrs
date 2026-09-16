@@ -129,6 +129,13 @@ impl MongoOptions {
 static MONGO_OPTIONS: OnceLock<MongoOptions> = OnceLock::new();
 static MONGO_CLIENT: OnceCell<Result<Arc<Client>>> = OnceCell::const_new();
 
+/// Default database name registered by `MongoModule::for_feature(db_name)`.
+/// Mirrors MongooseModule's `forFeature` registration key — apps list the
+/// `for_feature` call inside `#[module(imports = …)]` and then resolve a
+/// typed [`crate::repository::MongoRepository<T>`] through the helper
+/// [`crate::repository::MongoRepository::for_feature`].
+static FEATURE_DB: OnceLock<String> = OnceLock::new();
+
 async fn ensure_client() -> Result<Arc<Client>> {
     let cell = MONGO_CLIENT
         .get_or_try_init(|| async {
@@ -253,6 +260,42 @@ impl MongoModule {
     pub fn for_root_with_options(opts: MongoOptions) -> Self {
         let _ = MONGO_OPTIONS.set(opts);
         Self
+    }
+
+    /// Feature-registration step (NestJS MongooseModule `forFeature`
+    /// analogue). Registers the database name that the typed
+    /// [`crate::repository::MongoRepository::for_feature`] helper reads
+    /// when building repositories.
+    ///
+    /// Typically called inside `#[module(imports = …)]` so it runs at
+    /// boot time:
+    ///
+    /// ```ignore
+    /// #[module(imports = [MongoModule::for_feature("app")])]
+    /// struct AppModule;
+    /// ```
+    ///
+    /// Then anywhere in your app:
+    ///
+    /// ```ignore
+    /// let users: MongoRepository<User> =
+    ///     MongoRepository::for_feature(&svc).await?;
+    /// ```
+    ///
+    /// Calling `for_feature` more than once replaces the previous
+    /// registration (last-wins). For most apps there's exactly one
+    /// `for_feature` call at the root module.
+    pub fn for_feature(db_name: impl Into<String>) -> Self {
+        let _ = FEATURE_DB.set(db_name.into());
+        Self
+    }
+
+    /// Borrow the registered feature database name. Used by
+    /// [`crate::repository::MongoRepository::for_feature`] to resolve
+    /// repositories without requiring the caller to thread the db name
+    /// through every DI lookup.
+    pub fn feature_db() -> Option<&'static str> {
+        FEATURE_DB.get().map(String::as_str)
     }
 }
 

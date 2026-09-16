@@ -1,0 +1,154 @@
+---
+title: "DTO mapped types in nestrs"
+description: "Reference for #[partial_type], #[omit_type(...)], and #[pick_type(...)] — the nestrs equivalents of @nestjs/mapped-types."
+---
+
+`#[partial_type]`, `#[omit_type(...)]`, and `#[pick_type(...)]` mirror NestJS's `@nestjs/mapped-types` (`PartialType`, `OmitType`, `PickType`). Each one emits the same derive set as `#[dto]` (`Debug`, `Clone`, `Serialize`, `Deserialize`, `NestDto`, `JsonSchema`, `Validate`) plus the default `#[serde(deny_unknown_fields)]`. Field-level validator markers (`#[IsEmail]`, `#[Length(...)]`, `#[Min(...)]`, etc.) are preserved on every surviving field.
+
+## `#[partial_type]`
+
+Wraps every non-optional field in `Option<T>`. Fields that are already `Option<T>` are left as-is — `Option<Option<T>>` would be a bug, and we avoid it. The result is the standard "PATCH body" shape: every field is independent, omitting a field skips its inner validator, and supplying `null` for a non-optional field is a deserialization error.
+
+```rust
+use nestrs::prelude::*;
+
+#[dto]
+struct CreateUserDto {
+    #[IsEmail]
+    email: String,
+    #[Length(min = 2, max = 64)]
+    name: String,
+    age: i32,
+    #[IsOptional]
+    nickname: Option<String>,
+}
+
+#[nestrs::partial_type]
+struct UpdateUserDto {
+    #[IsEmail]
+    email: String,
+    #[Length(min = 2, max = 64)]
+    name: String,
+    age: i32,
+    #[IsOptional]
+    nickname: Option<String>,
+}
+```
+
+`UpdateUserDto` deserializes from any subset of the four fields. A request body with `{"email": "ada@example.com"}` succeeds; one with `{"email": null}` fails with `400 Bad Request` because `email` is `Option<String>`, not `Option<Option<String>>`. An empty body `{}` succeeds because every field is optional.
+
+### Validation behavior on `Option` fields
+
+When a field is `Some(_)`, its inner validator runs. When it is `None`, the validator is skipped — the entire point of a partial type. This matches NestJS's `PartialType` semantics and validator 0.21's behavior on `Option<T>` fields.
+
+```rust
+#[routes(state = AppState)]
+impl UsersController {
+    #[patch("/:id")]
+    async fn update(
+        PathParam(id): PathParam<i64>,
+        ValidatedBody(dto): ValidatedBody<UpdateUserDto>,
+    ) -> &'static str {
+        // dto.email.is_none() → IsEmail skipped.
+        // dto.email = Some("nope") → IsEmail fires, 422 returned.
+        "updated"
+    }
+}
+```
+
+## `#[omit_type(field_a, field_b, ...)]`
+
+Builds a new DTO by removing the named fields from the source struct. Surviving fields keep their type and their validators. This is the typed equivalent of writing a duplicate DTO with one fewer field — same derive set, same `deny_unknown_fields` behavior, but the field list lives in the macro arguments.
+
+```rust
+#[nestrs::omit_type(nickname)]
+struct CreateUserNoNicknameDto {
+    #[IsEmail]
+    email: String,
+    #[Length(min = 2)]
+    name: String,
+    age: i32,
+    #[IsOptional]
+    nickname: Option<String>,
+}
+```
+
+`CreateUserNoNicknameDto` has exactly `email`, `name`, and `age`. Listing a field name that does not exist on the source struct is a compile error — the macro matches against the field list of the struct it is applied to.
+
+### Common use
+
+The most common case is a "registration without optional fields" DTO: a single source DTO defines all fields, and an omit variant is used at a stricter endpoint (e.g., admin onboarding) where the optional fields must be set later.
+
+```rust
+#[nestrs::omit_type(nickname, age)]
+struct AdminOnboardingDto {
+    #[IsEmail]
+    email: String,
+    #[Length(min = 2)]
+    name: String,
+    age: i32,
+    #[IsOptional]
+    nickname: Option<String>,
+}
+```
+
+## `#[pick_type(field_a, field_b, ...)]`
+
+The inverse of `#[omit_type]`. Keeps only the named fields; everything else is dropped. Same derive set, same validator preservation.
+
+```rust
+#[nestrs::pick_type(email, name)]
+struct UserIdentityDto {
+    #[IsEmail]
+    email: String,
+    #[Length(min = 2)]
+    name: String,
+    age: i32,
+    #[IsOptional]
+    nickname: Option<String>,
+}
+```
+
+`UserIdentityDto` has exactly `email` and `name`. Pick is useful for "view model" DTOs that project a subset of a wider input — for example, the public-safe fields of an internal entity.
+
+### Common use
+
+```rust
+#[nestrs::pick_type(email, name)]
+struct PublicUserDto {
+    #[IsEmail]
+    email: String,
+    #[Length(min = 2)]
+    name: String,
+    age: i32,
+    #[IsOptional]
+    nickname: Option<String>,
+}
+
+#[routes(state = AppState)]
+impl UsersController {
+    #[get("/:id/public")]
+    async fn public_view(
+        PathParam(id): PathParam<i64>,
+    ) -> PublicUserDto {
+        PublicUserDto {
+            email: "ada@example.com".to_string(),
+            name: "Ada".to_string(),
+        }
+    }
+}
+```
+
+## How the macros relate to `#[dto]`
+
+Each of the three mapped-type macros calls the same internal code path as `#[dto]`:
+
+1. The struct is rewritten: `PartialType` wraps non-Option fields in `Option<T>`; `OmitType` filters the field list by name; `PickType` filters the field list by name in the opposite direction.
+2. The validator attributes (`#[IsEmail]`, `#[Length(...)]`, `#[Min(...)]`, etc.) on every surviving field are translated to `validator` 0.21 `#[validate(...)]` attributes, exactly as `#[dto]` does.
+3. The macro emits `#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, nestrs::NestDto, nestrs::schemars::JsonSchema, validator::Validate)]` plus `#[serde(deny_unknown_fields)]`.
+
+This means `ValidatedBody<T>` / `ValidatedQuery<T>` / `ValidationPipe` accept mapped-type DTOs without any extra configuration, and the resulting types flow into `nestrs-openapi` `components.schemas` automatically through the `JsonSchema` derive.
+
+<Note>
+Unlike NestJS, where `@nestjs/mapped-types` re-types the source class by reference, nestrs mapped types take the source shape inline. You re-list the fields on the new struct. This is the standalone macro pattern, mirroring `ts-rs` and `specta` in the Rust ecosystem — it avoids cross-crate path resolution at proc-macro time and keeps the field-level validator markers editable per output struct.
+</Note>

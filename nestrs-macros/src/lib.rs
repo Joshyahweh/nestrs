@@ -5304,6 +5304,241 @@ pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+// ---------------------------------------------------------------------------
+// `#[nestrs::partial_type]` / `#[nestrs::omit_type(...)]` /
+// `#[nestrs::pick_type(...)]` — mapped-type macros.
+//
+// These mirror NestJS's `@nestjs/mapped-types`:
+//   - `PartialType<T>()`       → every field becomes optional
+//   - `OmitType<T>(fields...)` → drop named fields
+//   - `PickType<T>(fields...)` → keep only named fields
+//
+// Unlike the TS variants, the source struct is not referenced by path
+// (Rust's `syn` cannot dereference a struct path at macro-expansion time).
+// Instead, the user re-declares the fields on the target struct and the
+// macro applies the transform. This is the same shape used by `ts-rs` /
+// `specta` and keeps the macros single-pass and side-effect-free.
+//
+// All three emit the same derive set as `#[dto]` (Debug, Clone, Serialize,
+// Deserialize, NestDto, JsonSchema, Validate) plus the default
+// `#[serde(deny_unknown_fields)]`.
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct MappedTypeAttr {
+    fields: Vec<Ident>,
+}
+
+impl Parse for MappedTypeAttr {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut fields = Vec::new();
+        while !input.is_empty() {
+            let id: Ident = input.parse()?;
+            fields.push(id);
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(MappedTypeAttr { fields })
+    }
+}
+
+#[proc_macro_attribute]
+pub fn partial_type(attr: TokenStream, item: TokenStream) -> TokenStream {
+    mapped_type_impl(MappedTypeKind::Partial, attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn omit_type(attr: TokenStream, item: TokenStream) -> TokenStream {
+    mapped_type_impl(MappedTypeKind::Omit, attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn pick_type(attr: TokenStream, item: TokenStream) -> TokenStream {
+    mapped_type_impl(MappedTypeKind::Pick, attr, item)
+}
+
+enum MappedTypeKind {
+    Partial,
+    Omit,
+    Pick,
+}
+
+fn mapped_type_impl(
+    kind: MappedTypeKind,
+    attr: TokenStream,
+    item: TokenStream,
+) -> TokenStream {
+    let parsed_attr = parse_macro_input!(attr as MappedTypeAttr);
+
+    match kind {
+        MappedTypeKind::Partial => {
+            if !parsed_attr.fields.is_empty() {
+                return syn::Error::new_spanned(
+                    parsed_attr.fields[0].clone(),
+                    "`#[nestrs::partial_type]` takes no arguments — it applies to every field of the struct",
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+        MappedTypeKind::Omit | MappedTypeKind::Pick => {
+            if parsed_attr.fields.is_empty() {
+                let name = match kind {
+                    MappedTypeKind::Omit => "omit_type",
+                    _ => "pick_type",
+                };
+                return syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!(
+                        "`#[nestrs::{name}]` requires at least one field name \
+                         (e.g. `#[nestrs::{name}(password, internal_id)]`)"
+                    ),
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+    }
+
+    let item_struct = parse_macro_input!(item as ItemStruct);
+    let vis = item_struct.vis;
+    let ident = item_struct.ident;
+
+    let fields = match item_struct.fields {
+        Fields::Named(named) => named,
+        _ => {
+            return syn::Error::new_spanned(
+                ident,
+                "mapped-type attributes support named-field structs only",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    // For Omit/Pick, validate that every argument names a real field on the
+    // struct — typo-resistance that catches "Passowrd" vs "password".
+    let field_names: Vec<String> = fields
+        .named
+        .iter()
+        .filter_map(|f| f.ident.as_ref().map(|i| i.to_string()))
+        .collect();
+    let field_set: HashSet<&str> = field_names.iter().map(|s| s.as_str()).collect();
+    if matches!(kind, MappedTypeKind::Omit | MappedTypeKind::Pick) {
+        for arg_ident in &parsed_attr.fields {
+            let arg_str = arg_ident.to_string();
+            if !field_set.contains(arg_str.as_str()) {
+                return syn::Error::new_spanned(
+                    arg_ident,
+                    format!(
+                        "field `{arg_str}` is not present on `{ident}` (existing fields: {})",
+                        field_names.join(", ")
+                    ),
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+    }
+
+    let drop_set: HashSet<String> = match kind {
+        MappedTypeKind::Partial | MappedTypeKind::Pick => HashSet::new(),
+        MappedTypeKind::Omit => parsed_attr.fields.iter().map(|i| i.to_string()).collect(),
+    };
+    let keep_set: HashSet<String> = match kind {
+        MappedTypeKind::Partial | MappedTypeKind::Omit => HashSet::new(),
+        MappedTypeKind::Pick => parsed_attr.fields.iter().map(|i| i.to_string()).collect(),
+    };
+
+    let mut field_defs = Vec::new();
+    let mut marker_errors: Option<syn::Error> = None;
+    for field in &fields.named {
+        let field_ident_str = field.ident.as_ref().unwrap().to_string();
+
+        // Apply Omit / Pick filter.
+        let keep = match kind {
+            MappedTypeKind::Partial => true,
+            MappedTypeKind::Omit => !drop_set.contains(&field_ident_str),
+            MappedTypeKind::Pick => keep_set.contains(&field_ident_str),
+        };
+        if !keep {
+            continue;
+        }
+
+        // Rewrite field-level validator markers (no `expose_only` semantics
+        // for mapped types — the user listed the fields they want exposed
+        // explicitly via Pick/Omit).
+        let attrs = match convert_dto_field_attrs(field, false) {
+            Ok(attrs) => attrs,
+            Err(e) => {
+                marker_errors = Some(match marker_errors {
+                    None => e,
+                    Some(mut prev) => {
+                        prev.combine(e);
+                        prev
+                    }
+                });
+                continue;
+            }
+        };
+        let field_ident = field.ident.clone();
+        let ty = &field.ty;
+
+        // For PartialType, wrap each non-optional field type in `Option<T>`.
+        // Skip wrapping when the field is already `Option<T>` to avoid
+        // `Option<Option<T>>` (matches NestJS where PartialType of a DTO
+        // that already had optional fields leaves them optional).
+        let final_ty = match kind {
+            MappedTypeKind::Partial => {
+                if is_option_type(ty) {
+                    quote! { #ty }
+                } else {
+                    quote! { Option<#ty> }
+                }
+            }
+            _ => quote! { #ty },
+        };
+        field_defs.push(quote! {
+            #(#attrs)*
+            pub #field_ident: #final_ty
+        });
+    }
+    if let Some(e) = marker_errors {
+        return e.to_compile_error().into();
+    }
+
+    // Mapped types always emit `#[serde(deny_unknown_fields)]` for shape
+    // parity with `#[dto]` — users opt into a more permissive shape via
+    // `#[dto(allow_unknown_fields)]` on the original struct.
+    quote! {
+        #[derive(
+            Debug, Clone,
+            serde::Deserialize, serde::Serialize,
+            nestrs::NestDto,
+            nestrs::schemars::JsonSchema,
+            validator::Validate
+        )]
+        #[serde(deny_unknown_fields)]
+        #vis struct #ident {
+            #(#field_defs,)*
+        }
+    }
+    .into()
+}
+
+/// `true` if `ty` is `Option<T>` (any path spelling — `Option`,
+/// `std::option::Option`, `core::option::Option`). Used by
+/// `#[partial_type]` to avoid double-wrapping already-optional fields.
+fn is_option_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(last) = type_path.path.segments.last() {
+            return last.ident == "Option";
+        }
+    }
+    false
+}
+
 #[proc_macro_derive(
     NestDto,
     attributes(

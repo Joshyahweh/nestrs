@@ -1,0 +1,160 @@
+---
+title: "Health checks — `nestrs-health` crate"
+description: "Liveness / Readiness / Startup probes with pluggable indicators, 5s TTL caching, and in-flight coalescing — the @nestjs/terminus analogue."
+---
+
+Health probes live in the `nestrs-health` workspace member, modeled on
+the three-probe shape Kubernetes (and `@nestjs/terminus`) popularized:
+**liveness** (am I running?), **readiness** (can I serve traffic?),
+**startup** (have I finished booting?). Each probe is an HTTP endpoint
+that returns 200 when its indicators all check out, 503 when any one
+fails. Results are cached for 5s with in-flight coalescing so a probe
+storm from an orchestrator doesn't run every check N times in parallel.
+
+## Mount the three probes
+
+```rust
+use nestrs::{NestFactory, Module};
+use nestrs_health::{install_probes, ProbeKind};
+
+#[module(controllers = [/* ... */])]
+pub struct AppModule;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let app = NestFactory::create(AppModule).await?;
+    install_probes(&app, ProbeKind::all());
+    app.listen(3000).await?;
+    Ok(())
+}
+```
+
+`install_probes` mounts three endpoints at the server root, unaffected
+by `set_global_prefix` or URI versioning:
+
+- `GET /__nestrs/health/live` — liveness
+- `GET /__nestrs/health/ready` — readiness
+- `GET /__nestrs/health/startup` — startup
+
+Pick the subset you want via `ProbeKind::all()` (liveness + readiness +
+startup), `ProbeKind::live_and_ready()`, or pass them individually.
+Each probe runs only its own indicator set — liveness doesn't include
+the database check, readiness does.
+
+## Built-in indicators
+
+```rust
+use nestrs_health::{DatabaseIndicator, HttpIndicator, DiskSpaceIndicator};
+use std::path::PathBuf;
+
+let indicators = vec![
+    Box::new(DatabaseIndicator::new()),
+    Box::new(HttpIndicator::new(
+        "https://api.stripe.com/v1/charges",
+        std::time::Duration::from_secs(2),
+    )),
+    Box::new(DiskSpaceIndicator::new(
+        PathBuf::from("/var/lib/app"),
+        /* min_free_bytes */ 1_000_000_000,
+    )),
+];
+```
+
+- **`DatabaseIndicator`** — runs the shared `nestrs_core::DatabasePing`
+  capability (sqlx / Prisma / Mongo). One line, works across every
+  adapter the framework exposes.
+- **`HttpIndicator`** (feature `http`) — `GET` a URL, must be 2xx,
+  bounded by a timeout. Use for third-party dependencies where a
+  hand-rolled ping isn't worth maintaining.
+- **`DiskSpaceIndicator`** (feature `disk`) — `statvfs` threshold in
+  bytes. Unix-only; the probe reports the feature as missing on
+  Windows rather than crashing.
+
+Indicators that need a connection (database, broker) build with a
+constructor, not a builder — there's no connection string to thread
+through, the indicator pulls the live connection from the DI container
+at probe time.
+
+## Custom indicators
+
+Anything that can be checked asynchronously implements
+`HealthIndicator`:
+
+```rust
+use nestrs_health::{HealthIndicator, HealthStatus};
+use async_trait::async_trait;
+
+pub struct QueueDepthIndicator {
+    queue: Arc<MessageQueue>,
+}
+
+#[async_trait]
+impl HealthIndicator for QueueDepthIndicator {
+    async fn check(&self) -> HealthStatus {
+        let depth = self.queue.depth().await;
+        if depth > 10_000 {
+            HealthStatus::Down {
+                message: format!("queue depth {depth} exceeds 10k threshold"),
+            }
+        } else {
+            HealthStatus::Up
+        }
+    }
+}
+```
+
+A failure message is the on-call engineer's first debugging hook —
+make it specific (the actual depth, the threshold crossed, the resource
+that didn't open) rather than "down".
+
+## Broker health for microservices
+
+```rust
+use nestrs_health::{RedisBrokerHealth, NatsBrokerHealth};
+
+let broker = vec![
+    Box::new(RedisBrokerHealth::new("redis://10.0.0.1:6379")),
+    Box::new(NatsBrokerHealth::new("nats://10.0.0.2:4222")),
+];
+```
+
+`RedisBrokerHealth` issues a `PING`/`PONG` round-trip; `NatsBrokerHealth`
+opens a TCP connection. Both are bounded — a stuck broker doesn't hang
+the probe forever. `BrokerHealthStub` (always up) is the default in
+projects that haven't wired a real broker yet.
+
+## How the cache works
+
+Every probe result is cached for 5 seconds. If a probe arrives while a
+check is in flight, the second caller attaches to the first check
+rather than starting a parallel one — `tokio::sync::OnceCell` under the
+hood. Net effect:
+
+- A single in-flight check per probe kind, even under burst load.
+- After 5s, the next request triggers a fresh check.
+- Failures don't stick — if the database recovers within the TTL
+  window, the next probe sees `Up` immediately.
+
+The TTL is the right knob to tune if your orchestrator probes faster
+than the indicators can run (down to ~50ms is safe).
+
+## When to use what
+
+- **`DatabaseIndicator`** — almost every readiness probe needs this.
+  One line, real signal.
+- **`HttpIndicator`** — sparingly. Each one is an outbound dependency
+  you now own failures for. Better: define a narrow contract, check
+  the in-process client, not the upstream.
+- **`DiskSpaceIndicator`** — disk pressure kills writes silently.
+  Cheap to add.
+- **Custom `HealthIndicator`** — any state you can summarize async:
+  queue depth, replica lag, last successful batch timestamp.
+
+## See also
+
+- [Concepts: providers](/concepts/providers) — indicators are
+  providers; they participate in DI like any other service.
+- [Guides: microservices](/guides/microservices) — broker health is
+  usually the readiness probe's main signal.
+- [`@nestjs/terminus`](https://docs.nestjs.com/recipes/terminus) —
+  upstream documentation for comparison.

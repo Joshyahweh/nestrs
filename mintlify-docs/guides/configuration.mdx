@@ -1,0 +1,205 @@
+---
+title: "Configuration — `ConfigModule` and `ConfigService`"
+description: "Layered config from files + env + inline, namespaced typed structs, hot-reload watcher — the Rust analogue of @nestjs/config."
+---
+
+`nestrs`' configuration layer lives inside the `nestrs::config` module and
+is the in-tree analogue of `@nestjs/config`. Sources merge in declaration
+order (later wins); null / empty values delete the previous key; YAML,
+TOML, and JSON files are all converted to a JSON tree before the typed
+decode runs, so the typed-access path only ever sees one shape.
+
+## Define a typed, namespaced config
+
+```rust
+use nestrs::config::{Config, ConfigNamespace};
+use serde::Deserialize;
+use validator::Validate;
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct DatabaseConfig {
+    #[validate(length(min = 1))]
+    pub host: String,
+    #[validate(range(min = 1, max = 65535))]
+    pub port: u16,
+    pub database: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl ConfigNamespace for DatabaseConfig {
+    const NAMESPACE: &'static str = "db";
+}
+```
+
+`ConfigNamespace` declares the prefix used both for env-var matching
+(`NESTRS_DB__HOST`) and for the dotted-key view inside config files
+(`db.host`). One config struct per concern — `db`, `redis`, `auth`,
+`feature_flags`. The `#[derive(Validate)]` runs on boot, so an invalid
+config panics at startup rather than mid-request.
+
+## Register and load
+
+```rust
+use nestrs::config::ConfigModule;
+use nestrs::core::Module;
+
+#[module(providers = [/* ... */])]
+pub struct AppModule;
+
+impl AppModule {
+    pub fn new() -> DynamicModule {
+        AppModule::register()
+            .import(ConfigModule::for_root(vec![
+                Config::register::<DatabaseConfig>(),
+            ]))
+    }
+}
+```
+
+`ConfigModule::for_root` reads from the process environment (with a
+dotenvy cascade if a `.env` file is present at startup), parses each
+entry against its namespace, runs validation, and exports a
+`ConfigService` into the DI container. Boot-time panic on invalid
+config — match the `@nestjs/config` derive's panic-on-load behavior.
+
+## Read from a provider
+
+```rust
+use nestrs::config::ConfigService;
+
+pub struct DatabasePool {
+    cfg: ConfigService,
+}
+
+impl DatabasePool {
+    pub async fn connect(&self) -> sqlx::Result<Pool<MySql>> {
+        let cfg: DatabaseConfig = self.cfg.get_by_key("db")?;
+        let url = format!(
+            "mysql://{}:{}@{}:{}/{}",
+            cfg.username, cfg.password, cfg.host, cfg.port, cfg.database,
+        );
+        sqlx::mysql::MySqlPoolOptions::new()
+            .max_connections(10)
+            .connect(&url)
+            .await
+    }
+}
+```
+
+`get_by_key::<T>("db")` looks up the namespace, decodes the merged
+overlay, and returns the typed value. The string `"db"` matches
+`DatabaseConfig::NAMESPACE`, so the call site reads like a logical
+section rather than an env-var path.
+
+## Layer file sources
+
+```rust
+use nestrs::config::{ConfigModule, ConfigOptions, ConfigSource, FileFormat};
+
+pub fn bootstrap() -> DynamicModule {
+    AppModule::register().import(ConfigModule::for_root_with_options(
+        vec![Config::register::<DatabaseConfig>()],
+        ConfigOptions::new()
+            .add_source(ConfigSource::File {
+                path: "config/app.json".into(),
+                format: FileFormat::Json,
+            })
+            .add_source(ConfigSource::OptionalFile {
+                path: "config/local.json".into(),
+                format: FileFormat::from_path(Path::new("config/local.json"))
+                    .unwrap_or(FileFormat::Json),
+            })
+            .add_source(ConfigSource::Env { prefix: None }),
+    ))
+}
+```
+
+Sources are merged in declaration order:
+
+1. `config/app.json` — committed defaults, parsed at compile-time shape.
+2. `config/local.json` — developer overrides. `OptionalFile` silently
+   skips a missing path (matches `@nestjs/config`'s `ignoreEnvFile`
+   semantics).
+3. `Env { prefix: None }` — the process environment, always last so
+   deployments can override without rebuilding.
+
+A key set to `null` in any source deletes the previous value — the
+typed decode then either errors or fills with the struct's default.
+
+## Raw dotted-key view
+
+When the typed path is too narrow — feature flags with dynamic keys,
+templating, debugging — pull the merged overlay directly:
+
+```rust
+let snapshot: HashMap<String, String> = service.snapshot();
+tracing::info!(?snapshot, "loaded config");
+```
+
+`snapshot()` is the resolved view with namespace re-keying (`db.host` →
+`NESTRS_DB__HOST`), the same shape env-var lookups see. For the
+pre-rekey view, read `service.raw` (also a `HashMap<String, String>`).
+
+## File formats
+
+`FileFormat` is `{Json, Toml, Yaml}`. Use `FileFormat::from_path` to
+pick from the file extension when you don't want to be explicit:
+
+```rust
+ConfigSource::File {
+    path: "config/app.yaml".into(),
+    format: FileFormat::Yaml, // or `from_path(...)` to drive off extension
+}
+```
+
+TOML/YAML scalars are coerced through the same rules as JSON literals:
+`"true"` becomes `Bool(true)`, `"8080"` becomes `Number(8080)`,
+`""` / `"null"` becomes `Null`. Numeric / bool decoding only succeeds
+when the entire string round-trips, so `get_by_key::<u16>("db.port")`
+never silently truncates.
+
+## Hot reload
+
+With the `config-hot-reload` feature on the `nestrs` crate, attach a
+`ConfigWatcher` after building the initial `ConfigService`:
+
+```rust
+use nestrs::config::ConfigWatcher;
+
+let service = ConfigModule::build_service(&entries, &options)?;
+let watcher = ConfigWatcher::new(service, options);
+
+// On shutdown:
+watcher.stop().await;
+```
+
+The watcher uses `notify` to subscribe to fs events on every
+`File` / `OptionalFile` source, debounces bursts, and rebuilds the
+service on a blocking thread (the decode doesn't need the tokio
+runtime). Subsequent reads from the injected `ConfigService` see the
+new values. Env and `Inline` sources are not watched (they aren't
+filesystem-resident), so a config drift via env var won't trigger a
+reload — by design.
+
+## When to use what
+
+- **Typed `Config::register<T>()`** — every production config. Decode
+  + validate at boot, get compile errors on rename, and `get_by_key`
+  reads like a logical section.
+- **`ConfigService::snapshot()`** — debugging, dynamic feature flags,
+  or logging the resolved overlay at startup. Read-only.
+- **`ConfigWatcher`** — dev loops where config files change frequently
+  and a restart is friction. Don't ship it behind a prod feature
+  flag — the watcher adds fs syscall overhead per reload, and
+  production reload is usually a deploy event, not a runtime
+  concern.
+
+## See also
+
+- [Concepts: modules](/concepts/modules) — for how `import` wires a
+  dynamic module into a feature module.
+- [Concepts: providers](/concepts/providers) — `ConfigService` is a
+  regular provider; it participates in DI like any other.
+- [`@nestjs/config`](https://docs.nestjs.com/techniques/configuration)
+  — the upstream analogue, for comparison.

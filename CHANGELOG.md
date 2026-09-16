@@ -7,6 +7,61 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wave 7.15: Server-Sent Events (`nestrs-core`, feature `sse`)
+
+A thin nestrs-flavored wrapper around axum's SSE primitive — the
+missing runtime primitive for handlers that stream events to the
+browser. Behind a feature flag so apps that *consume* SSE payloads
+from upstream services don't pay the compile cost of `bytes` /
+`futures-core` / `serde`.
+
+- **`nestrs_core::sse` module** — gated on `feature = "sse"`. Re-exports
+  `axum::response::sse::{Sse, Event, KeepAlive}` as `SseResponse`,
+  `SseEvent`, `SseKeepAlive` so handlers don't have to depend on
+  axum's SSE module directly. `SseResponse<S>` is a newtype around
+  `Sse<S>` that implements `IntoResponse` (delegates to axum, so the
+  `text/event-stream` content-type, chunked transfer encoding, and
+  retry semantics stay identical).
+- **Constructors** —
+  `SseResponse::from_stream(stream)` for infallible streams,
+  `SseResponse::from_fallible_stream(stream)` for
+  `Stream<Item = Result<Event, axum::Error>>` (the producer's
+  structured-error path), `.keep_alive(KeepAlive)` to attach a
+  heartbeat policy, `From<Sse<S>> for SseResponse<S>` for
+  already-constructed `Sse<S>` values, plus `into_inner` /
+  `as_inner` accessors for reaching axum-only APIs the wrapper
+  doesn't expose.
+- **`IntoSseEvent` trait** — covers the four payload shapes handler
+  authors reach for: `&str` / `String` (default `message` event),
+  `Bytes` (raw byte payload), any `T: Serialize` (auto-JSON-encoded
+  via `serde_json`, `event: message`). `Event` itself is a passthrough.
+  Serialization failures (e.g. `f64::NAN`) emit a structured
+  `event: error` event instead of crashing the stream — SSE consumers
+  treat stream termination as a connection drop, so a structured
+  error keeps the consumer alive and in charge.
+- **Feature flag** — `sse = ["dep:bytes", "dep:futures-core",
+  "dep:serde"]`. Off by default. `nestrs-core`'s default feature set
+  is unchanged — apps opt in only when they actually emit SSE.
+- **Tests** — 17 integration tests in `nestrs-core/tests/sse.rs`
+  (gated on `feature = "sse"`): content-type header is
+  `text/event-stream`; single-event body ends with the SSE blank-line
+  terminator; multi-event streams write each `data:` line in order;
+  named events emit an `event:` field; retry field is serialized as
+  `retry: 250`; `KeepAlive` attaches without breaking conversion;
+  empty streams produce no `data:` lines; `IntoSseEvent` impls for
+  `&str` / `String` / `Bytes` use the default event name;
+  `IntoSseEvent for T: Serialize` uses `message`; serialization
+  failure emits `error`; `Event` passthrough preserves name and
+  data; `From<Sse<S>>` works; `into_inner` / `as_inner` return the
+  inner `Sse<S>`; `from_fallible_stream` accepts a stream of
+  `Result<Event, axum::Error>`. 5 inline unit tests in
+  `nestrs-core/src/sse.rs` mirror the same assertions in isolation.
+- **Docs** — `mintlify-docs/concepts/sse.mdx` (enable feature, return
+  type, `IntoSseEvent` table with notes on each payload shape, error
+  event semantics, fallible streams, `KeepAlive`, conversion from
+  `Sse<S>`, accessors, "why these choices") + `docs.json` entry
+  under `Core Concepts` next to `middleware-pipeline`.
+
 ### Added — Wave 7.13: Password hashing helpers + `#[derive(HashOnNew)]` (`nestrs-oauth2`, feature `password`)
 
 Bcrypt / Argon2id hashing with prefix auto-detection on verify, plus

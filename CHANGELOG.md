@@ -7,6 +7,78 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wave 7.13: Password hashing helpers + `#[derive(HashOnNew)]` (`nestrs-oauth2`, feature `password`)
+
+Bcrypt / Argon2id hashing with prefix auto-detection on verify, plus
+a proc-macro that hashes marked fields on row construction. The
+small focused alternative to pulling in `bcrypt` + `argon2` directly
+— pick a backend feature (or both), call `hash` / `verify`, or let
+`#[derive(HashOnNew)]` do it for you.
+
+- **Backends behind per-feature flags** —
+  `password-bcrypt` (pure-rust bcrypt 0.15, `DEFAULT_COST` = 12),
+  `password-argon2` (pure-rust argon2 0.5, `Argon2id` defaults:
+  m = 19 456 KiB, t = 2, p = 1), `password-macros` (pulls in the
+  new `nestrs-oauth2-macros` proc-macro crate), `password`
+  umbrella pulling all three. Default feature set is unchanged —
+  opt in explicitly.
+- **`nestrs_oauth2::password`** — module gated on
+  `any(password-bcrypt, password-argon2)` (one backend is enough):
+  free functions `hash(plain) -> Result<String, HashError>`
+  (defaults to `Backend::Argon2`), `hash_with(plain, backend)`,
+  `verify(plain, hash)` (prefix-dispatch), `verify_any(plain, hash)`
+  (same dispatch, public alias), `verify_with(plain, hash, backend)`;
+  `Backend` enum (`Bcrypt` / `Argon2`, `Default = Argon2`) with
+  `Display`; `PasswordHasher` trait + `BcryptHasher` / `Argon2Hasher`
+  concrete impls (`Copy + Default + Debug`, slot into a DI registry
+  as `Arc<dyn PasswordHasher>`); `HashError` (`BcryptDisabled` /
+  `Argon2Disabled` for missing-feature paths, `SaltGeneration`,
+  `InvalidHash` / `InvalidPassword`, `UnknownPrefix` for hashes
+  that aren't `$2...` or `$argon2...`).
+- **Prefix auto-detection in `verify` / `verify_any`** — bcrypt
+  matches `$2` (covers `$2a` / `$2b` / `$2x` / `$2y`), argon2
+  matches `$argon2` (covers argon2id / argon2i / argon2d). Lets
+  legacy Bcrypt rows and new Argon2id rows coexist in the same
+  column during migration without branching at every call site.
+- **`#[derive(HashOnNew)]` + `#[hash]` field attribute** — new
+  workspace member `nestrs-oauth2-macros` (proc-macro sub-crate
+  mirroring `nestrs-macros`). Derive emits an inherent
+  `new_with_hashed(...)` constructor that takes every named field
+  in declaration order and hashes each `#[hash]`-marked field
+  via the absolute path `::nestrs_oauth2::password::hash(...)`
+  before storage. The attribute is **inert without the derive**
+  (a bare `#[hash]` outside `#[derive(HashOnNew)]` is a compile
+  error, not a silent no-op). Multiple marked fields are
+  supported; generics are preserved; `#[hash(args)]` is rejected
+  with an actionable error — backend selection happens at hash
+  time, not derive time. Field ordering is preserved verbatim
+  (pinned by test).
+- **Disabled-backend error semantics** — `hash_with(plain, Argon2)`
+  on a build with only `password-bcrypt` returns
+  `Err(HashError::Argon2Disabled)` (not `Err`, not silent `false`).
+  This surfaces as a 500 to operations so missing-feature
+  configuration can't be mistaken for "wrong password".
+- **Re-exports** — `hash` / `hash_with` / `verify` / `verify_any` /
+  `verify_with` / `Backend` / `HashError` / `PasswordHasher` /
+  `BcryptHasher` / `Argon2Hasher` from `nestrs_oauth2::*`; behind
+  `password-macros`, also `HashOnNew` (the derive) and
+  `hash_attr` (the inert attribute, renamed to avoid colliding
+  with the free `hash` function).
+- **Tests** — 8 integration tests in
+  `nestrs-oauth2/tests/password.rs` (gated per backend feature):
+  per-backend round-trip via the public API, default hash uses
+  argon2, `verify_any` prefix dispatch, `UnknownPrefix` rejection,
+  disabled-backend error paths (only run in single-backend
+  builds), `PasswordHasher` trait object round-trip, plus three
+  `HashOnNew` derive tests — single marked field, multiple
+  marked fields, field-order preservation. 7 inline unit tests
+  inside `src/password.rs` for the bcrypt / argon2 impls.
+- **Docs** — `mintlify-docs/oauth2/hashing.mdx` (full reference:
+  feature table, hash/verify, backend selection, `PasswordHasher`
+  trait, `#[derive(HashOnNew)]` examples, migration story with
+  the bcrypt → argon2id rehash pattern, "why these choices",
+  see-also) + `docs.json` entry under `Guides`.
+
 ### Added — nestrs as an OAuth2 **authorization server** (`nestrs-oauth2`, feature `authorization-server`)
 
 The third OAuth2 role alongside the existing client and resource

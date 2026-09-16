@@ -43,6 +43,7 @@
               "guides/authorization",
               "guides/crud",
               "guides/oauth2",
+              "oauth2/hashing",
               "guides/security",
               "guides/observability",
               "guides/api-versioning",

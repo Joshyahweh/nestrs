@@ -10,7 +10,9 @@
 //! the social provider wrappers, opt in to `social`. The guard + module
 //! are only meaningful with at least one of the above. To run the full
 //! authorization server (authorize/token/introspect/revoke/discovery/
-//! JWKS), opt in to `authorization-server`.
+//! JWKS), opt in to `authorization-server`. For password hashing with
+//! prefix auto-detection (Bcrypt / Argon2id), opt in to `password`
+//! (or to one of `password-bcrypt` / `password-argon2` individually).
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -40,3 +42,14 @@ pub use guard::OAuth2Guard;
 pub use middleware::install_oauth2_middleware;
 #[cfg(feature = "guard")]
 pub use module::OAuth2Module;
+
+#[cfg(any(feature = "password-bcrypt", feature = "password-argon2"))]
+pub mod password;
+
+#[cfg(any(feature = "password-bcrypt", feature = "password-argon2"))]
+pub use password::{hash, hash_with, verify, verify_any, verify_with, Backend, HashError};
+#[cfg(any(feature = "password-bcrypt", feature = "password-argon2"))]
+pub use password::{Argon2Hasher, BcryptHasher, PasswordHasher};
+
+#[cfg(feature = "password-macros")]
+pub use nestrs_oauth2_macros::{hash as hash_attr, HashOnNew};

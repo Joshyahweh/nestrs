@@ -13,6 +13,7 @@ members = [
   "nestrs-cli",
   "nestrs-mcp",
   "nestrs-oauth2",
+  "nestrs-oauth2-macros",
   "nestrs-storage",
   "nestrs-security",
   "nestrs-throttler",

@@ -1,0 +1,217 @@
+---
+title: "Password hashing — `nestrs_oauth2::password` + `#[derive(HashOnNew)]`"
+description: "Hash and verify passwords with Bcrypt or Argon2id, auto-detect the algorithm from the hash prefix, and use the `HashOnNew` derive to construct rows whose marked fields are hashed on insert."
+---
+
+`nestrs-oauth2` ships a small, focused password-hashing layer behind
+the `password` feature. Pick a backend (Bcrypt for legacy hash
+migration, Argon2id for new deployments), call `hash` /
+`verify` from your service layer, or let the `#[derive(HashOnNew)]`
+macro construct a row whose password field is hashed for you.
+
+## Enable the feature
+
+```toml
+[dependencies]
+nestrs-oauth2 = { version = "1.0.0", features = ["password"] }
+```
+
+The `password` umbrella pulls in both backends plus the
+`nestrs-oauth2-macros` proc-macro crate that powers `HashOnNew`.
+Enable just one backend if you know you'll never need the other:
+
+```toml
+[dependencies]
+nestrs-oauth2 = { version = "1.0.0", features = ["password-argon2"] }
+```
+
+Available sub-features (all off by default):
+
+| Feature | What it enables |
+|---|---|
+| `password-bcrypt` | Bcrypt backend (pure rust) |
+| `password-argon2` | Argon2id backend (pure rust, the default) |
+| `password-macros` | `#[derive(HashOnNew)]` + `#[hash]` attribute via `nestrs-oauth2-macros` |
+| `password` | All three — `password-bcrypt` + `password-argon2` + `password-macros` |
+
+## Hash and verify
+
+```rust
+use nestrs_oauth2::{hash, verify};
+
+// Hash a plain-text password with the default backend (Argon2id).
+let stored = hash("hunter2").expect("hash");
+
+// Verify a candidate against the stored hash. Auto-detects the
+// backend from the hash prefix — works whether the row was hashed
+// with Argon2id (new code) or Bcrypt (legacy migration).
+assert!(verify("hunter2", &stored).unwrap());
+assert!(!verify("wrong", &stored).unwrap());
+```
+
+`verify` (and its alias `verify_any`) returns `Result<bool, HashError>`:
+
+- `Ok(true)` — password matches.
+- `Ok(false)` — password does not match (hash was valid).
+- `Err(UnknownPrefix(_))` — the stored hash isn't `$2...` (bcrypt) or
+  `$argon2...` (argon2). Indicates a corrupt DB row or a hash from
+  an unsupported algorithm.
+- `Err(BcryptDisabled)` / `Err(Argon2Disabled)` — the matched
+  backend's feature wasn't enabled.
+
+## Pick a backend explicitly
+
+`hash_with` and `verify_with` take an explicit `Backend`:
+
+```rust
+use nestrs_oauth2::{hash_with, verify_with, Backend};
+
+let bcrypt = hash_with("hunter2", Backend::Bcrypt).expect("bcrypt");
+assert!(bcrypt.starts_with("$2"));
+assert!(verify_with("hunter2", &bcrypt, Backend::Bcrypt).unwrap());
+```
+
+`Backend::default()` is `Argon2id` — Argon2 is the modern OWASP
+recommendation; Bcrypt is retained only for hash migration. Mixing
+hashes from different algorithms in the same column is fine as long
+as you use `verify` / `verify_any` (which dispatches on the prefix)
+rather than `verify_with` with a hard-coded backend.
+
+## The `PasswordHasher` trait
+
+For code that wants to swap algorithms at runtime — e.g. a migration
+script that rehashes every row from Bcrypt to Argon2id — there's a
+trait with a concrete impl per backend:
+
+```rust
+use nestrs_oauth2::{Argon2Hasher, BcryptHasher, PasswordHasher};
+
+let hasher: Box<dyn PasswordHasher> = Box::new(BcryptHasher);
+let stored = hasher.hash("hunter2").expect("hash");
+assert!(hasher.verify("hunter2", &stored).unwrap());
+```
+
+`BcryptHasher` uses the `bcrypt` crate's `DEFAULT_COST` (12 as of
+bcrypt 0.15). `Argon2Hasher` uses `Argon2::default()` (Argon2id,
+m=19456 KiB, t=2, p=1). Both are `Copy + Default + Debug` so
+they slot into your DI registry as `Arc<dyn PasswordHasher>` if
+you want backend choice at request time.
+
+## `#[derive(HashOnNew)]` — the `new_with_hashed` constructor
+
+The proc-macro derive generates an inherent
+`new_with_hashed(...)` constructor that hashes every field tagged
+`#[hash]` via `nestrs_oauth2::password::hash` before storing it:
+
+```rust
+use nestrs_oauth2::HashOnNew;
+
+#[derive(HashOnNew)]
+pub struct UserRow {
+    pub email: String,
+    #[hash]
+    pub password: String,
+    pub role: String,
+}
+
+let row = UserRow::new_with_hashed(
+    "alice@example.com".to_string(),
+    "hunter2".to_string(),
+    "admin".to_string(),
+);
+
+assert_eq!(row.email, "alice@example.com");
+assert_eq!(row.role, "admin");
+assert!(row.password.starts_with("$argon2")); // not "hunter2"
+assert!(nestrs_oauth2::verify("hunter2", &row.password).unwrap());
+```
+
+The derive:
+
+- Takes every named field as a constructor parameter, in struct
+  declaration order. Marked fields take `String` (the plain input);
+  the macro hashes them before storage.
+- Uses the absolute path `::nestrs_oauth2::password::hash(...)`
+  for the hash call — no `use` statement is needed in user code.
+- Preserves generics (`impl<T: Clone> HashOnNew for Foo<T> { ... }`
+  works as you'd expect).
+- Errors at compile time if you mark a field with `#[hash(args)]`
+  — backend selection happens at hash time, not derive time.
+
+Multiple marked fields are supported:
+
+```rust
+use nestrs_oauth2::HashOnNew;
+
+#[derive(HashOnNew)]
+pub struct ApiCreds {
+    #[hash]
+    pub secret: String,
+    #[hash]
+    pub refresh_token: String,
+}
+
+let creds = ApiCreds::new_with_hashed(
+    "super-secret".to_string(),
+    "rt_abc".to_string(),
+);
+```
+
+## Migration story
+
+Most production migrations move from Bcrypt to Argon2id without
+service downtime. The recommended pattern:
+
+1. New rows: hash with `hash` (Argon2id default) → store the new
+   hash alongside any existing columns.
+2. Login: call `verify(plain, &stored)` — it dispatches on the hash
+   prefix and works against both Bcrypt and Argon2id rows.
+3. On successful login of a legacy Bcrypt row: rehash with
+   `hash_with(plain, Backend::Argon2)` and update the column.
+4. After the rollout window, drop the Bcrypt `password-bcrypt`
+   feature and confirm no `$2...` rows remain in production.
+
+```rust
+use nestrs_oauth2::{hash, hash_with, verify, Backend};
+
+async fn login_and_maybe_rehash(user: &mut UserRow, candidate: &str)
+    -> Result<bool, nestrs_oauth2::HashError>
+{
+    if !verify(candidate, &user.password)? {
+        return Ok(false);
+    }
+    if user.password.starts_with("$2") {
+        // Legacy Bcrypt row — rehash to Argon2id on successful login.
+        user.password = hash_with(candidate, Backend::Argon2)?;
+    }
+    Ok(true)
+}
+```
+
+`verify` returns `Err(HashError::UnknownPrefix(_))` for hashes that
+aren't Bcrypt or Argon2 — surface that as a 500 to operations so
+you can clean up bad rows, never as a "wrong password".
+
+## Why these choices
+
+- **Argon2id as default** — modern OWASP recommendation, resistant
+  to GPU and side-channel attacks.
+- **No `bcrypt` re-export at the crate root** — `bcrypt` and
+  `argon2` are implementation details of the `password` module. If
+  you need raw access (custom parameters, custom salt format),
+  depend on those crates directly.
+- **Prefix auto-detection in `verify_any`** — lets you mix legacy
+  and new hashes in the same column during migration without
+  branching at every call site.
+- **`Result<bool, _>` instead of `bool`** — distinguishes "hash
+  format unknown" (real error) from "password mismatch" (normal
+  auth failure). Use `.unwrap_or(false)` at the call site if you
+  want the bool shortcut.
+
+## See also
+
+- [`mintlify-docs/guides/oauth2`](/guides/oauth2) — the parent
+  OAuth2 guide (client, resource server, social, guard).
+- `nestrs_oauth2::Backend` — the backend enum.
+- `nestrs_oauth2::PasswordHasher` — the trait for swappable backends.
+- `nestrs_oauth2::HashError` — the error type returned by hash/verify.

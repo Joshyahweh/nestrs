@@ -1,0 +1,18 @@
+[package]
+name = "nestrs-oauth2-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Proc-macro support for nestrs-oauth2 (HashOnNew + #[hash])."
+keywords = ["nest", "oauth2", "macros", "proc-macro", "password"]
+categories = ["development-tools::procedural-macro-helpers", "authentication"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true

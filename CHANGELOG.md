@@ -184,6 +184,42 @@ for apps that prefer Drizzle's query-first DSL.
   configuration, API surface table) + `docs.json` entry under
   `recipes` "Backend stacks".
 
+### Added — Outbound HTTP client (`nestrs-http`, feature `http-client`)
+
+Wave 7.8. Extracted the existing `nestrs::HttpService` /
+`HttpModule` into a focused workspace member. The umbrella keeps
+the same paths via a 1-line re-export shim.
+
+- **New workspace member `nestrs-http`** — `HttpService` wraps a
+  shared `reqwest::Client` with bounded default timeouts
+  (`DEFAULT_REQUEST_TIMEOUT = 30s`, `DEFAULT_CONNECT_TIMEOUT = 10s`).
+  `.get(url)` / `.post(url)` / `.put(url)` / `.patch(url)` /
+  `.delete(url)` return `reqwest::RequestBuilder`s;
+  `.client()` exposes the raw client. `HttpServiceOptions` builder
+  tunes `request_timeout` / `connect_timeout`. `HttpModule::register()`
+  installs the singleton provider. `reqwest` re-exported at the
+  crate root under feature flag `reqwest`.
+- **Umbrella `nestrs` (`feature = "http-client"`)** — `HttpService` /
+  `HttpModule` / `HttpServiceOptions` / `DEFAULT_REQUEST_TIMEOUT` /
+  `DEFAULT_CONNECT_TIMEOUT` re-exported from `nestrs::http_client::*`.
+  The `http-client` feature now pulls `dep:nestrs-http` instead of
+  `dep:reqwest` directly; `nestrs-health/http` stays as-is. The
+  legacy `reqwest` direct dep is removed from the umbrella entirely.
+- **Tests** — `nestrs-http/tests/timeouts.rs` (3 tests): default
+  options carry sane timeouts (30s / 10s), `from_options` produces a
+  working client, the five request-builder helpers (`get` / `post` /
+  `put` / `patch` / `delete`) compile and return typed builders.
+- **Docs** — `mintlify-docs/recipes/http-client.mdx` (full reference
+  with install, "why default timeouts matter", boot, configuration,
+  API surface table) + `docs.json` entry under `recipes` "Backend
+  stacks".
+
+### Note — pre-existing umbrella tests
+
+`nestrs/tests/http_client_timeouts.rs` (the regression test that
+moved over) keeps compiling unchanged via the 1-line shim — the
+file's content already lives in `nestrs-http/tests/timeouts.rs`.
+
 ## [1.0.0] - 2026-09-12
 
 First stable release. Everything since 0.5.2 is in this version: the

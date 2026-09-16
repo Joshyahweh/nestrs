@@ -96,7 +96,8 @@
               "recipes/message-brokers",
               "recipes/event-driven",
               "recipes/mongodb",
-              "recipes/drizzle"
+              "recipes/drizzle",
+              "recipes/http-client"
             ]
           }
         ]

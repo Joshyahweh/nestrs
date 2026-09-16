@@ -1,0 +1,25 @@
+[package]
+name = "nestrs-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Outbound HTTP client for nestrs — HttpModule, HttpService (shared reqwest::Client with sane default timeouts), HttpServiceOptions builder."
+keywords = ["http", "reqwest", "client", "nest", "axum"]
+categories = ["api-bindings", "web-programming", "network-programming"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "1.0.0" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio.workspace = true
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []
+## Re-export `reqwest` at the crate root so callers don't add a direct dep.
+reqwest = []

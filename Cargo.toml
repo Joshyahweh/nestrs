@@ -19,6 +19,7 @@ members = [
   "nestrs-health",
   "nestrs-mongodb",
   "nestrs-drizzle",
+  "nestrs-http",
   "examples/hello-app",
   "examples/lab",
 ]

@@ -14,6 +14,7 @@ members = [
   "nestrs-mcp",
   "nestrs-oauth2",
   "nestrs-storage",
+  "nestrs-throttler",
   "examples/hello-app",
   "examples/lab",
 ]

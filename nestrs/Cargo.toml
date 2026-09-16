@@ -111,6 +111,15 @@ authn-oauth2 = ["authn", "oauth2"]
 admin = ["dep:subtle"]
 ## Clears `nestrs-core` global registries in tests (`RouteRegistry`, `MetadataRegistry`). See `STABILITY.md`.
 test-hooks = ["nestrs-core/test-hooks"]
+## Route throttling (`#[throttle(n, "per")]` / `#[skip_throttle]`); provides
+## `ThrottlerModule::register`, `ThrottlerGuard`, and the global middleware
+## installed by `NestApplication::use_throttler`. Underlying crate is
+## `nestrs-throttler`; the main crate re-exports its public types.
+throttler = ["dep:nestrs-throttler"]
+## Pulls in the Redis backend (`ThrottlerBackendKind::Redis` +
+## `RedisThrottler`) on top of `throttler`. Same flag name as the crate-level
+## `cache-redis` so feature surfaces stay symmetric.
+throttler-redis = ["throttler", "nestrs-throttler/cache-redis"]
 
 [dependencies]
 axum = { workspace = true, features = ["multipart", "macros"] }
@@ -183,6 +192,7 @@ jsonwebtoken = { workspace = true, optional = true }
 argon2 = { workspace = true, optional = true, features = ["rand"] }
 getrandom = { version = "0.2", optional = true }
 nestrs-oauth2 = { version = "1.0.0", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
+nestrs-throttler = { version = "1.0.0", path = "../nestrs-throttler", optional = true, default-features = false }
 
 [dev-dependencies]
 async-graphql = "=7.0.17"

@@ -1,0 +1,31 @@
+[package]
+name = "nestrs-throttler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Route throttling (#[throttle] / #[skip_throttle]) for nestrs — NestJS @nestjs/throttler parity: fixed-window budget enforcement (in-memory + Redis backends), ThrottlerGuard, ThrottlerModule, custom ThrottleKeyGenerator / ThrottleSkipper / ThrottlerBackend."
+keywords = ["throttler", "rate-limit", "ratelimit", "nest", "axum"]
+categories = ["api-bindings", "web-programming"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "1.0.0" }
+axum.workspace = true
+tokio.workspace = true
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+redis = { version = "0.29", default-features = false, features = ["tokio-comp"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[features]
+default = []
+## Redis backend (matches nestrs' `cache-redis` feature name for symmetry)
+cache-redis = ["dep:redis"]
+## All-in convenience feature
+all = ["cache-redis"]

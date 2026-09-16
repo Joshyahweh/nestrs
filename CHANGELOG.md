@@ -7,6 +7,79 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wave 7.16: Async-local-storage `#[als]` proc-macro + `nestrs_core::als` runtime
+
+A typed cell that propagates a value through every `.await` on the
+current task without threading it through every function signature
+— the Rust analogue of `nestjs-cls` / `cls-hooked`. Middleware
+installs the value once, downstream handlers and services read it
+without injecting it. The runtime is always-on (no feature gate);
+the proc-macro is sugar over it that adds per-type generated names
+and an axum extractor.
+
+- **`nestrs_core::als` module** — always-on (no feature flag, since
+  `tokio::task_local!` is already in scope via the existing `tokio`
+  workspace dep). Three pieces of public surface:
+  - `AlsError` — single-variant rejection enum
+    (`NotSet`, no value installed on the current task).
+    `Clone + Copy + PartialEq + Eq` so handler tests can
+    `assert_eq!(res, Err(AlsError::NotSet))` without wrapping.
+    `Display` impl names the fix in the failure message
+    ("middleware should set it via `with_<name>(value, future).await`").
+    `std::error::Error` impl.
+  - `task_local!` — re-export of `tokio::task_local!` so the macro's
+    emitted code has a stable path
+    (`::nestrs_core::als::task_local!`) that doesn't require `tokio`
+    to be a direct dependency of the user's crate (transitive
+    visibility from `nestrs-core` isn't enough on its own).
+  - `AlsContext<T>` — manual helper for users who don't want the
+    proc-macro. `new(&cell)` constructor + `async fn with(value, future) -> R`
+    + `fn current() -> Option<T>`. Wraps a `tokio::task_local!` cell
+    with `RefCell<Option<T>>` storage, drops the manual `scope` /
+    `try_with` plumbing. The macro is sugar over this surface; pick
+    whichever fits your codebase.
+- **`#[als]` proc-macro** in `nestrs-macros` — applied to a struct,
+  generates alongside the original:
+  - `task_local!` cell `<SNAKE_UPPER>_ALS: Option<Self> = None` —
+    names derived from the type itself so two ALS values can't share
+    state.
+  - `with_<snake>(value, future) -> R` — install the value for the
+    duration of `future`. After `future` completes (success, error,
+    or panic), the prior value (or absence) is restored.
+  - `current_<snake>() -> Option<Self>` — read the current value
+    (where `Self: Clone`), returns `None` outside any active scope.
+    Cheap (single task-local lookup + clone).
+  - `impl<S> FromRequestParts<S> for Self` for both `S = ()` and
+    `S = Parts` (axum's request parts type) — handlers extract the
+    value as a normal axum extractor. `Rejection = AlsError`.
+  - Generic-aware — preserves `impl_generics`, `ty_generics`,
+    `where_clause` through the generated impls.
+  - Inline `to_snake_case` helper (handles `RequestContext` →
+    `request_context`, `UserID` → `user_id`, `HTTPRequest` →
+    `http_request`). No `heck` dependency added.
+- **Bounded to `Self: Clone + Send + Sync + 'static`** — the value is
+  stored by `task_local!`, returned by clone, and propagates across
+  `.await` boundaries automatically. `task_local`'s own bounds cover
+  the rest.
+- **Tests** — 7 integration tests in `nestrs-core/tests/als.rs`
+  (runtime: `with` installs value for future duration, nested
+  scopes join the outer, `current` returns `None` off-scope, empty
+  string round-trip, `Display` mentions the fix, `Eq` supports match
+  arms) + 10 macro expansion tests in `nestrs-macros/tests/als.rs`
+  (named-field struct, single-field struct, tuple struct, unit
+  struct; `with_*` / `current_*` round-trip; nested scope joins;
+  extractor reads from middleware-installed value; extractor
+  rejects with `AlsError::NotSet` when not installed; extractor
+  works for single-field / tuple / unit structs; two distinct ALS
+  types don't interfere). 3 inline unit tests in
+  `nestrs-core/src/als.rs` mirror the runtime assertions in
+  isolation (incl. panic restore via `catch_unwind`).
+- **Docs** — `mintlify-docs/concepts/als.mdx` (define an ALS type,
+  install it from middleware, read it from a handler, read it from
+  anywhere on the task, the runtime helper, `AlsError`, multiple
+  ALS types, `tokio::task_local` re-export, "why these choices") +
+  `docs.json` entry under `Core Concepts` next to `sse`.
+
 ### Added — Wave 7.15: Server-Sent Events (`nestrs-core`, feature `sse`)
 
 A thin nestrs-flavored wrapper around axum's SSE primitive — the

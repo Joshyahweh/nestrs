@@ -6102,3 +6102,165 @@ pub fn derive_nestrs_mongo_document(input: TokenStream) -> TokenStream {
 
     expanded.into()
 }
+
+/// `#[als]` — declare a struct as an async-local-storage key.
+///
+/// The macro generates, alongside the original struct:
+/// - a `tokio::task_local!` cell named `<SNAKE_CASE>_ALS`,
+/// - `pub async fn with_<snake_case>(value, future) -> R` that runs
+///   `future` with `value` installed in the cell,
+/// - `pub fn current_<snake_case>() -> Option<Self>` that reads the
+///   current value (returns `None` outside any scope), and
+/// - `impl<S> axum::extract::FromRequestParts<S> for Self` so handlers
+///   can take the type directly as a parameter and get back either the
+///   value the request-scoped middleware installed, or
+///   `nestrs_core::als::AlsError::NotSet`.
+///
+/// Bounded to `Self: Clone + Send + Sync + 'static` — the value is
+/// stored by `tokio::task_local!`, returned by clone, and propagated
+/// across `.await` boundaries automatically.
+///
+/// # Example
+///
+/// ```ignore
+/// use nestrs_macros::als;
+///
+/// #[als]
+/// #[derive(Clone)]
+/// pub struct RequestContext {
+///     pub user_id: uuid::Uuid,
+///     pub tenant_id: String,
+/// }
+///
+/// // Middleware that installs the value:
+/// async fn install<R>(ctx: RequestContext, next: R) -> R::Output
+/// where
+///     R: nestrs_core::als::WithRequestContext,
+/// {
+///     with_request_context(ctx, async move { next.run().await }).await
+/// }
+///
+/// // Handler that reads it:
+/// async fn handler(ctx: RequestContext) -> String {
+///     format!("user={}", ctx.user_id)
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn als(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemStruct);
+
+    let name = &input.ident;
+    let snake = to_snake_case(&name.to_string());
+    let als_const = format_ident!("{}_ALS", snake.to_uppercase());
+    let with_fn = format_ident!("with_{}", snake);
+    let current_fn = format_ident!("current_{}", snake);
+
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let expanded = quote! {
+        #input
+
+        ::nestrs_core::als::task_local! {
+            static #als_const: ::std::option::Option<#name #ty_generics> = ::std::option::Option::None;
+        }
+
+        impl #impl_generics #name #ty_generics #where_clause {
+            /// Run `future` with `value` installed as the
+            /// async-local-storage value. After `future` completes
+            /// (success, error, or panic), the prior value (or absence
+            /// of one) is restored.
+            #[allow(dead_code)]
+            pub async fn #with_fn<F, R>(value: #name #ty_generics, future: F) -> R
+            where
+                F: ::std::future::Future<Output = R>,
+            {
+                #als_const
+                    .scope(::std::option::Option::Some(value), future)
+                    .await
+            }
+
+            /// Read the current value, or `None` if no `with_*` scope
+            /// is active on this task. Cheap (a single task-local
+            /// lookup + clone).
+            #[allow(dead_code)]
+            pub fn #current_fn() -> ::std::option::Option<#name #ty_generics>
+            where
+                #name #ty_generics: ::std::clone::Clone,
+            {
+                #als_const
+                    .try_with(|cell| cell.clone())
+                    .ok()
+                    .flatten()
+            }
+        }
+
+        impl #impl_generics ::axum::extract::FromRequestParts<()>
+            for #name #ty_generics
+        where
+            #name #ty_generics: ::std::clone::Clone + ::std::marker::Send + ::std::marker::Sync + 'static,
+        {
+            type Rejection = ::nestrs_core::als::AlsError;
+
+            async fn from_request_parts(
+                _parts: &mut ::axum::http::request::Parts,
+                _state: &(),
+            ) -> ::std::result::Result<Self, Self::Rejection> {
+                #als_const
+                    .try_with(|cell| cell.clone())
+                    .ok()
+                    .flatten()
+                    .ok_or(::nestrs_core::als::AlsError::NotSet)
+            }
+        }
+
+        impl #impl_generics ::axum::extract::FromRequestParts<::axum::http::request::Parts>
+            for #name #ty_generics
+        where
+            #name #ty_generics: ::std::clone::Clone + ::std::marker::Send + ::std::marker::Sync + 'static,
+        {
+            type Rejection = ::nestrs_core::als::AlsError;
+
+            async fn from_request_parts(
+                _parts: &mut ::axum::http::request::Parts,
+                _state: &::axum::http::request::Parts,
+            ) -> ::std::result::Result<Self, Self::Rejection> {
+                #als_const
+                    .try_with(|cell| cell.clone())
+                    .ok()
+                    .flatten()
+                    .ok_or(::nestrs_core::als::AlsError::NotSet)
+            }
+        }
+    };
+
+    expanded.into()
+}
+
+/// Convert a CamelCase identifier to snake_case without pulling in
+/// the `heck` crate. Handles the common cases: `RequestContext` →
+/// `request_context`, `UserID` → `user_id`, `HTTPRequest` →
+/// `http_request`. Lowercases ASCII letters and inserts an underscore
+/// at every upper→lower transition that isn't the first character.
+fn to_snake_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    let chars: Vec<char> = s.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_ascii_uppercase() {
+            if i > 0 {
+                let prev = chars[i - 1];
+                let next = chars.get(i + 1).copied();
+                let boundary = prev.is_ascii_lowercase()
+                    || (prev.is_ascii_uppercase()
+                        && next.map(|n| n.is_ascii_lowercase()).unwrap_or(false))
+                    || prev.is_ascii_digit();
+                if boundary {
+                    out.push('_');
+                }
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}

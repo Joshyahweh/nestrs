@@ -16,3 +16,8 @@ proc-macro = true
 proc-macro2.workspace = true
 quote.workspace = true
 syn.workspace = true
+
+[dev-dependencies]
+nestrs-core = { path = "../nestrs-core" }
+tokio = { workspace = true, features = ["macros", "rt"] }
+axum = { workspace = true }

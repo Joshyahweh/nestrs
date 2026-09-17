@@ -72,6 +72,10 @@ the new surfaces. Additive minor on the 1.0 / 1.1 contract.
 
 ### Fixed
 
+- **`nestrs-oauth2` keywords** trimmed to 5 (`oauth2`, `oidc`, `auth`,
+  `nest`, `axum`). crates.io rejected 1.2.0 with HTTP 400 (`expected at
+  most 5 keywords per crate`). Publish preflight now checks keyword and
+  category limits.
 - **`throttler_middleware`** honors `#[throttle]` / `#[skip_throttle]` on the
   app-level layer. Route-level `HandlerKey` is not available there, so the
   middleware resolves the handler via `RouteRegistry::handler_for` and applies

@@ -2,10 +2,10 @@
 //! [`@nestjs/throttler`](https://docs.nestjs.com/security/rate-limiting) parity.
 //!
 //! This module is a thin shim: every public symbol lives in the
-//! [`nestrs-throttler`](https://crates.io/crates/nestrs-throttler) crate and
+//! [`nestrs-throttle`](https://crates.io/crates/nestrs-throttle) crate and
 //! is re-exported here when the `throttler` feature flag is on. See
-//! `nestrs_throttler` for the implementation (backends, key generators,
+//! `nestrs_throttle` for the implementation (backends, key generators,
 //! skippers, guard, middleware, module wiring, etc.).
 
 #[cfg(feature = "throttler")]
-pub use nestrs_throttler::*;
+pub use nestrs_throttle::*;

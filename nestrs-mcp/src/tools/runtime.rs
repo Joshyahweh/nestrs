@@ -28,7 +28,7 @@ fn into_rmcp(e: crate::Error) -> ErrorData {
 #[derive(Debug)]
 pub struct RuntimeTools;
 
-#[tool_router]
+#[tool_router(vis = "pub")]
 impl RuntimeTools {
     #[tool(
         name = "get_app_health",

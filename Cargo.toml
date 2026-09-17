@@ -16,7 +16,7 @@ members = [
   "nestrs-oauth2-macros",
   "nestrs-storage",
   "nestrs-security",
-  "nestrs-throttler",
+  "nestrs-throttle",
   "nestrs-health",
   "nestrs-mongodb",
   "nestrs-http",
@@ -31,7 +31,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "1.0.0"
+version = "1.2.0"
 rust-version = "1.88"
 repository = "https://github.com/Joshyahweh/nestrs"
 # `homepage`, `documentation`, `readme`, and `description` are deliberately

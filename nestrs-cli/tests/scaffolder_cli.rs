@@ -58,6 +58,7 @@ fn cli_bin() -> PathBuf {
 
 fn run_cli(args: &[&str]) {
     let status = Command::new(cli_bin())
+        .current_dir(std::env::temp_dir())
         .args(args)
         .status()
         .expect("failed to invoke nestrs-cli");

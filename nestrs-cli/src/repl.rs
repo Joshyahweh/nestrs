@@ -13,6 +13,12 @@
 //!   route, method + path + handler.
 //! - `nestrs-cli repl providers [--path <dir>]` — flat list of every
 //!   `#[injectable]` type and which module declares it.
+//! - `nestrs-cli repl live --url <admin> [--bearer-token <token>]` —
+//!   dump live providers + routes from a running app's admin sidecar
+//!   (`GET /__nestrs/providers` and `/__nestrs/routes`). Transport is
+//!   `curl -X GET` with `Authorization: Bearer …` as a **header only**
+//!   (never a query string). The URL is passed after `--` so it cannot
+//!   be parsed as a curl flag. Requires `curl` on `$PATH`.
 //!
 //! All modes default to scanning `./src` from the current working
 //! directory. `--path <dir>` overrides the source root.
@@ -20,63 +26,203 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command, ExitCode, Stdio};
 
 use regex::Regex;
 use serde::Serialize;
 
+/// A `#[module(...)]` declaration found by the REPL scanner.
 #[derive(Debug, Serialize)]
-struct ModuleEntry {
-    name: String,
-    file: String,
-    controllers: Vec<String>,
-    providers: Vec<String>,
-    imports: Vec<String>,
+pub struct ModuleEntry {
+    /// Type name.
+    pub name: String,
+    /// Source file (display path).
+    pub file: String,
+    /// Controller type names listed in the module.
+    pub controllers: Vec<String>,
+    /// Provider type names listed in the module.
+    pub providers: Vec<String>,
+    /// Imported module type names.
+    pub imports: Vec<String>,
 }
 
+/// A `#[controller(...)]` declaration found by the REPL scanner.
 #[derive(Debug, Serialize)]
-struct ControllerEntry {
-    name: String,
-    file: String,
-    prefix: Option<String>,
-    routes: Vec<RouteEntry>,
+pub struct ControllerEntry {
+    /// Type name.
+    pub name: String,
+    /// Source file (display path).
+    pub file: String,
+    /// Route prefix from `#[controller("/...")]`, if any.
+    pub prefix: Option<String>,
+    /// HTTP routes discovered on the impl.
+    pub routes: Vec<RouteEntry>,
 }
 
+/// A single HTTP route extracted from a controller impl.
 #[derive(Debug, Serialize)]
-struct RouteEntry {
-    method: String,
-    path: String,
-    handler: String,
+pub struct RouteEntry {
+    /// HTTP method (`GET`, `POST`, …).
+    pub method: String,
+    /// Path fragment from the method attribute.
+    pub path: String,
+    /// Handler function name.
+    pub handler: String,
 }
 
+/// An `#[injectable]` type found by the REPL scanner.
 #[derive(Debug, Serialize)]
-struct ProviderEntry {
-    name: String,
-    file: String,
+pub struct ProviderEntry {
+    /// Type name.
+    pub name: String,
+    /// Source file (display path).
+    pub file: String,
 }
 
+/// A `#[dto]` type found by the REPL scanner.
 #[derive(Debug, Serialize)]
-struct DtoEntry {
-    name: String,
-    file: String,
+pub struct DtoEntry {
+    /// Type name.
+    pub name: String,
+    /// Source file (display path).
+    pub file: String,
 }
 
+/// Source-level DI graph extracted by `nestrs-cli repl`.
 #[derive(Debug, Default, Serialize)]
-struct Graph {
-    modules: Vec<ModuleEntry>,
-    controllers: Vec<ControllerEntry>,
-    providers: Vec<ProviderEntry>,
-    dtos: Vec<DtoEntry>,
+pub struct Graph {
+    /// Modules in scan order.
+    pub modules: Vec<ModuleEntry>,
+    /// Controllers in scan order.
+    pub controllers: Vec<ControllerEntry>,
+    /// Injectable providers in scan order.
+    pub providers: Vec<ProviderEntry>,
+    /// DTO / entity / model types in scan order.
+    pub dtos: Vec<DtoEntry>,
 }
 
-/// Entry point. Dispatches to graph/routes/providers sub-subcommands.
+/// Parsed `repl live` flags. Bearer is never logged.
+#[derive(Debug)]
+pub struct LiveArgs {
+    /// Admin sidecar base URL (`http://127.0.0.1:7777`).
+    pub url: String,
+    /// Optional bearer token (header only).
+    pub bearer: Option<String>,
+    /// `text` or `json`.
+    pub format: String,
+}
+
+/// Parse `repl live` argv (tokens after `live`). Network I/O is separate
+/// so tests can assert flag errors without hitting an admin port.
+pub fn parse_live_args(args: &[String]) -> Result<LiveArgs, String> {
+    let mut url: Option<String> = None;
+    let mut bearer: Option<String> = None;
+    let mut format = String::from("text");
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--url" => {
+                i += 1;
+                url = Some(
+                    args.get(i)
+                        .ok_or_else(|| "missing value for --url".to_string())?
+                        .clone(),
+                );
+            }
+            "--bearer-token" => {
+                i += 1;
+                bearer = Some(
+                    args.get(i)
+                        .ok_or_else(|| "missing value for --bearer-token".to_string())?
+                        .clone(),
+                );
+            }
+            "--format" => {
+                i += 1;
+                format = args
+                    .get(i)
+                    .ok_or_else(|| "missing value for --format".to_string())?
+                    .clone();
+            }
+            other => return Err(format!("unknown option `{other}`")),
+        }
+        i += 1;
+    }
+    let url = url.ok_or_else(|| "missing required `--url <http>`".to_string())?;
+    if format != "text" && format != "json" {
+        return Err(format!("unknown format `{format}`; expected text or json"));
+    }
+    Ok(LiveArgs {
+        url,
+        bearer,
+        format,
+    })
+}
+
+fn admin_url(base: &str, path: &str) -> String {
+    format!("{}{}", base.trim_end_matches('/'), path)
+}
+
+fn curl_get(url: &str, bearer: Option<&str>) -> Result<String, String> {
+    let mut cmd = Command::new("curl");
+    cmd.arg("-sS").arg("-X").arg("GET").arg("--max-time").arg("15");
+    if let Some(token) = bearer {
+        cmd.arg("-H").arg(format!("Authorization: Bearer {token}"));
+    }
+    cmd.arg("--").arg(url);
+    cmd.stdin(Stdio::null());
+    let output = cmd.output().map_err(|e| {
+        format!("failed to invoke `curl` against admin sidecar: {e}. Is `curl` on your $PATH?")
+    })?;
+    if !output.status.success() {
+        return Err(format!(
+            "curl exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn run_live(args: &[String]) -> Result<(), String> {
+    let opts = parse_live_args(args)?;
+    let providers = curl_get(
+        &admin_url(&opts.url, "/__nestrs/providers"),
+        opts.bearer.as_deref(),
+    )?;
+    let routes = curl_get(
+        &admin_url(&opts.url, "/__nestrs/routes"),
+        opts.bearer.as_deref(),
+    )?;
+    match opts.format.as_str() {
+        "json" => {
+            println!(
+                "{{\"providers\":{},\"routes\":{}}}",
+                providers.trim(),
+                routes.trim()
+            );
+        }
+        _ => {
+            println!("GET /__nestrs/providers");
+            println!("{providers}");
+            println!("GET /__nestrs/routes");
+            println!("{routes}");
+        }
+    }
+    Ok(())
+}
+
+/// Entry point. Dispatches to graph/routes/providers/live sub-subcommands.
 /// `args` are the post-`repl` argv tokens.
 pub fn run(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "expected `nestrs-cli repl <graph|routes|providers> [--path <dir>] [--format text|json]`"
-                .to_string(),
+            "expected `nestrs-cli repl <graph|routes|providers|dtos|live> [...]`".to_string(),
         );
+    }
+
+    if args[0] == "live" {
+        return run_live(&args[1..]);
     }
 
     let mut path = PathBuf::from("src");
@@ -124,15 +270,17 @@ pub fn scan(root: &Path) -> Result<Graph, String> {
 
     let mut graph = Graph::default();
 
-    let re_module = Regex::new(r"#\s*\[\s*module\b([^\]]*)\]").unwrap();
     let re_controller = Regex::new(r"#\s*\[\s*controller\b([^\]]*)\]").unwrap();
     let re_injectable = Regex::new(r"#\s*\[\s*injectable\b[^\]]*\]").unwrap();
-    let re_dto = Regex::new(r"#\s*\[\s*dto\b[^\]]*\]").unwrap();
+    let re_dto = Regex::new(
+        r"#\s*\[\s*(?:(?:nestrs|nestrs_macros)\s*::\s*)?(?:dto|partial_type|omit_type|pick_type|intersection_type)\b[^\]]*\]",
+    )
+    .unwrap();
     let re_impl_routes = Regex::new(r"impl_routes!\s*\(").unwrap();
     let re_prefix =
         Regex::new(r#"prefix\s*=\s*"([^"]+)""#).unwrap();
     let re_method_route = Regex::new(
-        r"#\s*\[\s*(get|post|put|patch|delete|head|options)\s*\(\s*\"([^\"]*)\"\s*\)\s*\]",
+        r#"#\s*\[\s*(get|post|put|patch|delete|head|options)\s*\(\s*"([^"]*)"\s*\)\s*\]"#,
     )
     .unwrap();
     let re_handler = Regex::new(r"\b(?:async\s+)?fn\s+([a-z][A-Za-z0-9_]*)\b").unwrap();
@@ -147,11 +295,12 @@ pub fn scan(root: &Path) -> Result<Graph, String> {
             .to_string();
         let content = fs::read_to_string(file).map_err(|e| e.to_string())?;
 
-        // Modules — `#[module(controllers = [...], providers = [...], imports = [...])]`
-        for cap in re_module.captures_iter(&content) {
-            let inner = cap.get(1).map(|m| m.as_str()).unwrap_or("");
-            let module_name = next_struct_name_after(&content, cap.get(0).unwrap().end());
-            let (controllers, providers, imports) = parse_lists(inner, &re_keyed_list);
+        // Modules — `#[module(controllers = [...], providers = [...], imports = [...])]`.
+        // Nested `[...]` lists mean we cannot stop at the first `]`; walk
+        // balanced parentheses instead.
+        for (end, inner) in find_attr_paren_inners(&content, "module") {
+            let module_name = next_struct_name_after(&content, end);
+            let (controllers, providers, imports) = parse_lists(&inner, &re_keyed_list);
             if let Some(name) = module_name {
                 graph.modules.push(ModuleEntry {
                     name,
@@ -228,13 +377,13 @@ pub fn scan(root: &Path) -> Result<Graph, String> {
         // DTOs — `#[dto]` must precede a struct declaration.
         for cap in re_dto.captures_iter(&content) {
             if let Some(name) = next_struct_name_after(&content, cap.get(0).unwrap().end()) {
-                if name.ends_with("Dto") || name.ends_with("Entity") || name.ends_with("Model") {
-                    if !graph.dtos.iter().any(|d| d.name == name) {
-                        graph.dtos.push(DtoEntry {
-                            name,
-                            file: display.clone(),
-                        });
-                    }
+                if (name.ends_with("Dto") || name.ends_with("Entity") || name.ends_with("Model"))
+                    && !graph.dtos.iter().any(|d| d.name == name)
+                {
+                    graph.dtos.push(DtoEntry {
+                        name,
+                        file: display.clone(),
+                    });
                 }
             }
         }
@@ -274,6 +423,78 @@ fn collect_rs_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Locate `#[ident(...)]` / `#[ident]` invocations and return
+/// `(byte_offset_after_attr, paren_inner)`. Nested `[...]` inside the
+/// parentheses (e.g. `controllers = [Foo]`) are preserved — a naive
+/// `[^\]]*` regex would stop at the first list closer.
+fn find_attr_paren_inners(content: &str, ident: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let bytes = content.as_bytes();
+    let mut i = 0usize;
+    while i < content.len() {
+        let Some(rel) = content[i..].find("#[") else {
+            break;
+        };
+        let after_hash = i + rel + 2;
+        let rest = content[after_hash..].trim_start();
+        let ident_start = after_hash + (content[after_hash..].len() - rest.len());
+        if !rest.starts_with(ident) {
+            i = after_hash;
+            continue;
+        }
+        let after_ident = ident_start + ident.len();
+        if after_ident < content.len() {
+            let next = bytes[after_ident];
+            if next.is_ascii_alphanumeric() || next == b'_' {
+                i = after_ident;
+                continue;
+            }
+        }
+        let mut k = after_ident;
+        while k < content.len() && bytes[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        if k >= content.len() {
+            break;
+        }
+        if bytes[k] == b']' {
+            out.push((k + 1, String::new()));
+            i = k + 1;
+            continue;
+        }
+        if bytes[k] != b'(' {
+            i = k;
+            continue;
+        }
+        let inner_start = k + 1;
+        let mut depth = 1i32;
+        let mut j = inner_start;
+        while j < content.len() && depth > 0 {
+            match bytes[j] {
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ => {}
+            }
+            j += 1;
+        }
+        if depth != 0 {
+            i = inner_start;
+            continue;
+        }
+        let inner = content[inner_start..j - 1].to_string();
+        let mut end = j;
+        while end < content.len() && bytes[end].is_ascii_whitespace() {
+            end += 1;
+        }
+        if end < content.len() && bytes[end] == b']' {
+            end += 1;
+        }
+        out.push((end, inner));
+        i = end;
+    }
+    out
 }
 
 fn next_struct_name_after(content: &str, after: usize) -> Option<String> {
@@ -323,7 +544,7 @@ fn parse_ident_list(body: &str) -> Vec<String> {
     body.split(|c: char| c == ',' || c.is_whitespace())
         .filter(|s| !s.is_empty())
         .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_').to_string())
-        .filter(|s| !s.is_empty() && s.chars().next().map_or(false, |c| c.is_uppercase()))
+        .filter(|s| !s.is_empty() && s.chars().next().is_some_and(|c| c.is_uppercase()))
         .collect()
 }
 
@@ -391,7 +612,7 @@ fn print_routes(graph: &Graph, format: &str) -> Result<(), String> {
                 }
             }
             rows.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
-            println!("{:>6}  {:<40}  {}", "METHOD", "PATH", "HANDLER");
+            println!("{:>6}  {:<40}  HANDLER", "METHOD", "PATH");
             for (m, p, h) in rows {
                 println!("{m:>6}  {p:<40}  {h}");
             }
@@ -497,6 +718,10 @@ fn join_route(prefix: &str, path: &str) -> String {
 pub fn run_cli(args: &[String]) -> Result<Graph, String> {
     if args.is_empty() {
         return Err("expected `graph|routes|providers|dtos`".to_string());
+    }
+    match args[0].as_str() {
+        "graph" | "routes" | "providers" | "dtos" => {}
+        other => return Err(format!("unknown subcommand `{other}`")),
     }
     let mut path = PathBuf::from("src");
     let mut i = 1usize;

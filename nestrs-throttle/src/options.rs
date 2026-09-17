@@ -4,10 +4,14 @@
 use crate::backend::ThrottlerBackendKind;
 use crate::keys::{NeverSkip, ThrottleKeyGenerator, ThrottleSkipper};
 use crate::spec::ThrottleSpec;
+use std::fmt;
 use std::sync::Arc;
 
 /// Options for [`crate::ThrottlerModule::register`] / `NestApplication::use_throttler`.
-#[derive(Debug, Clone, Default)]
+///
+/// There is no builder — construct the struct (or `..Default::default()`).
+/// `global: None` means only routes with `#[throttle(n, "per")]` are limited.
+#[derive(Clone, Default)]
 pub struct ThrottlerOptions {
     /// Fallback spec applied to routes without `#[throttle(...)]`.
     /// `None` means only explicitly decorated routes are throttled.
@@ -24,6 +28,19 @@ pub struct ThrottlerOptions {
     pub key_generator: Option<Arc<dyn ThrottleKeyGenerator>>,
     /// Pre-check skipper. `None` defaults to [`NeverSkip`].
     pub skipper: Option<Arc<dyn ThrottleSkipper>>,
+}
+
+/// Manual Debug impl to avoid requiring `Debug` on trait objects.
+impl fmt::Debug for ThrottlerOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ThrottlerOptions")
+            .field("global", &self.global)
+            .field("backend", &self.backend)
+            .field("trusted_proxy_hops", &self.trusted_proxy_hops)
+            .field("key_generator", &self.key_generator.is_some())
+            .field("skipper", &self.skipper.is_some())
+            .finish()
+    }
 }
 
 impl ThrottlerOptions {

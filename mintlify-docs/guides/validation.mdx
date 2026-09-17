@@ -60,6 +60,43 @@ pub struct CreateUserDto {
 
 You can also use raw `validator` attributes directly: `#[validate(range(min = 0))]` works on any `#[dto]` field.
 
+## Mapped types (`PartialType` / `OmitType` / `PickType` / `IntersectionType`)
+
+NestJS `@nestjs/mapped-types` maps to four macros. Partial / Omit / Pick re-list the source fields on a new struct. Intersection **does not** — parent DTOs are flattened into one JSON object.
+
+| NestJS | nestrs |
+|--------|--------|
+| `PartialType(CreateUserDto)` | `#[partial_type]` — wrap non-`Option` fields in `Option<T>` (PATCH body) |
+| `OmitType(UserDto, ['password'])` | `#[omit_type(password)]` |
+| `PickType(UserDto, ['email', 'name'])` | `#[pick_type(email, name)]` |
+| `IntersectionType(IdentDto, ProfileDto)` | `#[intersection_type]` with parent fields |
+
+`#[intersection_type]` emits `#[serde(flatten)]` + `#[validate(nested)]` on each parent field. Parent DTOs **must** use `#[dto(allow_unknown_fields)]` or flattened siblings fail each other's `deny_unknown_fields`. Nested validator errors live under `ValidationErrors::errors()`, not `field_errors()`.
+
+```rust
+use nestrs::prelude::*;
+
+#[dto(allow_unknown_fields)]
+struct IdentDto {
+    #[IsEmail]
+    email: String,
+}
+
+#[dto(allow_unknown_fields)]
+struct ProfileDto {
+    #[Length(min = 2)]
+    name: String,
+}
+
+#[nestrs::intersection_type]
+struct CreateUserMergedDto {
+    ident: IdentDto,
+    profile: ProfileDto,
+}
+```
+
+`CreateUserMergedDto` deserializes from `{"email": "ada@example.com", "name": "Ada"}`. Full reference: [DTO mapped types](/api/macros/mapped-types).
+
 ## Using ValidatedBody in a controller
 
 Pair `ValidatedBody<T>` with your DTO type as an Axum extractor. nestrs validates the deserialized value before your handler body runs and returns `422 Unprocessable Entity` on failure:

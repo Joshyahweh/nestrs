@@ -4,13 +4,12 @@
 //! covered by a smoke test that uses a local Python HTTP server.
 
 use std::fs;
-use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use nestrs_cli::graphql_sdl;
+use nestrs_scaffold::graphql_sdl;
 
 fn unique_tmp_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -48,6 +47,7 @@ fn write_sdl_creates_parent_dirs_and_writes_bytes() {
 #[test]
 fn write_sdl_overwrites_existing_file() {
     let dir = unique_tmp_dir("write-sdl-overwrite");
+    fs::create_dir_all(&dir).expect("mkdir");
     let path = dir.join("schema.graphql");
     fs::write(&path, "old content").expect("seed");
     graphql_sdl::write_sdl(&path, "new content").expect("write");

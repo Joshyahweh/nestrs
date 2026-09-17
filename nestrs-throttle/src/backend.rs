@@ -2,7 +2,7 @@
 //! concrete variants:
 //!
 //! - [`InMemoryThrottler`] — default, 32-shard, poison-tolerant.
-//! - [`RedisThrottler`] — cross-process counters in Redis (cfg `cache-redis`).
+//! - `RedisThrottler` — cross-process counters in Redis (cfg `cache-redis`).
 //! - [`ThrottlerBackendKind::Custom`] — user-supplied `Arc<dyn ThrottlerBackend>`.
 
 use crate::spec::{ThrottleOutcome, ThrottleSpec};
@@ -135,10 +135,18 @@ return {count, redis.call('TTL', KEYS[1])}
 /// Cross-process backend: counters in Redis, keyed `{prefix}:{key}`.
 /// Two service instances sharing a URL + prefix share a budget.
 #[cfg(feature = "cache-redis")]
-#[derive(Debug)]
 pub struct RedisThrottler {
     client: redis::Client,
     key_prefix: String,
+}
+
+#[cfg(feature = "cache-redis")]
+impl std::fmt::Debug for RedisThrottler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisThrottler")
+            .field("key_prefix", &self.key_prefix)
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(feature = "cache-redis")]
@@ -160,7 +168,7 @@ impl ThrottlerBackend for RedisThrottler {
             // Fail open on backend unavailability (same policy as the
             // global Redis rate limiter): throttling is an optimization,
             // not an availability gate.
-            tracing::warn!(target: "nestrs_throttler", "redis throttler: connection failed; allowing request");
+            tracing::warn!(target: "nestrs_throttle", "redis throttler: connection failed; allowing request");
             return ThrottleOutcome::Allowed { remaining: 0 };
         };
         let result: Result<(i64, i64), redis::RedisError> = redis::cmd("EVAL")
@@ -185,7 +193,7 @@ impl ThrottlerBackend for RedisThrottler {
                 }
             }
             Err(e) => {
-                tracing::warn!(target: "nestrs_throttler", "redis throttler check failed: {e}");
+                tracing::warn!(target: "nestrs_throttle", "redis throttler check failed: {e}");
                 ThrottleOutcome::Allowed { remaining: 0 }
             }
         }
@@ -193,7 +201,7 @@ impl ThrottlerBackend for RedisThrottler {
 }
 
 /// Backend selection for [`crate::ThrottlerOptions`].
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub enum ThrottlerBackendKind {
     #[default]
     InMemory,
@@ -203,6 +211,38 @@ pub enum ThrottlerBackendKind {
     /// User-supplied backend (e.g. DynamoDB, Memcached, CockroachDB). Anything
     /// that implements `ThrottlerBackend` and is cheap to share behind an Arc.
     Custom(Arc<dyn ThrottlerBackend>),
+}
+
+/// Redact `user:pass@` from a connection URI so `Debug` / logs cannot
+/// leak credentials. URIs without userinfo are returned unchanged.
+#[cfg(feature = "cache-redis")]
+fn redact_userinfo(uri: &str) -> String {
+    let Some(scheme_end) = uri.find("://") else {
+        return uri.to_string();
+    };
+    let rest = &uri[scheme_end + 3..];
+    let Some(at) = rest.find('@') else {
+        return uri.to_string();
+    };
+    format!("{}***@{}", &uri[..=scheme_end + 2], &rest[at + 1..])
+}
+
+impl std::fmt::Debug for ThrottlerBackendKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ThrottlerBackendKind::InMemory => f.debug_tuple("InMemory").finish(),
+            #[cfg(feature = "cache-redis")]
+            ThrottlerBackendKind::Redis { url, key_prefix } => f
+                .debug_struct("Redis")
+                .field("url", &redact_userinfo(url))
+                .field("key_prefix", key_prefix)
+                .finish(),
+            ThrottlerBackendKind::Custom(_) => f
+                .debug_tuple("Custom")
+                .field(&"<dyn ThrottlerBackend>")
+                .finish(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -279,5 +319,23 @@ mod tests {
             backend.check("a", &spec).await,
             ThrottleOutcome::Limited { .. }
         ));
+    }
+
+    #[cfg(feature = "cache-redis")]
+    #[test]
+    fn redis_backend_debug_redacts_url_userinfo() {
+        let kind = ThrottlerBackendKind::Redis {
+            url: "redis://:s3cret@127.0.0.1:6379/0".into(),
+            key_prefix: "t".into(),
+        };
+        let dbg = format!("{kind:?}");
+        assert!(
+            !dbg.contains("s3cret"),
+            "password must not appear in Debug: {dbg}"
+        );
+        assert!(
+            dbg.contains("***@127.0.0.1:6379/0"),
+            "userinfo should be redacted, got: {dbg}"
+        );
     }
 }

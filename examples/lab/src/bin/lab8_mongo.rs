@@ -27,7 +27,7 @@ impl MongoController {
         svc.ping()
             .await
             .map(|_| Json(serde_json::json!({ "ok": true })))
-            .map_err(BadRequestException::new)
+            .map_err(|e| BadRequestException::new(e.to_string()))
     }
 
     #[post("/users")]

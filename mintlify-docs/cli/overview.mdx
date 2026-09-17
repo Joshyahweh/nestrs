@@ -42,6 +42,7 @@ This alias is configured in `.cargo/config.toml` as `run -p nestrs-scaffold --bi
 | `nestrs-cli db migrate …` | Create, apply, revert, and inspect SQL migrations (`add`, `run`, `revert`, `info`). Default backend `sqlx`; `--backend prisma` passes through to `npx prisma`. |
 | `nestrs-cli db seed …` | Seed the database from a Cargo seed binary (`--bin`) or a transactional SQL file (`--seed-file`). |
 | `nestrs-cli doctor` | Print `rustc` and `cargo` versions, scan `Cargo.toml` for nestrs feature flags, and heuristically check `src/**/*.rs` for common misconfigurations. |
+| `nestrs-cli repl …` | Static DI graph explorer (`graph` / `routes` / `providers` / `dtos`) plus `repl live --url` against a running admin sidecar (`GET /__nestrs/providers` + `/routes`; bearer header; curl `--` before URL). |
 
 <Note>
 The <code>db</code> family ships behind the <code>db</code> Cargo feature (it pulls in <code>sqlx</code> and <code>tokio</code> as CLI dependencies). Install it with:

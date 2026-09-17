@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use nestrs_cli::graphql_federation;
+use nestrs_scaffold::graphql_federation;
 
 fn unique_tmp_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -142,8 +142,7 @@ fn start_mock_server(sdl: &str) -> Option<(u16, std::process::Child)> {
     f.write_all(sdl.as_bytes()).expect("write payload");
     drop(f);
 
-    let script = format!(
-        r#"
+    let script = r#"
 import http.server, json, sys
 
 PORT = int(sys.argv[1])
@@ -156,12 +155,12 @@ class H(http.server.BaseHTTPRequestHandler):
         try:
             req = json.loads(body)
         except Exception:
-            req = {{}}
+            req = {}
         q = req.get("query", "")
         if "_service" in q and "sdl" in q:
-            payload = {{"data": {{"_service": {{"sdl": SDL}}}}}}
+            payload = {"data": {"_service": {"sdl": SDL}}}
         else:
-            payload = {{"errors": [{{"message": "unsupported"}}]}}
+            payload = {"errors": [{"message": "unsupported"}]}
         out = json.dumps(payload).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -172,8 +171,7 @@ class H(http.server.BaseHTTPRequestHandler):
         pass
 
 http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
-"#
-    );
+"#;
 
     let child = Command::new("python3")
         .arg("-c")

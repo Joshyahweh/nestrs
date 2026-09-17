@@ -24,9 +24,7 @@ use std::net::IpAddr;
 
 // Re-export the shared pieces so `crate::client_ip::*` keeps working for
 // the rate limiter, the throttler, and any user code that imported them.
-pub use nestrs_core::client_ip::{
-    rate_limit_key_ip_or_unknown, TrustedProxyHops, X_FORWARDED_FOR, X_REAL_IP,
-};
+pub use nestrs_core::client_ip::TrustedProxyHops;
 
 /// Extracts the best-effort client IP address for the current request.
 pub struct ClientIp(pub IpAddr);

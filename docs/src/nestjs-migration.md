@@ -43,6 +43,7 @@ This guide maps NestJS concepts to **nestrs** (Rust + Axum + Tower). It is aimed
 
 - Nest often uses `class-validator` + `class-transformer`. nestrs uses **`#[dto]`** (serde + `validator`) and **`ValidatedBody<T>`** for JSON bodies.
 - **Unknown JSON keys** are rejected by default (`#[serde(deny_unknown_fields)]` emitted by `#[dto]`). Opt out with `#[dto(allow_unknown_fields)]` when you intentionally accept forward-compatible clients.
+- **Mapped types:** `#[partial_type]` / `#[omit_type(...)]` / `#[pick_type(...)]` re-list fields (Nest `PartialType` / `OmitType` / `PickType`). `#[intersection_type]` flattens parent DTOs (`IntersectionType`); those parents **must** use `#[dto(allow_unknown_fields)]`. Nested validator errors live under `ValidationErrors::errors()`, not `field_errors()`.
 
 ## OpenAPI, GraphQL, WebSockets, microservices
 
@@ -51,7 +52,8 @@ This guide maps NestJS concepts to **nestrs** (Rust + Axum + Tower). It is aimed
 | Swagger / OpenAPI | `nestrs-openapi`, feature `openapi`; `#[dto]` derives `schemars::JsonSchema` — `schema_entry` / `with_schemas` land DTOs under `components.schemas` | [OpenAPI & HTTP](openapi-http.md) |
 | GraphQL | `nestrs-graphql`, feature `graphql`; federation gateway via feature `graphql-federation-gateway` (batched `EntityResolver`, `_service { sdl }`) | [GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md) |
 | WebSockets gateways | `nestrs-ws`, feature `ws`; origin allowlist via `WsSecurityConfig` + `ws_route_with_security` (CSWSH) | Same chapter + `#[ws_gateway]`, `#[ws_routes]` |
-| Microservices / messaging | `nestrs-microservices`, features `microservices`, `microservices-*` | [Microservices](microservices.md) |
+| Mongo (`@nestjs/mongoose`) | `nestrs-mongodb`, feature `mongo`; `MongoModule::for_root` / `for_root_async`, `MongoService::model::<T>()` (`@InjectModel`) | [Backend recipes](backend-recipes.md) Recipe B |
+| Redis sessions | Feature `session-redis`, `NestApplication::use_session_redis(url)` | [Secure defaults](secure-defaults.md) |
 
 ## Common pitfalls
 

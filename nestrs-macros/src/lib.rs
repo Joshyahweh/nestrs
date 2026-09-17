@@ -3720,11 +3720,27 @@ pub fn check_policies(attr: TokenStream, item: TokenStream) -> TokenStream {
     passthrough(attr, item)
 }
 
+/// `#[throttle(n, "second"|"minute"|"hour")]` — per-route rate limit.
+///
+/// Records metadata `"throttle" => "n/per"` consumed by
+/// `ThrottlerGuard` and `throttler_middleware`. Overrides
+/// `ThrottlerOptions.global` for this handler. `n` must be a
+/// positive integer; `"per"` is one of `second`, `minute`, `hour`.
+///
+/// ```ignore
+/// #[get("/upload")]
+/// #[throttle(5, "minute")]
+/// async fn upload() { /* ... */ }
+/// ```
 #[proc_macro_attribute]
 pub fn throttle(attr: TokenStream, item: TokenStream) -> TokenStream {
     passthrough(attr, item)
 }
 
+/// `#[skip_throttle]` — exempt this handler from throttling.
+///
+/// Records `"skip_throttle" => "true"`. Takes precedence over both
+/// `#[throttle]` and `ThrottlerOptions.global`.
 #[proc_macro_attribute]
 pub fn skip_throttle(attr: TokenStream, item: TokenStream) -> TokenStream {
     passthrough(attr, item)
@@ -5306,22 +5322,23 @@ pub fn dto(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 // ---------------------------------------------------------------------------
 // `#[nestrs::partial_type]` / `#[nestrs::omit_type(...)]` /
-// `#[nestrs::pick_type(...)]` — mapped-type macros.
+// `#[nestrs::pick_type(...)]` / `#[nestrs::intersection_type]` — mapped-type macros.
 //
 // These mirror NestJS's `@nestjs/mapped-types`:
 //   - `PartialType<T>()`       → every field becomes optional
 //   - `OmitType<T>(fields...)` → drop named fields
 //   - `PickType<T>(fields...)` → keep only named fields
+//   - `IntersectionType(A, B)` → flatten parent DTOs (`#[intersection_type]`)
 //
-// Unlike the TS variants, the source struct is not referenced by path
-// (Rust's `syn` cannot dereference a struct path at macro-expansion time).
-// Instead, the user re-declares the fields on the target struct and the
-// macro applies the transform. This is the same shape used by `ts-rs` /
-// `specta` and keeps the macros single-pass and side-effect-free.
+// Unlike the TS variants, Partial/Omit/Pick do not reference the source
+// struct by path (Rust's `syn` cannot dereference a struct path at
+// macro-expansion time). Instead, the user re-declares the fields on the
+// target struct and the macro applies the transform. Intersection is the
+// exception: parent DTOs are referenced by field type and flattened.
 //
-// All three emit the same derive set as `#[dto]` (Debug, Clone, Serialize,
-// Deserialize, NestDto, JsonSchema, Validate) plus the default
-// `#[serde(deny_unknown_fields)]`.
+// Partial/Omit/Pick emit the same derive set as `#[dto]` plus the default
+// `#[serde(deny_unknown_fields)]`. Intersection omits `deny_unknown_fields`
+// because serde forbids it on structs that contain `#[serde(flatten)]`.
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
@@ -5358,17 +5375,146 @@ pub fn pick_type(attr: TokenStream, item: TokenStream) -> TokenStream {
     mapped_type_impl(MappedTypeKind::Pick, attr, item)
 }
 
+/// `#[intersection_type]` — NestJS `IntersectionType(A, B)` analogue.
+///
+/// Unlike Partial/Omit/Pick, this does **not** re-list every leaf field.
+/// Each named field is a parent DTO that is `#[serde(flatten)]`'d into
+/// one JSON object, so `{ ...A, ...B }` deserializes as a single body.
+/// Nested `Validate` runs via `#[validate(nested)]`. Nested validator
+/// errors live under `ValidationErrors::errors()`, not `field_errors()`.
+///
+/// Requires at least two named fields. Takes no arguments.
+///
+/// Parent DTOs **must** use `#[dto(allow_unknown_fields)]`. Flattened
+/// siblings would otherwise fail each other's default
+/// `deny_unknown_fields`.
+///
+/// # Example
+///
+/// ```ignore
+/// use nestrs::prelude::*;
+///
+/// #[dto(allow_unknown_fields)]
+/// struct IdentDto {
+///     #[IsEmail]
+///     email: String,
+/// }
+///
+/// #[dto(allow_unknown_fields)]
+/// struct ProfileDto {
+///     #[Length(min = 2)]
+///     name: String,
+/// }
+///
+/// #[nestrs::intersection_type]
+/// struct CreateUserMergedDto {
+///     ident: IdentDto,
+///     profile: ProfileDto,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn intersection_type(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`#[nestrs::intersection_type]` takes no arguments — list parent DTOs as named fields",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    let item_struct = parse_macro_input!(item as ItemStruct);
+    let vis = item_struct.vis;
+    let ident = item_struct.ident;
+    let fields = match item_struct.fields {
+        Fields::Named(named) => named,
+        _ => {
+            return syn::Error::new_spanned(
+                ident,
+                "`#[intersection_type]` supports named-field structs only",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+    if fields.named.len() < 2 {
+        return syn::Error::new_spanned(
+            ident,
+            "`#[intersection_type]` needs at least two parent DTO fields to merge",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    let mut field_defs = Vec::new();
+    for field in &fields.named {
+        let field_ident = field.ident.clone();
+        let ty = &field.ty;
+        let mut attrs: Vec<_> = field.attrs.iter().map(|a| quote! { #a }).collect();
+        if !field_has_serde_flatten(&field.attrs) {
+            attrs.push(quote! { #[serde(flatten)] });
+        }
+        if !field_has_validate_nested(&field.attrs) {
+            attrs.push(quote! { #[validate(nested)] });
+        }
+        field_defs.push(quote! {
+            #(#attrs)*
+            pub #field_ident: #ty
+        });
+    }
+
+    quote! {
+        #[derive(
+            Debug, Clone,
+            serde::Deserialize, serde::Serialize,
+            nestrs::NestDto,
+            nestrs::schemars::JsonSchema,
+            validator::Validate
+        )]
+        // No `deny_unknown_fields` here: serde rejects it on any struct
+        // that contains `#[serde(flatten)]`. Parent DTOs keep their own
+        // shape rules; they should be declared with
+        // `#[dto(allow_unknown_fields)]` so sibling flattened keys are
+        // not rejected as unknown.
+        #vis struct #ident {
+            #(#field_defs,)*
+        }
+    }
+    .into()
+}
+
+fn field_has_serde_flatten(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        let path = attr.path();
+        if !(path.is_ident("serde") || path.segments.last().is_some_and(|s| s.ident == "serde")) {
+            return false;
+        }
+        attr.meta
+            .require_list()
+            .map(|list| list.tokens.to_string().contains("flatten"))
+            .unwrap_or(false)
+    })
+}
+
+fn field_has_validate_nested(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("validate") {
+            return false;
+        }
+        attr.meta
+            .require_list()
+            .map(|list| list.tokens.to_string().contains("nested"))
+            .unwrap_or(false)
+    })
+}
+
 enum MappedTypeKind {
     Partial,
     Omit,
     Pick,
 }
 
-fn mapped_type_impl(
-    kind: MappedTypeKind,
-    attr: TokenStream,
-    item: TokenStream,
-) -> TokenStream {
+fn mapped_type_impl(kind: MappedTypeKind, attr: TokenStream, item: TokenStream) -> TokenStream {
     let parsed_attr = parse_macro_input!(attr as MappedTypeAttr);
 
     match kind {
@@ -6132,15 +6278,14 @@ pub fn derive_nestrs_mongo_document(input: TokenStream) -> TokenStream {
 ///     pub tenant_id: String,
 /// }
 ///
-/// // Middleware that installs the value:
-/// async fn install<R>(ctx: RequestContext, next: R) -> R::Output
-/// where
-///     R: nestrs_core::als::WithRequestContext,
+/// // Middleware that installs the value for the rest of the request:
+/// async fn install(ctx: RequestContext, req: axum::extract::Request, next: axum::middleware::Next)
+///     -> axum::response::Response
 /// {
-///     with_request_context(ctx, async move { next.run().await }).await
+///     RequestContext::with_request_context(ctx, next.run(req)).await
 /// }
 ///
-/// // Handler that reads it:
+/// // Handler that reads it as an extractor:
 /// async fn handler(ctx: RequestContext) -> String {
 ///     format!("user={}", ctx.user_id)
 /// }
@@ -6156,12 +6301,15 @@ pub fn als(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let current_fn = format_ident!("current_{}", snake);
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    let mut frp_generics = input.generics.clone();
+    frp_generics.params.push(syn::parse_quote!(S));
+    let (frp_impl_generics, _, _) = frp_generics.split_for_impl();
 
     let expanded = quote! {
         #input
 
         ::nestrs_core::als::task_local! {
-            static #als_const: ::std::option::Option<#name #ty_generics> = ::std::option::Option::None;
+            static #als_const: ::std::option::Option<#name #ty_generics>;
         }
 
         impl #impl_generics #name #ty_generics #where_clause {
@@ -6194,35 +6342,18 @@ pub fn als(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
-        impl #impl_generics ::axum::extract::FromRequestParts<()>
+        #[::nestrs_core::als::async_trait]
+        impl #frp_impl_generics ::axum::extract::FromRequestParts<S>
             for #name #ty_generics
         where
             #name #ty_generics: ::std::clone::Clone + ::std::marker::Send + ::std::marker::Sync + 'static,
+            S: ::std::marker::Send + ::std::marker::Sync,
         {
             type Rejection = ::nestrs_core::als::AlsError;
 
             async fn from_request_parts(
                 _parts: &mut ::axum::http::request::Parts,
-                _state: &(),
-            ) -> ::std::result::Result<Self, Self::Rejection> {
-                #als_const
-                    .try_with(|cell| cell.clone())
-                    .ok()
-                    .flatten()
-                    .ok_or(::nestrs_core::als::AlsError::NotSet)
-            }
-        }
-
-        impl #impl_generics ::axum::extract::FromRequestParts<::axum::http::request::Parts>
-            for #name #ty_generics
-        where
-            #name #ty_generics: ::std::clone::Clone + ::std::marker::Send + ::std::marker::Sync + 'static,
-        {
-            type Rejection = ::nestrs_core::als::AlsError;
-
-            async fn from_request_parts(
-                _parts: &mut ::axum::http::request::Parts,
-                _state: &::axum::http::request::Parts,
+                _state: &S,
             ) -> ::std::result::Result<Self, Self::Rejection> {
                 #als_const
                     .try_with(|cell| cell.clone())

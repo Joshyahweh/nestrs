@@ -1,9 +1,9 @@
 ---
 title: "DTO mapped types in nestrs"
-description: "Reference for #[partial_type], #[omit_type(...)], and #[pick_type(...)] — the nestrs equivalents of @nestjs/mapped-types."
+description: "Reference for #[partial_type], #[omit_type(...)], #[pick_type(...)], and #[intersection_type] — the nestrs equivalents of @nestjs/mapped-types."
 ---
 
-`#[partial_type]`, `#[omit_type(...)]`, and `#[pick_type(...)]` mirror NestJS's `@nestjs/mapped-types` (`PartialType`, `OmitType`, `PickType`). Each one emits the same derive set as `#[dto]` (`Debug`, `Clone`, `Serialize`, `Deserialize`, `NestDto`, `JsonSchema`, `Validate`) plus the default `#[serde(deny_unknown_fields)]`. Field-level validator markers (`#[IsEmail]`, `#[Length(...)]`, `#[Min(...)]`, etc.) are preserved on every surviving field.
+`#[partial_type]`, `#[omit_type(...)]`, `#[pick_type(...)]`, and `#[intersection_type]` mirror NestJS's `@nestjs/mapped-types` (`PartialType`, `OmitType`, `PickType`, `IntersectionType`). Partial/Omit/Pick emit the same derive set as `#[dto]` (`Debug`, `Clone`, `Serialize`, `Deserialize`, `NestDto`, `JsonSchema`, `Validate`) plus the default `#[serde(deny_unknown_fields)]`. Field-level validator markers (`#[IsEmail]`, `#[Length(...)]`, `#[Min(...)]`, etc.) are preserved on every surviving field. `#[intersection_type]` omits `deny_unknown_fields` because serde forbids it on structs that contain `#[serde(flatten)]`.
 
 ## `#[partial_type]`
 
@@ -139,16 +139,48 @@ impl UsersController {
 }
 ```
 
+## `#[intersection_type]`
+
+NestJS `IntersectionType(A, B)` analogue. Unlike Partial/Omit/Pick, this does **not** re-list every leaf field. Each named field is a parent DTO that is `#[serde(flatten)]`'d into one JSON object, so `{ ...A, ...B }` deserializes as a single body. Nested `Validate` runs via `#[validate(nested)]`. Requires at least two named fields; takes no arguments.
+
+Parent DTOs must be declared with `#[dto(allow_unknown_fields)]`. Flattened siblings would otherwise fail each other's `deny_unknown_fields` (each parent would treat the other's keys as unknown).
+
+```rust
+use nestrs::prelude::*;
+
+#[dto(allow_unknown_fields)]
+struct IdentDto {
+    #[IsEmail]
+    email: String,
+}
+
+#[dto(allow_unknown_fields)]
+struct ProfileDto {
+    #[Length(min = 2)]
+    name: String,
+}
+
+#[nestrs::intersection_type]
+struct CreateUserMergedDto {
+    ident: IdentDto,
+    profile: ProfileDto,
+}
+```
+
+`CreateUserMergedDto` deserializes from `{"email": "ada@example.com", "name": "Ada"}`. Constructing it in Rust still uses the nested fields (`ident` / `profile`); only the JSON shape is flat. Nested validator failures live under `ValidationErrors::errors()` (struct-level), not `field_errors()`.
+
 ## How the macros relate to `#[dto]`
 
-Each of the three mapped-type macros calls the same internal code path as `#[dto]`:
+Partial/Omit/Pick call the same internal code path as `#[dto]`:
 
 1. The struct is rewritten: `PartialType` wraps non-Option fields in `Option<T>`; `OmitType` filters the field list by name; `PickType` filters the field list by name in the opposite direction.
 2. The validator attributes (`#[IsEmail]`, `#[Length(...)]`, `#[Min(...)]`, etc.) on every surviving field are translated to `validator` 0.21 `#[validate(...)]` attributes, exactly as `#[dto]` does.
 3. The macro emits `#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, nestrs::NestDto, nestrs::schemars::JsonSchema, validator::Validate)]` plus `#[serde(deny_unknown_fields)]`.
 
+`#[intersection_type]` emits the same derive set **without** `deny_unknown_fields`, and injects `#[serde(flatten)]` + `#[validate(nested)]` on each parent field instead of rewriting leaf types.
+
 This means `ValidatedBody<T>` / `ValidatedQuery<T>` / `ValidationPipe` accept mapped-type DTOs without any extra configuration, and the resulting types flow into `nestrs-openapi` `components.schemas` automatically through the `JsonSchema` derive.
 
 <Note>
-Unlike NestJS, where `@nestjs/mapped-types` re-types the source class by reference, nestrs mapped types take the source shape inline. You re-list the fields on the new struct. This is the standalone macro pattern, mirroring `ts-rs` and `specta` in the Rust ecosystem — it avoids cross-crate path resolution at proc-macro time and keeps the field-level validator markers editable per output struct.
+Unlike NestJS, where `@nestjs/mapped-types` re-types the source class by reference, nestrs Partial/Omit/Pick take the source shape inline. You re-list the fields on the new struct. This is the standalone macro pattern, mirroring `ts-rs` and `specta` in the Rust ecosystem — it avoids cross-crate path resolution at proc-macro time and keeps the field-level validator markers editable per output struct. `#[intersection_type]` is the exception: parent DTOs are referenced by field type, not re-listed leaf by leaf.
 </Note>

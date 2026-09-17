@@ -23,8 +23,8 @@ use nestrs_oauth2::{
 fn bcrypt_round_trip_via_public_api() {
     let h = hash_with("hunter2", Backend::Bcrypt).expect("bcrypt hash");
     assert!(h.starts_with("$2"), "bcrypt hash must start with $2: {h}");
-    assert_eq!(verify_with("hunter2", &h, Backend::Bcrypt), Ok(true));
-    assert_eq!(verify_with("wrong", &h, Backend::Bcrypt), Ok(false));
+    assert!(verify_with("hunter2", &h, Backend::Bcrypt).expect("verify ok"));
+    assert!(!verify_with("wrong", &h, Backend::Bcrypt).expect("verify ok"));
 }
 
 #[cfg(feature = "password-argon2")]
@@ -35,8 +35,8 @@ fn argon2_round_trip_via_public_api() {
         h.starts_with("$argon2"),
         "argon2 hash must start with $argon2: {h}"
     );
-    assert_eq!(verify_with("hunter2", &h, Backend::Argon2), Ok(true));
-    assert_eq!(verify_with("wrong", &h, Backend::Argon2), Ok(false));
+    assert!(verify_with("hunter2", &h, Backend::Argon2).expect("verify ok"));
+    assert!(!verify_with("wrong", &h, Backend::Argon2).expect("verify ok"));
 }
 
 #[cfg(feature = "password")]
@@ -58,10 +58,10 @@ fn default_hash_uses_argon2() {
 fn verify_any_dispatches_on_prefix() {
     let bcrypt = hash_with("hunter2", Backend::Bcrypt).expect("bcrypt");
     let argon2 = hash_with("hunter2", Backend::Argon2).expect("argon2");
-    assert_eq!(verify_any("hunter2", &bcrypt), Ok(true));
-    assert_eq!(verify_any("hunter2", &argon2), Ok(true));
-    assert_eq!(verify_any("wrong", &bcrypt), Ok(false));
-    assert_eq!(verify_any("wrong", &argon2), Ok(false));
+    assert!(verify_any("hunter2", &bcrypt).expect("verify ok"));
+    assert!(verify_any("hunter2", &argon2).expect("verify ok"));
+    assert!(!verify_any("wrong", &bcrypt).expect("verify ok"));
+    assert!(!verify_any("wrong", &argon2).expect("verify ok"));
 }
 
 #[cfg(feature = "password")]
@@ -110,8 +110,8 @@ fn password_hasher_trait_round_trip_for_each_backend() {
     let argon2: Box<dyn PasswordHasher> = Box::new(Argon2Hasher);
     for hasher in [&bcrypt, &argon2] {
         let h = hasher.hash("hunter2").expect("hash");
-        assert_eq!(hasher.verify("hunter2", &h), Ok(true));
-        assert_eq!(hasher.verify("wrong", &h), Ok(false));
+        assert!(hasher.verify("hunter2", &h).expect("verify ok"));
+        assert!(!hasher.verify("wrong", &h).expect("verify ok"));
     }
 }
 
@@ -158,8 +158,8 @@ fn hash_on_new_derive_hashes_marked_fields() {
     );
 
     // The stored hash verifies back to the original plaintext.
-    assert_eq!(verify("hunter2", &row.password), Ok(true));
-    assert_eq!(verify("wrong", &row.password), Ok(false));
+    assert!(verify("hunter2", &row.password).expect("verify ok"));
+    assert!(!verify("wrong", &row.password).expect("verify ok"));
 }
 
 #[cfg(feature = "password")]

@@ -358,3 +358,27 @@ let module = ConfigurableModuleBuilder::<MyOptions>::for_root_async::<MyModule>(
     load_options_from_vault().await
 }).await;
 ```
+
+## `als` — async-local storage
+
+Always-on (no feature flag). `AlsError::NotSet` is the extractor rejection (HTTP 500). `AlsContext<T>` wraps a `tokio::task_local!` cell for callers who skip the `#[als]` macro. The macro is re-exported from `nestrs` as `#[als]`.
+
+```rust
+use nestrs_core::{AlsContext, AlsError};
+
+nestrs_core::als::task_local! {
+    static CTX: std::cell::RefCell<Option<String>>;
+}
+
+let als = AlsContext::new(&CTX);
+```
+
+See [Async-local storage](/concepts/als).
+
+## `sse` feature — Server-Sent Events
+
+Gated on `feature = "sse"` (also forwarded as `nestrs` feature `sse`). Public items: `SseResponse`, `IntoSseEvent`, `serialize_to_event`, `SseEvent`, `SseKeepAlive`.
+
+`SseResponse::from_stream` and `from_fallible_stream` both take `Stream<Item = Result<Event, E>>`. JSON payloads use `serialize_to_event`, not a `T: Serialize` blanket impl.
+
+See [Server-Sent Events](/concepts/sse).

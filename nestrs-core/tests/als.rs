@@ -8,7 +8,7 @@
 use nestrs_core::als::{AlsContext, AlsError};
 
 tokio::task_local! {
-    static CTX_KEY: Option<String> = const { None };
+    static CTX_KEY: std::cell::RefCell<Option<String>>;
 }
 
 #[tokio::test]

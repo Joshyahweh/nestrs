@@ -6,14 +6,14 @@ pub use axum;
 use axum::body::{to_bytes, Body};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 pub use nestrs_macros::{
-    all, check_policies, config, controller, cron, dataloader, delete, dto, event_pattern,
-    event_routes, get, head, http_code, injectable, interval, liveness, message_pattern,
-    micro_routes, module, omit_type, on_event, openapi, options, partial_type, patch, pick_type,
-    post, put, queue_processor, raw_body, readiness, redirect, response_header, roles, routes,
-    schedule_routes, serialize, set_metadata, skip_throttle, sse, startup, subscribe_message,
-    throttle, upload_to, use_filters, use_guards, use_interceptors, use_micro_guards,
-    use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards, use_ws_interceptors,
-    use_ws_pipes, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
+    all, als, check_policies, config, controller, cron, dataloader, delete, dto, event_pattern,
+    event_routes, get, head, http_code, injectable, intersection_type, interval, liveness,
+    message_pattern, micro_routes, module, omit_type, on_event, openapi, options, partial_type,
+    patch, pick_type, post, put, queue_processor, raw_body, readiness, redirect, response_header,
+    roles, routes, schedule_routes, serialize, set_metadata, skip_throttle, sse, startup,
+    subscribe_message, throttle, upload_to, use_filters, use_guards, use_interceptors,
+    use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards,
+    use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
 };
 #[doc(hidden)]
 pub use schemars;
@@ -148,6 +148,8 @@ pub mod schedule;
 mod security;
 mod serialization;
 mod server_timing;
+#[cfg(feature = "session-redis")]
+mod session_store;
 pub mod sse;
 mod testing;
 #[cfg(feature = "throttler")]
@@ -170,13 +172,13 @@ pub use authn::{
 pub use cache::RedisCacheOptions;
 pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
 pub use client_ip::{ClientIp, ClientIpMissing};
-pub use config::{
-    build_overlay, build_sources_overlay, load_config, parse_namespaced, resolve_env_overlay, Config,
-    ConfigError, ConfigModule, ConfigNamespace, ConfigOptions, ConfigService, ConfigSource,
-    FileFormat, NamespacedConfig, TypedConfigModule, DEFAULT_CONFIG_PREFIX,
-};
 #[cfg(feature = "config-hot-reload")]
 pub use config::ConfigWatcher;
+pub use config::{
+    build_overlay, build_sources_overlay, load_config, parse_namespaced, resolve_env_overlay,
+    Config, ConfigError, ConfigModule, ConfigNamespace, ConfigOptions, ConfigService, ConfigSource,
+    FileFormat, NamespacedConfig, TypedConfigModule, DEFAULT_CONFIG_PREFIX,
+};
 #[cfg(feature = "database-sqlx")]
 pub use database_sqlx::{install_default_drivers, SqlxDatabaseModule, SqlxDatabaseService};
 pub use exception_filter::ExceptionFilter;
@@ -238,6 +240,8 @@ pub use policies::{
     with_principal, Ability, AbilityBuilder, Action, Conditions, PoliciesGuard, PoliciesModule,
     PoliciesOptions, PolicyEntry, RowPredicate, Rule, Subject,
 };
+#[cfg(feature = "session-redis")]
+pub use session_store::RedisSessionStore;
 // NOTE: `policies::Principal` is deliberately NOT root-exported — the authn
 // extractor newtype `nestrs::Principal` owns that name. Use the
 // module-qualified path `nestrs::policies::Principal`.
@@ -266,25 +270,26 @@ pub use request_context::{RequestContext, RequestContextMissing};
 pub use request_scoped::{RequestScoped, RequestScopedMissing};
 #[cfg(feature = "schedule")]
 pub use schedule::{ScheduleModule, ScheduleRuntime};
+#[allow(deprecated)]
+pub use security::XRoleMetadataGuard;
 #[cfg(feature = "csrf")]
 pub use security::{csrf_double_submit_middleware, CsrfProtectionConfig};
 pub use security::{
-    helmet_middleware, parse_authorization_bearer, route_roles_csv, AuthStrategyGuard,
-    BearerToken, DemoXRoleMetadataGuard, HelmetConfig, OptionalBearerToken, SecurityRejection,
-    XRoleMetadataGuard,
+    helmet_middleware, parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
+    DemoXRoleMetadataGuard, HelmetConfig, OptionalBearerToken, SecurityRejection,
 };
 pub use serialization::strip_null_json_value;
 pub use server_timing::{ServerTiming, ServerTimingConfig};
 pub use testing::{TestClient, TestRequest, TestingModule, TestingModuleBuilder};
+#[cfg(feature = "throttler-redis")]
+pub use throttler::RedisThrottler;
 #[cfg(feature = "throttler")]
 pub use throttler::{
     ApiKeyHeaderKeyGenerator, InMemoryThrottler, IpKeyGenerator, NeverSkip, PrincipalId,
-    PrincipalKeyGenerator, ThrottleKeyGenerator, ThrottleOutcome, ThrottleSkipper,
-    ThrottleSpec, ThrottleSpecFor, ThrottlerBackend, ThrottlerBackendKind, ThrottlerGuard,
-    ThrottlerModule, ThrottlerOptions, ThrottlerRequest, ThrottlerService, ThrottlerState,
+    PrincipalKeyGenerator, ThrottleKeyGenerator, ThrottleOutcome, ThrottleSkipper, ThrottleSpec,
+    ThrottleSpecFor, ThrottlerBackend, ThrottlerBackendKind, ThrottlerGuard, ThrottlerModule,
+    ThrottlerOptions, ThrottlerRequest, ThrottlerService, ThrottlerState,
 };
-#[cfg(feature = "throttler-redis")]
-pub use throttler::RedisThrottler;
 pub use trace_context::{current_trace, install_trace_context_middleware};
 #[cfg(feature = "database-sqlx")]
 pub use transactional::{
@@ -315,11 +320,11 @@ macro_rules! interceptor_layer {
 
 pub mod prelude {
     pub use crate::core::{
-        AuthError, AuthStrategy, AxumHttpEngine, CanActivate, ConfigurableModuleBuilder,
-        Controller, DatabasePing, DiscoveryService, DynamicModule, DynamicModuleBuilder,
-        ExecutionContext, GuardError, HostType, HttpExecutionArguments, HttpPipeTransform,
-        HttpServerEngine, Injectable, MetadataRegistry, Module, ModuleOptions, ModuleRef,
-        PipeTransform, ProviderLifecycle, ProviderRegistry, ProviderScope,
+        AlsContext, AlsError, AuthError, AuthStrategy, AxumHttpEngine, CanActivate,
+        ConfigurableModuleBuilder, Controller, DatabasePing, DiscoveryService, DynamicModule,
+        DynamicModuleBuilder, ExecutionContext, GuardError, HostType, HttpExecutionArguments,
+        HttpPipeTransform, HttpServerEngine, Injectable, MetadataRegistry, Module, ModuleOptions,
+        ModuleRef, PipeTransform, ProviderLifecycle, ProviderRegistry, ProviderScope,
     };
     #[cfg(feature = "graphql")]
     pub use crate::graphql;
@@ -364,27 +369,32 @@ pub mod prelude {
     pub use crate::ws;
     #[cfg(feature = "microservices")]
     pub use crate::BrokerHealthStub;
+    #[cfg(feature = "config-hot-reload")]
+    pub use crate::ConfigWatcher;
     #[cfg(feature = "csrf")]
     pub use crate::CsrfProtectionConfig;
     #[cfg(all(feature = "microservices", feature = "microservices-nats"))]
     pub use crate::NatsBrokerHealth;
     #[cfg(all(feature = "microservices", feature = "microservices-redis"))]
     pub use crate::RedisBrokerHealth;
+    #[cfg(feature = "session-redis")]
+    pub use crate::RedisSessionStore;
     pub use crate::{
-        all, async_trait, controller, cron, crud, delete, dto, event_pattern, event_routes, get,
-        head, http_code, impl_routes, injectable, interval, liveness, load_config, message_pattern,
-        micro_routes, module, nestrs_default_not_found_handler, on_event, openapi, options, patch,
-        post, put, queue_processor, raw_body, readiness, redirect, response_header, roles, routes,
+        all, als, async_trait, build_sources_overlay, controller, cron, crud, delete, dto,
+        event_pattern, event_routes, get, head, http_code, impl_routes, injectable,
+        intersection_type, interval, liveness, load_config, message_pattern, micro_routes, module,
+        nestrs_default_not_found_handler, on_event, openapi, options, patch, post, put,
+        queue_processor, raw_body, readiness, redirect, response_header, roles, routes,
         runtime_is_production, schedule_routes, serialize, set_metadata, sse, startup,
         subscribe_message, try_init_tracing, use_filters, use_guards, use_interceptors,
         use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards,
         use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes,
         ApiVersioningPolicy, BadGatewayException, BadRequestException, CacheError, CacheModule,
-        CacheOptions, CacheService, ClientIp, ClientIpMissing, ConfigError, ConfigModule, ConfigOptions,
-        ConfigService, ConfigSource, ConflictException, CorsOptions, ExceptionFilter,
-        ExecutionContextMissing, FileFormat, ForbiddenException, GatewayTimeoutException,
-        GoneException, HealthIndicator, HealthStatus, HttpException, HttpExecutionContext, I18n,
-        I18nMissing, I18nModule, I18nOptions, I18nService, Interceptor,
+        CacheOptions, CacheService, ClientIp, ClientIpMissing, ConfigError, ConfigModule,
+        ConfigOptions, ConfigService, ConfigSource, ConflictException, CorsOptions,
+        ExceptionFilter, ExecutionContextMissing, FileFormat, ForbiddenException,
+        GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus, HttpException,
+        HttpExecutionContext, I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Interceptor,
         InternalServerErrorException, Locale, LoggingInterceptor, MethodNotAllowedException,
         NestApiVersion, NestApplication, NestConfig, NestDto, NestFactory, NotAcceptableException,
         NotFoundException, NotImplementedException, ParseIntPipe, PathNormalization,
@@ -392,11 +402,11 @@ pub mod prelude {
         PipedBody4, PipedPath1, PipedPath2, PipedPath3, PipedPath4, PipedQuery1, PipedQuery2,
         PipedQuery3, PipedQuery4, ProblemDetails, RateLimitOptions, RawBody, ReadinessContext,
         RequestContext, RequestContextMissing, RequestScoped, RequestScopedMissing,
-        RequestTimeoutException, RequestTracingOptions, SecurityHeaders, ServiceUnavailableException,
-        TestClient, TestRequest, TestingModule, TestingModuleBuilder, TooManyRequestsException,
-        TracingConfig, TracingFormat, TrimPipe, TypedConfigModule, UnauthorizedException,
-        UnprocessableEntityException, UnsupportedMediaTypeException, ValidatedBody, ValidatedPath,
-        ValidatedQuery, ValidationPipe, VersioningType, build_sources_overlay,
+        RequestTimeoutException, RequestTracingOptions, SecurityHeaders,
+        ServiceUnavailableException, TestClient, TestRequest, TestingModule, TestingModuleBuilder,
+        TooManyRequestsException, TracingConfig, TracingFormat, TrimPipe, TypedConfigModule,
+        UnauthorizedException, UnprocessableEntityException, UnsupportedMediaTypeException,
+        ValidatedBody, ValidatedPath, ValidatedQuery, ValidationPipe, VersioningType,
     };
     #[cfg(feature = "authn")]
     pub use crate::{
@@ -404,8 +414,6 @@ pub mod prelude {
         AuthnGuard, AuthnModule, AuthnOptions, JwtService, OptionalPrincipal, PasswordHasher,
         Principal, PrincipalIdentity,
     };
-    #[cfg(feature = "config-hot-reload")]
-    pub use crate::ConfigWatcher;
     #[cfg(feature = "authz")]
     pub use crate::{
         check_policies, install_policies_middleware, parse_policy_entries, Ability, AbilityBuilder,
@@ -1062,6 +1070,9 @@ pub struct NestApplication {
     /// Enables in-memory sessions via [`tower_sessions`] (implies cookie manager; feature: **`session`**).
     #[cfg(feature = "session")]
     session_memory: bool,
+    /// Redis session URL for [`RedisSessionStore`] (feature: **`session-redis`**).
+    #[cfg(feature = "session-redis")]
+    session_redis_url: Option<String>,
     /// Double-submit CSRF for unsafe methods (feature: **`csrf`**); pair with [`Self::use_cookies`].
     #[cfg(feature = "csrf")]
     csrf: Option<std::sync::Arc<crate::security::CsrfProtectionConfig>>,
@@ -1121,6 +1132,8 @@ impl NestApplication {
             cookie_manager: false,
             #[cfg(feature = "session")]
             session_memory: false,
+            #[cfg(feature = "session-redis")]
+            session_redis_url: None,
             #[cfg(feature = "csrf")]
             csrf: None,
         }
@@ -1499,6 +1512,29 @@ impl NestApplication {
         self
     }
 
+    /// Enables Redis-backed server-side sessions (feature: **`session-redis`**).
+    ///
+    /// Installs cookie + session layers using [`RedisSessionStore`]. If both
+    /// this and [`Self::use_session_memory`] are set, Redis wins and a
+    /// warning is logged. The session cookie is `Secure` when
+    /// [`runtime_is_production`] is true.
+    ///
+    /// The Redis URL's `user:pass@` is redacted in `Debug`; session ids are
+    /// never written to logs.
+    ///
+    /// ```ignore
+    /// NestFactory::create::<AppModule>()
+    ///     .use_session_redis("redis://127.0.0.1:6379")
+    ///     .use_csrf_protection(CsrfProtectionConfig::default())
+    ///     .listen(3000)
+    ///     .await;
+    /// ```
+    #[cfg(feature = "session-redis")]
+    pub fn use_session_redis(mut self, url: impl Into<String>) -> Self {
+        self.session_redis_url = Some(url.into());
+        self
+    }
+
     /// Enables double-submit CSRF checks on POST/PUT/PATCH/DELETE (feature: **`csrf`**).
     ///
     /// Requires [`Self::use_cookies`] so [`tower_cookies::Cookies`] is available to the middleware.
@@ -1578,6 +1614,21 @@ impl NestApplication {
     /// `#[throttle(n, "per")]` overrides). Adds a 429 layer
     /// with `Retry-After` + `X-RateLimit-Remaining` headers.
     /// The chosen [`ThrottlerService`] is registered for `ThrottlerGuard`.
+    ///
+    /// [`ThrottlerOptions`] has no builder — construct the struct.
+    /// `global: None` (default) throttles only decorated routes.
+    ///
+    /// ```ignore
+    /// use nestrs_throttle::{ThrottleSpec, ThrottlerOptions};
+    ///
+    /// NestFactory::create::<AppModule>()
+    ///     .use_throttler(ThrottlerOptions {
+    ///         global: ThrottleSpec::parse("100/minute"),
+    ///         ..ThrottlerOptions::default()
+    ///     })
+    ///     .listen(3000)
+    ///     .await;
+    /// ```
     #[cfg(feature = "throttler")]
     pub fn use_throttler(mut self, options: ThrottlerOptions) -> Self {
         self.throttler_options = Some(options);
@@ -2030,6 +2081,8 @@ impl NestApplication {
         let cookie_manager = self.cookie_manager;
         #[cfg(feature = "session")]
         let session_memory = self.session_memory;
+        #[cfg(feature = "session-redis")]
+        let session_redis_url = self.session_redis_url.clone();
         #[cfg(feature = "csrf")]
         let csrf = self.csrf.clone();
         let mut registry = self.registry;
@@ -2218,7 +2271,7 @@ impl NestApplication {
                     ));
                 }
             }
-            let state = std::sync::Arc::new(crate::throttler::ThrottlerState::new(&options));
+            let state = std::sync::Arc::new(crate::throttler::ThrottlerState::new(options));
             router = router.layer(axum::middleware::from_fn_with_state(
                 state,
                 crate::throttler::throttler_middleware,
@@ -2361,16 +2414,39 @@ impl NestApplication {
         {
             #[cfg(feature = "session")]
             {
-                if session_memory {
+                let session_secure = runtime_is_production();
+                #[cfg(feature = "session-redis")]
+                let mut session_layer_installed = false;
+                #[cfg(not(feature = "session-redis"))]
+                let session_layer_installed = false;
+                #[cfg(feature = "session-redis")]
+                if let Some(url) = session_redis_url {
+                    if session_memory {
+                        tracing::warn!(
+                            target: "nestrs",
+                            "nestrs: both use_session_memory and use_session_redis are set; Redis wins"
+                        );
+                    }
+                    let store = crate::session_store::RedisSessionStore::new(&url)
+                        .unwrap_or_else(|e| panic!("{e}"));
+                    router = router
+                        .layer(
+                            tower_sessions::SessionManagerLayer::new(store)
+                                .with_secure(session_secure),
+                        )
+                        .layer(tower_cookies::CookieManagerLayer::new());
+                    session_layer_installed = true;
+                }
+                if !session_layer_installed && session_memory {
                     router = router
                         .layer(
                             tower_sessions::SessionManagerLayer::new(
                                 tower_sessions::MemoryStore::default(),
                             )
-                            .with_secure(false),
+                            .with_secure(session_secure),
                         )
                         .layer(tower_cookies::CookieManagerLayer::new());
-                } else if cookie_manager {
+                } else if !session_layer_installed && cookie_manager {
                     router = router.layer(tower_cookies::CookieManagerLayer::new());
                 }
             }
@@ -2421,8 +2497,10 @@ impl NestApplication {
     fn log_security_footguns(&self) {
         #[cfg(feature = "cookies")]
         {
-            #[cfg(feature = "session")]
+            #[cfg(all(feature = "session", not(feature = "session-redis")))]
             let session_on = self.session_memory;
+            #[cfg(all(feature = "session", feature = "session-redis"))]
+            let session_on = self.session_memory || self.session_redis_url.is_some();
             #[cfg(not(feature = "session"))]
             let session_on = false;
             let cookies_on = self.cookie_manager;
@@ -2435,7 +2513,7 @@ impl NestApplication {
                 if self.csrf.is_none() {
                     tracing::warn!(
                         target: "nestrs",
-                        "nestrs security: cookies or in-memory sessions are enabled, but CSRF protection is not configured. \
+                        "nestrs security: cookies or sessions (memory or Redis) are enabled, but CSRF protection is not configured. \
                          Cookie-authenticated browser clients remain vulnerable to cross-site request forgery on unsafe HTTP methods \
                          until you call NestApplication::use_csrf_protection(...) (after use_cookies). \
                          CSRF stays opt-in by default; see SECURITY.md and the mdBook page `secure-defaults.md`."

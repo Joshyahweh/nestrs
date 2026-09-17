@@ -5,7 +5,7 @@
 //! Enable with the `admin` Cargo feature:
 //!
 //! ```toml
-//! nestrs = { version = "0.4", features = ["admin"] }
+//! nestrs = { version = "1.2.0", features = ["admin"] }
 //! ```
 //!
 //! Then on the application:
@@ -26,6 +26,12 @@
 //! - `GET /__nestrs/providers`  — `Vec<{ type_name, scope }>`
 //! - `GET /__nestrs/routes`     — `Vec<RouteInfo>` (method, path, handler, openapi summary)
 //! - `GET /__nestrs/openapi.json` — placeholder summary (real OpenAPI doc comes from the `openapi` feature)
+//!
+//! Live dump from the CLI (curl GET, bearer header, `--` before the URL):
+//!
+//! ```bash
+//! nestrs-cli repl live --url http://127.0.0.1:7777 --bearer-token secret
+//! ```
 //!
 //! Auth: when `token` is set, the listener requires `Authorization: Bearer <token>`
 //! on every request. The token is deliberately NOT accepted via query string

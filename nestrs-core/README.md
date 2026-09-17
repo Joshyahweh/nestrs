@@ -10,7 +10,7 @@ You rarely depend on this crate alone in application code; the main framework re
 
 ```toml
 [dependencies]
-nestrs-core = "1.0.0"
+nestrs-core = "1.2.0"
 axum = "0.7"
 async-trait = "0.1"
 ```
@@ -57,6 +57,7 @@ Full narrative (scopes, lifecycle, dynamic modules, circular deps): **[Fundament
 
 ## Cargo features
 
+- **`sse`** — Server-Sent Events wrapper (`SseResponse`, `IntoSseEvent`, `serialize_to_event`). Off by default. The umbrella `nestrs` crate forwards this as `features = ["sse"]`.
 - **`test-hooks`** — exposes `RouteRegistry::clear_for_tests()` and `MetadataRegistry::clear_for_tests()` so integration tests can reset process-global registries. **Do not enable in production.** See workspace **`STABILITY.md`**.
 
 ## License

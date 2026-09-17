@@ -108,7 +108,7 @@ fn route_not_found(method: &str, path: &str) -> ErrorData {
 #[derive(Debug)]
 pub struct IntrospectionTools;
 
-#[tool_router]
+#[tool_router(vis = "pub")]
 impl IntrospectionTools {
     #[tool(
         name = "list_modules",

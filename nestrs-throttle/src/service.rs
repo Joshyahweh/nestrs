@@ -40,7 +40,7 @@ impl ThrottlerService {
                     Ok(b) => Arc::new(b),
                     Err(e) => {
                         tracing::warn!(
-                            target: "nestrs_throttler",
+                            target: "nestrs_throttle",
                             "redis throttler init failed ({e}); falling back to in-memory"
                         );
                         Arc::new(InMemoryThrottler::new())
@@ -57,12 +57,7 @@ impl ThrottlerService {
     }
 
     /// Run the throttle check against a `{handler}:{key}` scoped key.
-    pub async fn check(
-        &self,
-        handler: &str,
-        key: &str,
-        spec: &ThrottleSpec,
-    ) -> ThrottleOutcome {
+    pub async fn check(&self, handler: &str, key: &str, spec: &ThrottleSpec) -> ThrottleOutcome {
         let scoped = format!("{handler}:{key}");
         self.backend.check(&scoped, spec).await
     }
@@ -78,7 +73,7 @@ impl ThrottlerService {
 
 impl Injectable for ThrottlerService {
     fn construct(registry: &ProviderRegistry) -> Arc<Self> {
-        if let Some(svc) = registry.get::<ThrottlerService>() {
+        if let Some(svc) = registry.try_get::<ThrottlerService>() {
             return svc;
         }
         // Last-resort: build a default in-memory service. Lets unit tests

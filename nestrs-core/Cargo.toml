@@ -21,7 +21,7 @@ test-hooks = []
 ## `nestrs-core` only if you actually emit SSE streams; users who
 ## only consume SSE payloads from upstream services don't need
 ## this flag.
-sse = ["dep:bytes", "dep:futures-core", "dep:serde"]
+sse = ["dep:bytes", "dep:futures-core", "dep:serde", "serde/derive"]
 
 [dependencies]
 axum.workspace = true

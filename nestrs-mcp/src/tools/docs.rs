@@ -73,7 +73,7 @@ fn into_rmcp(e: crate::Error) -> ErrorData {
 #[derive(Debug)]
 pub struct DocsTools;
 
-#[tool_router]
+#[tool_router(vis = "pub")]
 impl DocsTools {
     #[tool(
         name = "search_docs",

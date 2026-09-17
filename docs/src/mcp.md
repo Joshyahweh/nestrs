@@ -41,15 +41,13 @@ between them:
   `nestrs_mcp::tools::scaffold::ScaffoldTools` (5 tools), and
   `nestrs_mcp::tools::docs::DocsTools` (3 tools).
 
-> **Warning: the shipped binary advertises no tools.** Because rmcp's
-> `#[tool_router]` type is invariant in `Self`, the sub-routers on the
-> four area handlers cannot be merged into `NestrsMcpServer`'s router
-> without a breaking redesign — so the wrapper's router is empty and a
-> `tools/list` against the stock `nestrs-mcp` binary returns `[]`.
-> Until a `nestrs-cli mcp` subcommand lands (the CLI's `mcp` feature is
-> already stubbed), serve the tools yourself — see below.
+> The stock `nestrs-mcp` binary advertises every area tool. rmcp's
+> `#[tool_router]` type is invariant in `Self`, so the sub-routers cannot
+> be merged into `NestrsMcpServer`'s router — `list_tools` / `get_tool` /
+> `call_tool` dispatch to the four area handlers instead. Embedding a
+> single area handler is still supported when you want a narrower surface.
 
-### Serving the tools yourself
+### Serving a single area yourself
 
 Each area handler is a standalone `ServerHandler`, so a three-line
 `main.rs` serves any subset without spawning a subprocess:
@@ -75,7 +73,7 @@ async fn main() -> std::io::Result<()> {
 ```toml
 # Cargo.toml — note the direct rmcp dependency; it is not re-exported
 [dependencies]
-nestrs-mcp = "1.0"
+nestrs-mcp = "1.2.0"
 rmcp = { version = "3.1", default-features = false, features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["full"] }
 ```

@@ -1,9 +1,9 @@
 //! `#[tool]` aggregator for all MCP tool surfaces.
 //!
-//! Each submodule declares a `#[derive(Debug, ...)]` tool-router struct
-//! marked with `#[tool_router(server_handler)]`. `server.rs` then wires
-//! the routers into the parent `NestrsMcpServer` with a plain
-//! `tool_router.merge(...)` chain.
+//! Each submodule declares a tool-router struct. `server.rs` cannot
+//! `merge` those routers into `NestrsMcpServer` (rmcp's `ToolRouter<S>`
+//! is invariant in `S`); instead the stock server dispatches
+//! `list_tools` / `get_tool` / `call_tool` to the four area handlers.
 
 pub mod docs;
 pub mod introspection;

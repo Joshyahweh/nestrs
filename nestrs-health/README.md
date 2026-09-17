@@ -13,7 +13,7 @@ public symbol at the same path, so existing code keeps compiling unchanged.
 
 ```toml
 [dependencies]
-nestrs-health = "1.0.0"
+nestrs-health = "1.2.0"
 ```
 
 ## Surface
@@ -41,6 +41,6 @@ nestrs-health = "1.0.0"
   `reqwest`, `redis`, and `async-nats` move behind `nestrs-health`'s own
   feature flags.
 - Same path-preserving shim pattern as `nestrs-security` and
-  `nestrs-throttler`: nothing in `nestrs::health_probes::*`,
+  `nestrs-throttle`: nothing in `nestrs::health_probes::*`,
   `nestrs::microservice_health::*`, or the `nestrs::HealthIndicator` /
   `HealthStatus` / `ProbeKind` names moves at the user level.

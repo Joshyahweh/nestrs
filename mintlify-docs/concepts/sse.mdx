@@ -1,42 +1,52 @@
 ---
 title: "Server-Sent Events — `nestrs_core::sse`"
-description: "Stream events to the browser with `SseResponse<S>` and the `IntoSseEvent` trait. One wrapper, no axum dep at the handler site."
+description: "Stream events to the browser with `SseResponse<S>`, `IntoSseEvent`, and `serialize_to_event`. One wrapper, no axum dep at the handler site."
 ---
 
 `nestrs-core` ships a thin Server-Sent Events wrapper behind the `sse`
 feature. The intent is the same as the `nestrs-oauth2::cookies` surface:
 re-export the axum primitive (`Sse<S>`), give it a stable, axum-agnostic
-return type (`SseResponse<S>`), and add a trait (`IntoSseEvent`) that
-covers the payload shapes handler authors actually reach for — `&str`,
-`String`, `Bytes`, anything `Serialize`. Handlers can stream events
-without ever naming `axum::response::sse`.
+return type (`SseResponse<S>`), and add a conversion surface that covers
+the payload shapes handler authors actually reach for — `&str`,
+`String`, `Bytes`, and anything `Serialize` via `serialize_to_event`.
+Handlers can stream events without ever naming `axum::response::sse`.
 
 ## Enable the feature
 
+On the umbrella crate:
+
 ```toml
 [dependencies]
-nestrs-core = { version = "1.0.0", features = ["sse"] }
+nestrs = { version = "1.2.0", features = ["sse"] }
 ```
 
-The flag pulls in `bytes`, `futures-core`, and `serde` (for the
-`IntoSseEvent for T: Serialize` blanket impl) on top of the axum SSE
-plumbing, which is on by default in axum 0.7. Enable it only if you
-actually emit SSE streams; outbound clients that *consume* SSE payloads
-don't need this flag.
+Or on `nestrs-core` directly:
+
+```toml
+[dependencies]
+nestrs-core = { version = "1.2.0", features = ["sse"] }
+```
+
+The flag pulls in `bytes`, `futures-core`, and `serde` on top of the
+axum SSE plumbing, which is on by default in axum 0.7. Enable it only
+if you actually emit SSE streams; outbound clients that *consume* SSE
+payloads don't need this flag.
 
 ## Return an SSE stream
 
+axum 0.7's `Sse::new` takes `Stream<Item = Result<Event, E>>`. Both
+`from_stream` and `from_fallible_stream` are that constructor —
+there is no infallible-item overload.
+
 ```rust
 use axum::response::sse::{Event, KeepAlive};
-use futures_util::stream::Stream;
+use futures_core::Stream;
 use nestrs_core::sse::{IntoSseEvent, SseResponse};
 
-async fn tick_handler() -> SseResponse<impl Stream<Item = Event>> {
-    let stream = async_stream::stream! {
-        for i in 0..5 {
-            yield i.to_string().into_sse_event().unwrap();
-        }
-    };
+async fn tick_handler() -> SseResponse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let stream = futures_core::stream::iter([
+        "tick".into_sse_event(),
+    ]);
     SseResponse::from_stream(stream).keep_alive(KeepAlive::new())
 }
 ```
@@ -49,11 +59,33 @@ transfer encoding, retry semantics) stays identical.
 
 ## `IntoSseEvent` — payload shapes
 
-The trait covers the four shapes handler authors reach for. The blanket
-impl for `T: Serialize` is the one most production handlers use:
+The trait covers the shapes that convert without going through serde.
+JSON payloads use the free function [`serialize_to_event`](#serialize_to_event)
+instead of a blanket `T: Serialize` impl — `axum::response::sse::Event`
+itself implements `Serialize`, so a blanket impl would conflict with
+the passthrough.
 
 ```rust
 use nestrs_core::sse::IntoSseEvent;
+
+let evt = "hello".into_sse_event().unwrap();
+```
+
+| Payload | Event name | Notes |
+|---|---|---|
+| `&str` / `String` | (default — no `event:` field) | Plain `data:` line, e.g. `data: hello` |
+| `Bytes` | (default) | UTF-8 decoded into a `data:` line; invalid UTF-8 is an `axum::Error` |
+| `Event` | (passthrough) | Already an event; returned as-is |
+
+## `serialize_to_event`
+
+Any `Serialize` type becomes an SSE event with the default `message`
+name. Serialization failures (e.g. a `f64::NAN` that `serde_json`
+rejects) are **not** a stream crash — the helper emits an
+`event: error` event with the failure message instead:
+
+```rust
+use nestrs_core::sse::serialize_to_event;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -63,33 +95,14 @@ struct Tick {
 }
 
 // Renders as `event: message\ndata: {"id":1,"text":"hi"}\n\n`.
-let evt: Event = Tick { id: 1, text: "hi".into() }
-    .into_sse_event()
-    .expect("ok");
+let evt = serialize_to_event(&Tick { id: 1, text: "hi".into() }).unwrap();
+
+// serde_json rejects NaN — the stream does NOT die.
+let _err_evt = serialize_to_event(&f64::NAN).unwrap();
 ```
 
-| Payload | Event name | Notes |
-|---|---|---|
-| `&str` / `String` | (default — no `event:` field) | Plain `data:` line, e.g. `data: hello` |
-| `Bytes` | (default) | Raw byte payload — useful for binary-over-SSE protocols |
-| `T: Serialize` | `message` | Auto-JSON-encoded via `serde_json` |
-| `Event` | (passthrough) | Already an event; returned as-is |
-
-### Errors fall back to a structured `error` event
-
-A `Serialize` failure on the producer side (e.g. a `f64::NAN` that
-`serde_json` rejects) is **not** a stream crash — `IntoSseEvent` emits
-an `event: error` event with the failure message instead:
-
-```rust
-use nestrs_core::sse::IntoSseEvent;
-
-// serde_json rejects NaN — the stream does NOT die, it emits an
-// `error` event so the consumer can detect and react.
-let bad: f64 = f64::NAN;
-let evt: Event = bad.into_sse_event().unwrap();
-assert_eq!(evt.event.as_deref(), Some("error"));
-```
+axum's `Event` fields are private — assert on the serialized body
+(`data: …` / `event: error`) rather than `evt.event`.
 
 This is a deliberately conservative default — SSE consumers typically
 expect a long-lived stream and treat any termination as an implicit
@@ -100,13 +113,15 @@ the `Event` yourself with `serde_json::to_string(...)` and surface the
 ## Fallible streams
 
 For producers that want a structured error path (a network drop, a
-serialization failure the caller does want to crash on), use
-`SseResponse::from_fallible_stream` instead:
+serialization failure the caller does want to crash on), pass a
+`Result` stream. `from_fallible_stream` is an alias of `from_stream`
+so call sites that already produce `Result` read as intent:
 
 ```rust
 use axum::Error as AxumError;
 use axum::response::sse::Event;
 use futures_core::Stream;
+use nestrs_core::sse::SseResponse;
 
 fn handler() -> SseResponse<impl Stream<Item = Result<Event, AxumError>>> {
     let stream = futures_core::stream::iter(vec![
@@ -117,8 +132,8 @@ fn handler() -> SseResponse<impl Stream<Item = Result<Event, AxumError>>> {
 }
 ```
 
-`Result<Event, axum::Error>` is axum's contract — error events get
-serialized into the stream as `event: error` automatically.
+`Result<Event, E>` is axum's contract — `E` must convert to
+`Box<dyn Error + Send + Sync>`.
 
 ## `KeepAlive`
 
@@ -165,10 +180,9 @@ let inner_ref: &Sse<MyStream> = wrapper.as_inner();
   of which crate (`nestrs`, `nestrs-http`) wired the response. Tests
   can construct a response directly without depending on the full
   runtime.
-- **`IntoSseEvent` instead of a per-crate adapter** — one trait covers
-  `&str` / `String` / `Bytes` / `Serialize`. Handlers don't have to
-  reach for `axum::response::sse::Event::default().data(...)` boilerplate
-  every time they want to send a string.
+- **`IntoSseEvent` plus `serialize_to_event`** — strings and bytes
+  stay on the trait; JSON goes through a free function so `Event`'s
+  own `Serialize` impl can still pass through as an event.
 - **Serialize-failure → `error` event** — SSE consumers treat stream
   termination as a connection drop, so silently emitting an error event
   keeps the stream alive and lets the consumer decide what to do.

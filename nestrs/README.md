@@ -8,11 +8,11 @@ NestJS-style **modules, controllers, dependency injection, and HTTP routes** on 
 
 ```toml
 [dependencies]
-nestrs = "1.0.0"
+nestrs = "1.2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-Optional features (enable in `Cargo.toml`): `ws`, `graphql`, `openapi`, `microservices`, `microservices-nats`, `microservices-redis`, `microservices-kafka`, `microservices-mqtt`, `microservices-rabbitmq`, `microservices-grpc`, `cache-redis`, `schedule`, `queues`, `cookies`, `session`, `csrf` (requires `cookies`), `otel`, and others — see `Cargo.toml`.
+Optional features (enable in `Cargo.toml`): `ws`, `graphql`, `openapi`, `microservices`, `microservices-nats`, `microservices-redis`, `microservices-kafka`, `microservices-mqtt`, `microservices-rabbitmq`, `microservices-grpc`, `cache-redis`, `schedule`, `queues`, `queues-redis`, `cookies`, `session`, `session-redis`, `csrf` (requires `cookies`), `throttler`, `throttler-redis`, `mongo`, `otel`, and others — see `Cargo.toml`.
 
 ## Minimal app
 
@@ -60,7 +60,13 @@ async fn main() {
 | [`nestrs-openapi`](https://crates.io/crates/nestrs-openapi) | OpenAPI + Swagger UI |
 | [`nestrs-microservices`](https://crates.io/crates/nestrs-microservices) | Transports (NATS, Redis, Kafka, MQTT, RabbitMQ, …) |
 | [`nestrs-prisma`](https://crates.io/crates/nestrs-prisma) | Prisma-oriented DB module |
-| [`nestrs-scaffold`](https://crates.io/crates/nestrs-scaffold) | CLI (`cargo install nestrs-scaffold`, binary `nestrs`) |
+| [`nestrs-mcp`](https://crates.io/crates/nestrs-mcp) | Model Context Protocol server |
+| [`nestrs-mongodb`](https://crates.io/crates/nestrs-mongodb) | MongoDB adapter (`MongoModule`, `MongoRepository`) |
+| [`nestrs-http`](https://crates.io/crates/nestrs-http) | Outbound HTTP client |
+| [`nestrs-throttle`](https://crates.io/crates/nestrs-throttle) | Per-route rate limiting |
+| [`nestrs-health`](https://crates.io/crates/nestrs-health) | Health indicators |
+| [`nestrs-security`](https://crates.io/crates/nestrs-security) | Auth helpers, helmet, CSRF |
+| [`nestrs-scaffold`](https://crates.io/crates/nestrs-scaffold) | CLI (`cargo install nestrs-scaffold`, binary `nestrs-cli`) |
 
 See the [workspace README](https://github.com/Joshyahweh/nestrs/blob/main/README.md) for badges, benchmarks, and contribution guides.
 

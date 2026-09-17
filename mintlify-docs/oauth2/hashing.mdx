@@ -13,7 +13,7 @@ macro construct a row whose password field is hashed for you.
 
 ```toml
 [dependencies]
-nestrs-oauth2 = { version = "1.0.0", features = ["password"] }
+nestrs-oauth2 = { version = "1.2.0", features = ["password"] }
 ```
 
 The `password` umbrella pulls in both backends plus the
@@ -22,7 +22,7 @@ Enable just one backend if you know you'll never need the other:
 
 ```toml
 [dependencies]
-nestrs-oauth2 = { version = "1.0.0", features = ["password-argon2"] }
+nestrs-oauth2 = { version = "1.2.0", features = ["password-argon2"] }
 ```
 
 Available sub-features (all off by default):

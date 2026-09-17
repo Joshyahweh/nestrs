@@ -13,7 +13,7 @@ nestrs gives you two SQL integration paths depending on how much structure you w
 
 ```toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["database-sqlx"] }
+nestrs = { version = "1.2.0", features = ["database-sqlx"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "postgres"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -122,8 +122,8 @@ See the [CLI reference](/cli/overview) for the full flag table.
 
 ```toml
 [dependencies]
-nestrs = "1.0.0"
-nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
+nestrs = "1.2.0"
+nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-postgres"] }
 async-trait = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "postgres"] }
 serde = { version = "1", features = ["derive"] }
@@ -135,7 +135,7 @@ Enable exactly one SQLx backend feature: `sqlx-postgres`, `sqlx-mysql`, or `sqlx
 <Tabs>
   <Tab title="PostgreSQL">
     ```toml
-    nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
+    nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-postgres"] }
     ```
     ```bash
     export DATABASE_URL="postgresql://user:password@127.0.0.1:5432/myapp"
@@ -143,7 +143,7 @@ Enable exactly one SQLx backend feature: `sqlx-postgres`, `sqlx-mysql`, or `sqlx
   </Tab>
   <Tab title="MySQL">
     ```toml
-    nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-mysql"] }
+    nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-mysql"] }
     ```
     ```bash
     export DATABASE_URL="mysql://user:password@127.0.0.1:3306/myapp"
@@ -151,7 +151,7 @@ Enable exactly one SQLx backend feature: `sqlx-postgres`, `sqlx-mysql`, or `sqlx
   </Tab>
   <Tab title="SQLite">
     ```toml
-    nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-sqlite"] }
+    nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-sqlite"] }
     sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "sqlite"] }
     ```
     ```bash
@@ -339,13 +339,17 @@ cargo run -p nestrs-prisma --example quickstart --features "sqlx,sqlx-sqlite"
 
 ## Path 3: MongoModule
 
-`MongoModule` wraps the official `mongodb` driver. Call `for_root` with a connection URI before `NestFactory::create`, then inject `MongoService` to access databases and collections.
+`MongoModule` wraps the official `mongodb` driver. Call `for_root` (or
+`for_root_async` for vault / env factories) with a connection URI before
+`NestFactory::create`, then inject `MongoService` to access databases and
+collections. `MongoService::model::<T>()` is the NestJS `@InjectModel`
+analogue over `MongoRepository::for_feature`.
 
 ### Cargo.toml
 
 ```toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["mongo"] }
+nestrs = { version = "1.2.0", features = ["mongo"] }
 mongodb = "3"
 bson = "3"
 futures-util = { version = "0.3", features = ["sink"] }
@@ -367,6 +371,11 @@ async fn main() {
         .await
         .expect("server");
 }
+
+// Async factory (vault / ConfigService) — must complete before create:
+// MongoModule::for_root_async(|| async {
+//     Ok(nestrs::mongo::MongoOptions::new(std::env::var("MONGO_URI")?))
+// }).await?;
 
 #[module(imports = [MongoModule], controllers = [ProfileController], providers = [ProfileStore])]
 pub struct AppModule;
@@ -402,6 +411,11 @@ impl ProfileStore {
     }
 }
 ```
+
+`MongoService::model::<T>()` is the NestJS `@InjectModel` analogue: it
+returns `MongoRepository<T>` for a type that implements `Document`
+(`#[derive(Document)]`) after `MongoModule::for_feature("db_name")`.
+See the [MongoDB recipe](/recipes/mongodb).
 
 ### Troubleshooting
 

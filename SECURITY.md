@@ -61,7 +61,7 @@ Please report security vulnerabilities privately.
 
 ### Runtime diagnostics
 
-When cookies or in-memory sessions are enabled **without** CSRF wiring, `NestApplication::build_router` emits a **`tracing` WARN** (and a separate WARN if the `csrf` Cargo feature is missing entirely). Treat these as release-blocking for browser-facing cookie auth until you have an explicit CSRF or SameSite strategy.
+When cookies or sessions (memory or Redis) are enabled **without** CSRF wiring, `NestApplication::build_router` emits a **`tracing` WARN** (and a separate WARN if the `csrf` Cargo feature is missing entirely). Treat these as release-blocking for browser-facing cookie auth until you have an explicit CSRF or SameSite strategy.
 
 ## Secrets and config
 

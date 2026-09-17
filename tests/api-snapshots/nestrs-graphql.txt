@@ -15,9 +15,12 @@ nestrs_graphql::federation::FederationError::NoSubgraphs
 nestrs_graphql::federation::FederationError::Parse
 nestrs_graphql::federation::SubgraphSpec
 nestrs_graphql::federation::SubgraphSpec::entity_resolver
+nestrs_graphql::federation::export_subgraph_v2_sdl
+nestrs_graphql::federation::export_subgraph_v2_sdl_to_file
 nestrs_graphql::federation::federation_router
 nestrs_graphql::federation::federation_router_with_hook
 nestrs_graphql::federation::federation_router_with_options
+nestrs_graphql::federation::is_federation_v2_sdl
 nestrs_graphql::gql_data_context
 nestrs_graphql::gql_data_context::inner::GqlHandlerHook
 nestrs_graphql::gql_data_context::inner::NoopHook
@@ -33,3 +36,5 @@ nestrs_graphql::router_options::graphql_router_with_options
 nestrs_graphql::sdl
 nestrs_graphql::sdl::export_schema_sdl
 nestrs_graphql::sdl::export_schema_sdl_with_options
+nestrs_graphql::sdl::export_sdl_to_file
+nestrs_graphql::sdl::export_sdl_with_options_to_file

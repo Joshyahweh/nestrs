@@ -10,7 +10,7 @@ Full chapter: **[Recipe B in backend-recipes.md](https://github.com/Joshyahweh/n
 ## Dependencies
 
 ```toml
-nestrs = { version = "1.0.0", features = ["mongo"] }
+nestrs = { version = "1.2.0", features = ["mongo"] }
 mongodb = "3"
 bson = "3"
 futures-util = { version = "0.3", features = ["sink"] }
@@ -26,6 +26,11 @@ let _ = nestrs::MongoModule::for_root(
     std::env::var("MONGODB_URI").unwrap_or_else(|_| "mongodb://127.0.0.1:27017".into()),
 );
 ```
+
+For vault / env lookups, `MongoModule::for_root_async` must complete
+before `NestFactory::create`. Typed repositories resolve with
+`MongoService::model::<T>()` (`@InjectModel`) after
+`MongoModule::for_feature("app")`.
 
 ## Docker (local)
 

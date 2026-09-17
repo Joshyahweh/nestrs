@@ -10,8 +10,8 @@
 
 use crate::client::{MongoModule, MongoService};
 use crate::error::{MongoError, Result};
-use crate::schema::{Document, Schema};
-use bson::{doc, Document as BsonDoc};
+use crate::schema::Schema;
+use bson::{doc, Bson, Document as BsonDoc};
 use futures::stream::TryStreamExt;
 use mongodb::options::{
     FindOneAndUpdateOptions, FindOptions, InsertManyOptions, ReplaceOptions, UpdateOptions,
@@ -19,13 +19,87 @@ use mongodb::options::{
 use mongodb::{Collection, Database};
 use std::marker::PhantomData;
 
-/// Typed filter alias. A `Filter` is just a `BsonDoc` plus the phantom
+/// Typed filter alias. A `Filter` wraps a `BsonDoc` with a phantom
 /// binding to `T` so call sites can be generic over the document type.
-pub type Filter<T> = BsonDoc;
-/// Typed update alias. An `Update` is a `BsonDoc` of operator-style
-/// modifiers (`{"$set": …, "$inc": …}`); the repository doesn't introspect
-/// the contents — it just hands them to the driver.
-pub type Update<T> = BsonDoc;
+/// Implements `Deref<Target = BsonDoc>` for transparent access.
+#[derive(Debug, Clone)]
+pub struct Filter<T>(pub BsonDoc, PhantomData<T>);
+
+impl<T> Filter<T> {
+    /// Create a new filter from a raw `BsonDoc`.
+    pub fn new(doc: BsonDoc) -> Self {
+        Self(doc, PhantomData)
+    }
+}
+
+impl<T> std::ops::Deref for Filter<T> {
+    type Target = BsonDoc;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for Filter<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T> From<BsonDoc> for Filter<T> {
+    fn from(doc: BsonDoc) -> Self {
+        Self(doc, PhantomData)
+    }
+}
+
+impl<T> From<Filter<T>> for BsonDoc {
+    fn from(filter: Filter<T>) -> Self {
+        filter.0
+    }
+}
+
+/// Typed update alias. An `Update` wraps a `BsonDoc` of operator-style
+/// modifiers (`{"$set": …, "$inc": …}`) with a phantom binding to `T`.
+/// Implements `Deref<Target = BsonDoc>` for transparent access.
+#[derive(Debug, Clone)]
+pub struct Update<T>(pub BsonDoc, PhantomData<T>);
+
+impl<T> Update<T> {
+    /// Create a new update from a raw `BsonDoc`.
+    pub fn new(doc: BsonDoc) -> Self {
+        Self(doc, PhantomData)
+    }
+}
+
+impl<T> std::ops::Deref for Update<T> {
+    type Target = BsonDoc;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for Update<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T> From<BsonDoc> for Update<T> {
+    fn from(doc: BsonDoc) -> Self {
+        Self(doc, PhantomData)
+    }
+}
+
+impl<T> From<Update<T>> for BsonDoc {
+    fn from(update: Update<T>) -> Self {
+        update.0
+    }
+}
+
+impl<T> From<Update<T>> for mongodb::options::UpdateModifications {
+    fn from(update: Update<T>) -> Self {
+        update.0.into()
+    }
+}
 
 /// Typed CRUD wrapper over a `mongodb::Collection<T>`. Built from a
 /// `Database` handle (typically `MongoService::database(name)`); the
@@ -109,7 +183,7 @@ impl<T: Schema> MongoRepository<T> {
     /// Find one document matching `filter`. Returns `Ok(None)` for no match.
     pub async fn find_one(&self, filter: Filter<T>) -> Result<Option<T>> {
         self.collection
-            .find_one(filter)
+            .find_one(filter.into())
             .await
             .map_err(MongoError::from)
     }
@@ -119,7 +193,7 @@ impl<T: Schema> MongoRepository<T> {
     /// driver can compare against the stored `_id`.
     pub async fn find_by_id(&self, id: impl Into<bson::Bson>) -> Result<Option<T>> {
         let filter = doc! { "_id": id.into() };
-        self.find_one(filter).await
+        self.find_one(filter.into()).await
     }
 
     /// Find all documents matching `filter`. Returns a `Vec` — for large
@@ -128,7 +202,7 @@ impl<T: Schema> MongoRepository<T> {
     pub async fn find(&self, filter: Filter<T>) -> Result<Vec<T>> {
         let cursor = self
             .collection
-            .find(filter)
+            .find(filter.into())
             .await
             .map_err(MongoError::from)?;
         cursor.try_collect().await.map_err(MongoError::from)
@@ -147,7 +221,7 @@ impl<T: Schema> MongoRepository<T> {
         opts.limit = limit;
         let cursor = self
             .collection
-            .find(filter)
+            .find(filter.into())
             .with_options(opts)
             .await
             .map_err(MongoError::from)?;
@@ -159,7 +233,7 @@ impl<T: Schema> MongoRepository<T> {
     /// instead of scanning.
     pub async fn count_documents(&self, filter: Filter<T>) -> Result<u64> {
         self.collection
-            .count_documents(filter)
+            .count_documents(filter.into())
             .await
             .map_err(MongoError::from)
     }
@@ -178,17 +252,13 @@ impl<T: Schema> MongoRepository<T> {
 
     /// Insert a single document. Sets `inserted_id` on `doc` if the field
     /// is named `_id` and was `None`.
-    pub async fn insert_one(&self, doc: &mut T) -> Result<bson::Bson> {
+    pub async fn insert_one(&self, doc: &mut T) -> Result<Bson> {
         let result = self
             .collection
             .insert_one(doc)
             .await
             .map_err(MongoError::from)?;
-        Ok(result
-            .inserted_id
-            .as_id()
-            .cloned()
-            .unwrap_or(bson::Bson::Null))
+        Ok(result.inserted_id)
     }
 
     /// Insert many documents. Returns the inserted `_id` values in order.
@@ -202,11 +272,7 @@ impl<T: Schema> MongoRepository<T> {
             .with_options(InsertManyOptions::default())
             .await
             .map_err(MongoError::from)?;
-        Ok(result
-            .inserted_ids
-            .values()
-            .cloned()
-            .collect())
+        Ok(result.inserted_ids.values().cloned().collect())
     }
 
     // -----------------------------------------------------------------------
@@ -218,7 +284,7 @@ impl<T: Schema> MongoRepository<T> {
     pub async fn update_one(&self, filter: Filter<T>, update: Update<T>) -> Result<u64> {
         let result = self
             .collection
-            .update_one(filter, update)
+            .update_one(filter.into(), update)
             .await
             .map_err(MongoError::from)?;
         Ok(result.modified_count)
@@ -229,7 +295,7 @@ impl<T: Schema> MongoRepository<T> {
     pub async fn update_many(&self, filter: Filter<T>, update: Update<T>) -> Result<u64> {
         let result = self
             .collection
-            .update_many(filter, update)
+            .update_many(filter.into(), update)
             .await
             .map_err(MongoError::from)?;
         Ok(result.modified_count)
@@ -251,7 +317,7 @@ impl<T: Schema> MongoRepository<T> {
             Some(mongodb::options::ReturnDocument::Before)
         };
         self.collection
-            .find_one_and_update(filter, update)
+            .find_one_and_update(filter.into(), update)
             .with_options(opts)
             .await
             .map_err(MongoError::from)
@@ -262,7 +328,7 @@ impl<T: Schema> MongoRepository<T> {
     pub async fn replace_one(&self, filter: Filter<T>, replacement: T) -> Result<u64> {
         let result = self
             .collection
-            .replace_one(filter, replacement)
+            .replace_one(filter.into(), replacement)
             .with_options(ReplaceOptions::default())
             .await
             .map_err(MongoError::from)?;
@@ -277,7 +343,7 @@ impl<T: Schema> MongoRepository<T> {
     pub async fn delete_one(&self, filter: Filter<T>) -> Result<u64> {
         let result = self
             .collection
-            .delete_one(filter)
+            .delete_one(filter.into())
             .await
             .map_err(MongoError::from)?;
         Ok(result.deleted_count)
@@ -287,7 +353,7 @@ impl<T: Schema> MongoRepository<T> {
     pub async fn delete_many(&self, filter: Filter<T>) -> Result<u64> {
         let result = self
             .collection
-            .delete_many(filter)
+            .delete_many(filter.into())
             .await
             .map_err(MongoError::from)?;
         Ok(result.deleted_count)
@@ -296,7 +362,7 @@ impl<T: Schema> MongoRepository<T> {
     /// Convenience: delete by `_id`. Equivalent to `delete_one({"_id": id})`.
     pub async fn delete_by_id(&self, id: impl Into<bson::Bson>) -> Result<u64> {
         let filter = doc! { "_id": id.into() };
-        self.delete_one(filter).await
+        self.delete_one(filter.into()).await
     }
 
     // -----------------------------------------------------------------------

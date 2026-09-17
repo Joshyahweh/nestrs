@@ -5,9 +5,10 @@
 //! subcommand POSTs the query, parses the JSON response, and writes
 //! the SDL string to disk.
 //!
-//! For non-federation apps, the SDL is generated at build time via
-//! [`nestrs_graphql::export_schema_sdl`] in the user's binary — that
-//! flow is unchanged.
+//! For non-federation apps, print SDL at **build time** with
+//! `export_schema_sdl` / `export_sdl_to_file` in the user's binary.
+//! `--no-federation` runs standard GraphQL introspection and does
+//! **not** return Schema Definition Language.
 //!
 //! Transport: shell out to `curl`. Avoids pulling a heavy HTTP-client
 //! dependency into the CLI; every macOS / Linux dev box has `curl`.
@@ -123,7 +124,9 @@ pub fn fetch_sdl(url: &str, bearer: Option<&str>, federation: bool) -> Result<St
     if let Some(token) = bearer {
         cmd.arg("-H").arg(format!("Authorization: Bearer {token}"));
     }
-    cmd.arg(url);
+    // End option parsing so a URL that starts with `-` cannot be
+    // interpreted as extra curl flags.
+    cmd.arg("--").arg(url);
     cmd.stdin(Stdio::null());
 
     let output = cmd.output().map_err(|e| {

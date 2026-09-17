@@ -11,7 +11,7 @@ keywords = ["security", "csrf", "helmet", "auth", "axum"]
 categories = ["api-bindings", "web-programming"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.0.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.2.0" }
 axum.workspace = true
 tokio.workspace = true
 async-trait = "0.1"
@@ -31,5 +31,5 @@ default = []
 ## `csrf_token` cookie) and `subtle` (constant-time token compare).
 csrf = ["dep:tower-cookies", "dep:subtle"]
 ## Convenience: `csrf` plus the rest of the surface (currently the same as
-## `csrf` — kept for symmetry with `nestrs-throttler`).
+## `csrf` — kept for symmetry with `nestrs-throttle`).
 all = ["csrf"]

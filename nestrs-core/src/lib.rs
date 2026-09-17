@@ -46,7 +46,7 @@ pub use strategy::{AuthError, AuthStrategy};
 pub use trace::{current_trace_context, parse_traceparent, with_trace_context, TraceContext};
 
 #[cfg(feature = "sse")]
-pub use sse::{IntoSseEvent, SseEvent, SseKeepAlive, SseResponse};
+pub use sse::{serialize_to_event, IntoSseEvent, SseEvent, SseKeepAlive, SseResponse};
 
 type CustomFactoryFn =
     std::sync::Arc<dyn Fn(&ProviderRegistry) -> Arc<dyn Any + Send + Sync> + Send + Sync>;

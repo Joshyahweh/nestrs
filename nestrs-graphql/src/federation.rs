@@ -472,9 +472,7 @@ where
 {
     let raw = crate::sdl::export_schema_sdl_with_options(
         schema,
-        SDLExportOptions::default()
-            .federation()
-            .compose_directive(),
+        SDLExportOptions::default().federation().compose_directive(),
     );
     let mut out = String::with_capacity(raw.len() + 64);
     out.push_str("# Federation v2 subgraph SDL — emitted by nestrs-graphql (Wave 7.12)\n");
@@ -515,7 +513,6 @@ pub fn is_federation_v2_sdl(sdl: &str) -> bool {
     // Both forms ship in the spec-compliant shape.
     sdl.contains("@link")
 }
-
 
 ///
 /// Steps:
@@ -612,7 +609,7 @@ mod tests {
     /// nothing useful for humans or routers to inspect.
     struct PingQuery;
 
-    #[Object]
+    #[Object(name = "Query")]
     impl PingQuery {
         async fn ping(&self) -> &'static str {
             "pong"
@@ -660,9 +657,15 @@ mod tests {
             is_federation_v2_sdl(&sdl),
             "expected `@link` directive in federation v2 SDL, got: {sdl}"
         );
-        // The schema's query type survives the round-trip.
-        assert!(sdl.contains("type Query"));
-        assert!(sdl.contains("ping"));
+        // Federation subgraph SDL may emit `type Query` or `extend type Query`.
+        assert!(
+            sdl.contains("type Query") || sdl.contains("extend type Query"),
+            "query type must survive the round-trip, got: {sdl}"
+        );
+        assert!(
+            sdl.contains("ping"),
+            "ping field must survive the round-trip, got: {sdl}"
+        );
     }
 
     #[test]

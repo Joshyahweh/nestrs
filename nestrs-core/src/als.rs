@@ -12,8 +12,16 @@
 //! - [`AlsError`] — the rejection type the generated extractor
 //!   returns when middleware forgot to install the value.
 //! - [`task_local!`] — re-export of [`tokio::task_local!`] so the
-//!   macro's emitted code has a stable path that doesn't require
-//!   the user to add `tokio` as a direct dependency.
+//!   `#[als]` macro's emitted code has a stable path
+//!   (`::nestrs_core::als::task_local!`) without requiring `tokio`
+//!   as a direct user dependency.
+//! - `async_trait` — re-export of `async_trait::async_trait` so the
+//!   generated `FromRequestParts` impl can use axum 0.7's
+//!   `async_trait`-based extractor trait without requiring
+//!   `async-trait` as a direct user dependency.
+//! - [`AlsCell`] — type alias for the `tokio::task_local!` cell the
+//!   runtime helper wraps, so user code can name it without a
+//!   tokio-internal type path.
 //! - [`AlsContext`] — a small typed wrapper around a `tokio::task_local!`
 //!   cell for users who don't want to use the proc-macro.
 //!
@@ -34,7 +42,7 @@ pub enum AlsError {
     /// No value for the requested ALS key is installed on the current
     /// task. Either the request never entered a `with_*` scope, or a
     /// `tokio::spawn` boundary stripped the task-local — see
-    /// [`nestrs_core::spawn_with_request_scope`] for the request-scoped
+    /// [`crate::spawn_with_request_scope`] for the request-scoped
     /// analogue.
     NotSet,
 }
@@ -52,17 +60,32 @@ impl std::fmt::Display for AlsError {
 
 impl std::error::Error for AlsError {}
 
+impl axum::response::IntoResponse for AlsError {
+    fn into_response(self) -> axum::response::Response {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            self.to_string(),
+        )
+            .into_response()
+    }
+}
+
 /// Re-export of [`tokio::task_local!`] so the `#[als]` macro's emitted
 /// code can reference the primitive via a stable path
 /// (`::nestrs_core::als::task_local!`) without requiring `tokio` to be
-/// a direct dependency of the user's crate. `tokio` is reachable
-/// transitively via `nestrs-core` (the workspace `tokio.workspace =
-/// true` dep), but a transitive dep isn't visible in the user's
-/// crate root without an explicit `use`.
-///
-/// Users who prefer `tokio::task_local!` directly can still reach for
-/// it — the re-export is just a path convenience for the macro.
+/// a direct dependency of the user's crate.
 pub use tokio::task_local;
+
+/// Re-export of [`async_trait::async_trait`] so the `#[als]` macro's
+/// generated `FromRequestParts` impl can use axum 0.7's
+/// `async_trait`-based extractor trait without requiring `async-trait`
+/// as a direct user dependency.
+pub use async_trait::async_trait;
+
+/// Type alias for the `tokio::task_local!` cell [`AlsContext`] wraps.
+/// Exists so helper users can name the cell without a tokio-internal
+/// type path.
+pub type AlsCell<T> = tokio::task::LocalKey<std::cell::RefCell<Option<T>>>;
 
 /// Manual async-local-storage helper for users who don't want to use
 /// the `#[als]` proc-macro.
@@ -79,8 +102,7 @@ pub use tokio::task_local;
 /// use nestrs_core::als::{AlsContext, AlsError};
 ///
 /// tokio::task_local! {
-///     static MY_CTX: std::cell::RefCell<Option<String>> =
-///         const { std::cell::RefCell::new(None) };
+///     static MY_CTX: std::cell::RefCell<Option<String>>;
 /// }
 ///
 /// async fn handler() -> Result<String, AlsError> {
@@ -91,7 +113,7 @@ pub struct AlsContext<T>
 where
     T: Clone + Send + Sync + 'static,
 {
-    cell: &'static tokio::task_local::LocalKey<std::cell::RefCell<Option<T>>>,
+    cell: &'static AlsCell<T>,
 }
 
 impl<T> AlsContext<T>
@@ -99,9 +121,7 @@ where
     T: Clone + Send + Sync + 'static,
 {
     /// Bind a typed view to a `tokio::task_local!` cell.
-    pub fn new(
-        cell: &'static tokio::task_local::LocalKey<std::cell::RefCell<Option<T>>>,
-    ) -> Self {
+    pub fn new(cell: &'static AlsCell<T>) -> Self {
         Self { cell }
     }
 
@@ -132,8 +152,7 @@ mod tests {
     use super::*;
 
     tokio::task_local! {
-        static CTX: std::cell::RefCell<Option<String>> =
-            const { std::cell::RefCell::new(None) };
+        static CTX: std::cell::RefCell<Option<String>>;
     }
 
     #[tokio::test]
@@ -162,20 +181,18 @@ mod tests {
                 let _ = als
                     .with(String::from("outer"), async {
                         // Inner scope swallows the panic via `catch_unwind`.
-                        let result = std::panic::catch_unwind(
-                            std::panic::AssertUnwindSafe(|| {
-                                let rt = tokio::runtime::Builder::new_current_thread()
-                                    .build()
-                                    .unwrap();
-                                rt.block_on(async {
-                                    let _ = als
-                                        .with(String::from("inner"), async {
-                                            panic!("simulated panic");
-                                        })
-                                        .await;
-                                });
-                            }),
-                        );
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let rt = tokio::runtime::Builder::new_current_thread()
+                                .build()
+                                .unwrap();
+                            rt.block_on(async {
+                                let _ = als
+                                    .with(String::from("inner"), async {
+                                        panic!("simulated panic");
+                                    })
+                                    .await;
+                            });
+                        }));
                         assert!(result.is_err(), "inner panic propagated");
                         als.current()
                     })

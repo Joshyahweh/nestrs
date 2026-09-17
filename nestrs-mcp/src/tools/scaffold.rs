@@ -65,7 +65,7 @@ fn into_rmcp(e: crate::Error) -> ErrorData {
 #[derive(Debug)]
 pub struct ScaffoldTools;
 
-#[tool_router]
+#[tool_router(vis = "pub")]
 impl ScaffoldTools {
     #[tool(
         name = "new_project",

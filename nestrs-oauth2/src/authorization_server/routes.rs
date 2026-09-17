@@ -7,7 +7,7 @@
 //!   `Cache-Control: no-store` + `Pragma: no-cache` (RFC 6749 §5.1).
 //! - `/authorize` never redirects until client + redirect URI are
 //!   verified (open-redirect guard, see
-//!   [`AuthorizeFailure`](super::service::AuthorizeFailure)); after
+//!   [`AuthorizeFailure`]); after
 //!   verification, errors travel back via the redirect per §4.1.2.1.
 //! - Client auth accepts `client_secret_basic` (HTTP Basic, preferred)
 //!   and `client_secret_post` (form fields) — never both at once

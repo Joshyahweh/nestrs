@@ -13,10 +13,11 @@ no need to launch the binary, no runtime hook required. Useful for:
 
 The parser is regex-driven (no `syn` dependency). It recognises
 `#[module(...)]`, `#[controller(prefix = "/...")]`, `#[injectable]`,
-`#[dto]`, and HTTP-method macros (`#[get]` / `#[post]` / `#[put]` /
-`#[patch]` / `#[delete]`). Struct names are captured positionally —
-only types that immediately follow the attribute are added to the
-graph.
+`#[dto]` / mapped-type macros (`#[partial_type]`, `#[omit_type]`,
+`#[pick_type]`, `#[intersection_type]`), and HTTP-method macros
+(`#[get]` / `#[post]` / `#[put]` / `#[patch]` / `#[delete]`). Struct names
+are captured positionally — only types that immediately follow the
+attribute are added to the graph.
 
 ## Subcommands
 
@@ -65,6 +66,41 @@ fall under `unassigned:`.
 Lists every `#[dto]`-decorated struct (heuristic: name ends with
 `Dto`, `Entity`, or `Model`).
 
+### `nestrs-cli repl live`
+
+Dumps the **running** provider and route registries from an app that
+enabled the `admin` feature and called `use_admin`. This is the
+runtime counterpart of the static scanner: conditional
+`cfg!(feature = …)` providers show up here because they actually
+exist in the process.
+
+```bash
+nestrs-cli repl live --url http://127.0.0.1:7777
+nestrs-cli repl live --url http://127.0.0.1:7777 --bearer-token "$ADMIN_TOKEN" --format json
+```
+
+The CLI shells out to `curl`:
+
+1. `GET {url}/__nestrs/providers`
+2. `GET {url}/__nestrs/routes`
+
+Auth is `Authorization: Bearer <token>` on the header. The token is
+**never** accepted as a query string (URLs leak into access logs).
+curl argv always places `--` before the URL so a malformed URL cannot
+be parsed as a flag. Requires `curl` on `$PATH`.
+
+Enable the sidecar:
+
+```rust
+use nestrs::admin::{AdminOptions, AdminHandle};
+
+let handle: AdminHandle = app.use_admin(AdminOptions {
+    addr: "127.0.0.1:7777".parse()?,
+    token: Some("secret".into()),
+});
+tokio::spawn(async move { handle.serve().await });
+```
+
 ## Flags
 
 - `--path <dir>` — source root to scan. Defaults to `./src`. Use
@@ -88,6 +124,9 @@ nestrs-cli repl providers --path services/payments/src
 
 # list DTOs across the whole workspace
 nestrs-cli repl dtos --path .
+
+# live providers + routes from a running admin sidecar
+nestrs-cli repl live --url http://127.0.0.1:7777 --bearer-token "$ADMIN_TOKEN"
 ```
 
 ## Limitations
@@ -102,5 +141,5 @@ nestrs-cli repl dtos --path .
   lists parse correctly via `[^]]*` capture; nested generics in
   provider types are not parsed.
 
-For these cases, prefer the live HTTP route listing or run the app
-in dev mode and inspect via your existing logging.
+For these cases, prefer `nestrs-cli repl live --url <admin>` against a
+running app with the `admin` feature, or inspect via your existing logging.

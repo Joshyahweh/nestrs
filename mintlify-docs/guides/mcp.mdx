@@ -22,12 +22,12 @@ Introspection tools read the workspace's `src/` tree via `syn` (mirroring the at
 
 `nestrs-mcp` ships two layers:
 
-- **`NestrsMcpServer`** (`nestrs_mcp::server`) — the top-level `rmcp` `ServerHandler` that the `nestrs-mcp` binary serves. It carries the protocol surfaces **beyond tools** — prompts, resources, resource templates, argument completion, resource subscriptions (SEP-1696), cache hints (SEP-2549), elicitation (SEP-1034), and the task store (SEP-2663) — plus, under the `authz` feature, per-tool-call authorization. It declares **no tools of its own**: its `ToolRouter` is empty.
+- **`NestrsMcpServer`** (`nestrs_mcp::server`) — the top-level `rmcp` `ServerHandler` that the `nestrs-mcp` binary serves. It carries the protocol surfaces **beyond tools** — prompts, resources, resource templates, argument completion, resource subscriptions (SEP-1696), cache hints (SEP-2549), elicitation (SEP-1034), and the task store (SEP-2663) — plus, under the `authz` feature, per-tool-call authorization. Its own `ToolRouter` stays empty (rmcp routers are invariant in the handler type); `list_tools` / `get_tool` / `call_tool` **dispatch** to the four area handlers so the stock binary advertises all 24 tools.
 - **Four area handlers** (`nestrs_mcp::tools`) — `IntrospectionTools`, `RuntimeTools`, `ScaffoldTools`, `DocsTools`. Each is a complete `ServerHandler` with its own `#[tool_router]`, so each can be served on its own transport. `NestrsMcpServer::sub_servers()` returns all four bundled in a `SubServers` struct.
 
-<Warning>
-**As of 1.0.0 the stock binary registers no tools.** The binary serves the `NestrsMcpServer` wrapper, whose tool router is empty — a fresh `initialize` + `tools/list` round-trip returns `{"tools":[]}`. The 24 tools in the table above live on the four area handlers, which the binary does not mount (the rmcp router type is invariant in the handler type, so the sub-routers can't be merged into the wrapper). The wizard, the transports, and everything else on this page work; you just won't see the tools in the client's tool list until you serve an area handler yourself (next section) or the wiring lands in the planned `nestrs-cli mcp` subcommand.
-</Warning>
+<Note>
+The stock `nestrs-mcp` binary lists every area tool (`list_modules`, `get_app_health`, `create_resource`, `search_docs`, …). Embedding a single area handler is still supported when you want a narrower surface.
+</Note>
 
 ### Serving the tools yourself
 
@@ -53,7 +53,7 @@ async fn main() -> std::io::Result<()> {
 
 ```toml
 [dependencies]
-nestrs-mcp = "1.0"
+nestrs-mcp = "1.2.0"
 # rmcp is not re-exported — depend on it directly with the server +
 # transport features (transport-io = stdio; add transport-streamable-http-server for HTTP).
 rmcp = { version = "3.1", default-features = false, features = ["server", "transport-io"] }
@@ -92,7 +92,7 @@ cargo install nestrs-mcp --features "http,admin,authz,elicitation"
 The admin-port tools (`get_app_health`, `get_app_routes`, `get_app_providers`) and the `AdminClient` behind them are compiled in unconditionally — no feature needed on `nestrs-mcp`. The `admin` feature only re-exports `nestrs::admin::{AdminHandle, AdminOptions}` for embedders. The feature that matters for the runtime tools is `admin` on the **`nestrs` crate of the target app** (see [Live runtime](#live-runtime)).
 </Note>
 
-As a library dependency, the same features apply — `nestrs-mcp = { version = "1.0", features = ["admin"] }` etc. The full feature list (`stdio`, `http`, `admin`, `authz`, `authz-row-level`, `elicitation`) is on the [API reference](/api/crates/nestrs-mcp).
+As a library dependency, the same features apply — `nestrs-mcp = { version = "1.2.0", features = ["admin"] }` etc. The full feature list (`stdio`, `http`, `admin`, `authz`, `authz-row-level`, `elicitation`) is on the [API reference](/api/crates/nestrs-mcp).
 
 ## Setup wizard
 
@@ -130,7 +130,7 @@ Detection rules: an editor is "detected" if its config file **or** its parent di
 
 Merge behavior: all four formats (`mcpServers` for Claude Code / Cursor, `servers` for VS Code, `[mcp_servers]` for Codex) are merged round-trip — the wizard preserves every unrelated key and every other server entry. A second run is a no-op (the file is byte-identical, nothing is rewritten).
 
-After the wizard finishes, restart your editor (or click **Refresh** in the MCP servers panel) and the `nestrs` server appears in the MCP panel with a green handshake. Remember the 1.0.0 caveat from [Server architecture](#server-architecture): the stock binary's tool list is empty — serve an area handler from your own binary to make the tools (`list_modules`, `get_app_health`, `create_resource`, `search_docs`, …) visible to the model.
+After the wizard finishes, restart your editor (or click **Refresh** in the MCP servers panel) and the `nestrs` server appears in the MCP panel with a green handshake. The stock binary advertises every area tool (`list_modules`, `get_app_health`, `create_resource`, `search_docs`, …).
 
 <Tip>
 Codex's `config.toml` may show unrelated diff hunks on the first run — that's `toml::to_string_pretty` re-formatting the existing file. Commit the new file once and you're set; subsequent runs produce no diff.
@@ -242,7 +242,7 @@ args = []
 </Tab>
 </Tabs>
 
-After saving, restart the client (or click "Refresh" in the MCP servers panel). The handshake succeeds and the server shows up — for the tool list itself, see the 1.0.0 caveat in [Server architecture](#server-architecture): you'll need to point the entry at a binary that serves one of the area handlers.
+After saving, restart the client (or click "Refresh" in the MCP servers panel). The handshake succeeds and the stock binary's tool list includes every area tool.
 
 ### Streamable HTTP (networked / hosted)
 
@@ -492,7 +492,7 @@ let task = server.spawn_task(TaskOptions::default(), |ctx| {
 Behind the `authz` feature, the wrapper's `ServerHandler::call_tool` override runs every tool call inside the same task-local scopes the HTTP, WebSocket, and GraphQL transports use:
 
 ```toml
-nestrs-mcp = { version = "1.0", features = ["authz"] }
+nestrs-mcp = { version = "1.2.0", features = ["authz"] }
 ```
 
 ```rust

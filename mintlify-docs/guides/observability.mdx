@@ -155,7 +155,7 @@ Enable the `otel` feature to export to any OTLP-compatible collector (Jaeger, Te
 
 ```toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["otel"] }
+nestrs = { version = "1.2.0", features = ["otel"] }
 ```
 
 Replace `configure_tracing` with `configure_tracing_opentelemetry` and supply an `OpenTelemetryConfig`:

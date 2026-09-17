@@ -46,13 +46,13 @@ pub use nestrs_core::{
     AuthError, AuthStrategy, CanActivate, GuardError, HandlerKey, MetadataRegistry,
 };
 
+pub use auth::route_metadata_csv;
+#[allow(deprecated)]
+pub use auth::XRoleMetadataGuard;
 pub use auth::{
     parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
     DemoXRoleMetadataGuard, OptionalBearerToken, SecurityRejection,
 };
-pub use auth::route_metadata_csv;
-#[allow(deprecated)]
-pub use auth::XRoleMetadataGuard;
 
 #[cfg(feature = "csrf")]
 pub use csrf::{csrf_double_submit_middleware, CsrfProtectionConfig};

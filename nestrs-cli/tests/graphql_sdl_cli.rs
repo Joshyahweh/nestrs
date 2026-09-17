@@ -64,7 +64,10 @@ fn run_rejects_missing_url() {
 
 #[test]
 fn run_rejects_missing_out() {
-    let args: Vec<String> = vec!["--url".to_string(), "http://localhost:3000/graphql".to_string()];
+    let args: Vec<String> = vec![
+        "--url".to_string(),
+        "http://localhost:3000/graphql".to_string(),
+    ];
     let err = graphql_sdl::run(&args).expect_err("should reject");
     assert!(err.contains("--out"), "error should mention --out: {err}");
 }

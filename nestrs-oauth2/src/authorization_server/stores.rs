@@ -155,7 +155,10 @@ impl std::fmt::Debug for InMemoryClientStore {
 
 impl From<Vec<OAuth2ClientRecord>> for InMemoryClientStore {
     fn from(clients: Vec<OAuth2ClientRecord>) -> Self {
-        let map = clients.into_iter().map(|c| (c.client_id.clone(), c)).collect();
+        let map = clients
+            .into_iter()
+            .map(|c| (c.client_id.clone(), c))
+            .collect();
         Self {
             clients: RwLock::new(map),
         }

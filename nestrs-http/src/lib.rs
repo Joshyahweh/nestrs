@@ -83,7 +83,9 @@ impl HttpService {
             .connect_timeout(options.connect_timeout)
             .timeout(options.request_timeout)
             .build()
-            .unwrap_or_else(|e| panic!("nestrs_http HttpService: reqwest::Client::build failed: {e}"));
+            .unwrap_or_else(|e| {
+                panic!("nestrs_http HttpService: reqwest::Client::build failed: {e}")
+            });
         Self { client }
     }
 

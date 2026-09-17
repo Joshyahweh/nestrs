@@ -56,11 +56,7 @@ impl Default for HelmetConfig {
     }
 }
 
-fn insert_if_some(
-    headers: &mut axum::http::HeaderMap,
-    name: &'static str,
-    value: Option<&String>,
-) {
+fn insert_if_some(headers: &mut axum::http::HeaderMap, name: &'static str, value: Option<&String>) {
     if let Some(v) = value {
         if let Ok(hv) = HeaderValue::from_str(v) {
             headers.insert(name, hv);
@@ -68,7 +64,12 @@ fn insert_if_some(
     }
 }
 
-fn insert_if_bool(headers: &mut axum::http::HeaderMap, name: &'static str, on: bool, value: &'static str) {
+fn insert_if_bool(
+    headers: &mut axum::http::HeaderMap,
+    name: &'static str,
+    on: bool,
+    value: &'static str,
+) {
     if on {
         if let Ok(hv) = HeaderValue::from_str(value) {
             headers.insert(name, hv);

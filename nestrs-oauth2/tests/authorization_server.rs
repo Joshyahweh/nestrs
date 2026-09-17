@@ -181,7 +181,12 @@ fn authorize_uri(client_id: &str, redirect: &str, scope: Option<&str>) -> String
 /// Run `/authorize` → `/token` (PKCE) for `client_id` and return the
 /// token-endpoint JSON body. Confidential clients authenticate with
 /// Basic; public clients with the form `client_id` (no secret).
-async fn full_pkce_flow(app: Router, client_id: &str, redirect: &str, scope: Option<&str>) -> Value {
+async fn full_pkce_flow(
+    app: Router,
+    client_id: &str,
+    redirect: &str,
+    scope: Option<&str>,
+) -> Value {
     let response = get(app.clone(), &authorize_uri(client_id, redirect, scope)).await;
     assert_eq!(response.status(), 302, "authorize must redirect");
     let target = location(&response).expect("Location header");
@@ -302,7 +307,11 @@ async fn client_credentials_issues_jwt_with_expected_claims() {
     let body = body_json(response).await;
     assert_eq!(body["token_type"], json!("Bearer"));
     assert_eq!(body["expires_in"], json!(900));
-    assert_eq!(body["scope"], json!("read write"), "default = full client scope");
+    assert_eq!(
+        body["scope"],
+        json!("read write"),
+        "default = full client scope"
+    );
     assert!(
         body.get("refresh_token").is_none(),
         "client_credentials must not issue a refresh token"
@@ -315,7 +324,11 @@ async fn client_credentials_issues_jwt_with_expected_claims() {
     let info = introspect(app, &access).await;
     assert_eq!(info["active"], json!(true));
     assert_eq!(info["token_type"], json!("Bearer"));
-    assert_eq!(info["sub"], json!(CONFIDENTIAL_ID), "the client is the subject");
+    assert_eq!(
+        info["sub"],
+        json!(CONFIDENTIAL_ID),
+        "the client is the subject"
+    );
     assert_eq!(info["client_id"], json!(CONFIDENTIAL_ID));
     assert_eq!(info["iss"], json!(ISSUER));
     assert_eq!(info["scope"], json!("read write"));
@@ -332,11 +345,17 @@ async fn client_credentials_requires_confidential_client() {
         app,
         "/oauth/token",
         &[],
-        &[("grant_type", "client_credentials"), ("client_id", PUBLIC_ID)],
+        &[
+            ("grant_type", "client_credentials"),
+            ("client_id", PUBLIC_ID),
+        ],
     )
     .await;
     assert_eq!(response.status(), 400);
-    assert_eq!(body_json(response).await["error"], json!("unauthorized_client"));
+    assert_eq!(
+        body_json(response).await["error"],
+        json!("unauthorized_client")
+    );
 }
 
 // ---------- authorization-code + PKCE ----------
@@ -347,7 +366,10 @@ async fn authorization_code_full_flow_with_pkce() {
     let body = full_pkce_flow(app.clone(), PUBLIC_ID, PUBLIC_REDIRECT, None).await;
     assert_eq!(body["token_type"], json!("Bearer"));
     assert_eq!(body["scope"], json!("read"));
-    assert!(body["refresh_token"].is_string(), "auth-code grants issue a refresh token");
+    assert!(
+        body["refresh_token"].is_string(),
+        "auth-code grants issue a refresh token"
+    );
     let access = body["access_token"].as_str().unwrap().to_string();
     let refresh = body["refresh_token"].as_str().unwrap().to_string();
 
@@ -355,7 +377,11 @@ async fn authorization_code_full_flow_with_pkce() {
     // router — a fresh one would have a different key and empty stores.
     let info = introspect(app.clone(), &access).await;
     assert_eq!(info["active"], json!(true));
-    assert_eq!(info["sub"], json!("user-1"), "the resource owner, not the client");
+    assert_eq!(
+        info["sub"],
+        json!("user-1"),
+        "the resource owner, not the client"
+    );
     assert_eq!(info["client_id"], json!(PUBLIC_ID));
     assert_eq!(info["scope"], json!("read"));
 
@@ -372,7 +398,10 @@ async fn authorize_without_resource_owner_returns_401() {
     let app = test_router_with(None, true);
     let response = get(app, &authorize_uri(PUBLIC_ID, PUBLIC_REDIRECT, None)).await;
     assert_eq!(response.status(), 401);
-    assert!(location(&response).is_none(), "must not redirect without a user");
+    assert!(
+        location(&response).is_none(),
+        "must not redirect without a user"
+    );
     assert_eq!(body_json(response).await["error"], json!("access_denied"));
 }
 
@@ -389,9 +418,16 @@ async fn public_client_without_pkce_is_rejected_via_redirect() {
         ])
     );
     let response = get(app, &uri).await;
-    assert_eq!(response.status(), 302, "client + redirect are valid → error goes via redirect");
+    assert_eq!(
+        response.status(),
+        302,
+        "client + redirect are valid → error goes via redirect"
+    );
     let target = location(&response).unwrap();
-    assert_eq!(location_param(&target, "error").as_deref(), Some("invalid_request"));
+    assert_eq!(
+        location_param(&target, "error").as_deref(),
+        Some("invalid_request")
+    );
     assert_eq!(location_param(&target, "state").as_deref(), Some("st"));
 }
 
@@ -409,7 +445,10 @@ async fn confidential_client_without_pkce_is_rejected_by_default() {
     let response = get(app, &uri).await;
     assert_eq!(response.status(), 302);
     let target = location(&response).unwrap();
-    assert_eq!(location_param(&target, "error").as_deref(), Some("invalid_request"));
+    assert_eq!(
+        location_param(&target, "error").as_deref(),
+        Some("invalid_request")
+    );
 }
 
 #[tokio::test]
@@ -426,7 +465,10 @@ async fn relaxed_config_allows_confidential_without_pkce() {
     let response = get(app, &uri).await;
     assert_eq!(response.status(), 302);
     let target = location(&response).unwrap();
-    assert!(location_param(&target, "code").is_some(), "PKCE-off config must issue a code");
+    assert!(
+        location_param(&target, "code").is_some(),
+        "PKCE-off config must issue a code"
+    );
 }
 
 #[tokio::test]
@@ -445,13 +487,20 @@ async fn plain_pkce_method_is_unsupported() {
     let response = get(app, &uri).await;
     assert_eq!(response.status(), 302);
     let target = location(&response).unwrap();
-    assert_eq!(location_param(&target, "error").as_deref(), Some("invalid_request"));
+    assert_eq!(
+        location_param(&target, "error").as_deref(),
+        Some("invalid_request")
+    );
 }
 
 #[tokio::test]
 async fn wrong_pkce_verifier_burns_the_code() {
     let app = test_router();
-    let response = get(app.clone(), &authorize_uri(PUBLIC_ID, PUBLIC_REDIRECT, None)).await;
+    let response = get(
+        app.clone(),
+        &authorize_uri(PUBLIC_ID, PUBLIC_REDIRECT, None),
+    )
+    .await;
     let code = location_param(&location(&response).unwrap(), "code").unwrap();
 
     // Wrong verifier → invalid_grant …
@@ -611,7 +660,11 @@ async fn refresh_rotation_and_reuse_revokes_the_whole_family() {
     .await;
     assert_eq!(response.status(), 200, "rotation must succeed");
     let body2 = body_json(response).await;
-    assert_eq!(body2["scope"], json!("read"), "scope is preserved across rotation");
+    assert_eq!(
+        body2["scope"],
+        json!("read"),
+        "scope is preserved across rotation"
+    );
     let access2 = body2["access_token"].as_str().unwrap().to_string();
     let refresh2 = body2["refresh_token"].as_str().unwrap().to_string();
     assert_ne!(refresh1, refresh2, "rotation must issue a NEW token");
@@ -745,12 +798,10 @@ async fn authorize_rejects_unregistered_redirect_uri_without_redirecting() {
     );
     let body = body_json(response).await;
     assert_eq!(body["error"], json!("invalid_request"));
-    assert!(
-        body["error_description"]
-            .as_str()
-            .unwrap()
-            .contains("redirect_uri")
-    );
+    assert!(body["error_description"]
+        .as_str()
+        .unwrap()
+        .contains("redirect_uri"));
 }
 
 #[tokio::test]
@@ -863,30 +914,29 @@ async fn token_endpoint_client_authentication_failures() {
     assert_eq!(response.status(), 400);
     let body = body_json(response).await;
     assert_eq!(body["error"], json!("invalid_request"));
-    assert!(
-        body["error_description"]
-            .as_str()
-            .unwrap()
-            .contains("multiple client authentication methods")
-    );
+    assert!(body["error_description"]
+        .as_str()
+        .unwrap()
+        .contains("multiple client authentication methods"));
 
     // Basic id ≠ form client_id → 400.
     let response = post_form(
         app.clone(),
         "/oauth/token",
         &[("authorization", basic(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET))],
-        &[("grant_type", "client_credentials"), ("client_id", PUBLIC_ID)],
+        &[
+            ("grant_type", "client_credentials"),
+            ("client_id", PUBLIC_ID),
+        ],
     )
     .await;
     assert_eq!(response.status(), 400);
     let body = body_json(response).await;
     assert_eq!(body["error"], json!("invalid_request"));
-    assert!(
-        body["error_description"]
-            .as_str()
-            .unwrap()
-            .contains("does not match")
-    );
+    assert!(body["error_description"]
+        .as_str()
+        .unwrap()
+        .contains("does not match"));
 
     // A public client must not authenticate with a secret.
     let response = post_form(
@@ -899,12 +949,10 @@ async fn token_endpoint_client_authentication_failures() {
     assert_eq!(response.status(), 401);
     let body = body_json(response).await;
     assert_eq!(body["error"], json!("invalid_client"));
-    assert!(
-        body["error_description"]
-            .as_str()
-            .unwrap()
-            .contains("public clients")
-    );
+    assert!(body["error_description"]
+        .as_str()
+        .unwrap()
+        .contains("public clients"));
 }
 
 // ---------- revocation (RFC 7009) ----------
@@ -1019,8 +1067,7 @@ async fn issued_tokens_verify_against_the_crate_resource_server() {
     let addr = listener.local_addr().unwrap();
     let issuer = format!("http://{addr}");
 
-    let config =
-        AuthorizationServerConfig::new(&issuer, signing_key_pem(), "test-kid").unwrap();
+    let config = AuthorizationServerConfig::new(&issuer, signing_key_pem(), "test-kid").unwrap();
     let server = AuthorizationServer::new(
         config,
         AuthorizationServerStores::in_memory(vec![confidential_client(), public_client()]),
@@ -1064,6 +1111,9 @@ async fn issued_tokens_verify_against_the_crate_resource_server() {
 
     // A tampered signature must fail.
     let parts: Vec<&str> = access.split('.').collect();
-    let tampered = format!("{}.{}.{}", parts[0], parts[1], "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    let tampered = format!(
+        "{}.{}.{}",
+        parts[0], parts[1], "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    );
     assert!(verifier.verify(&tampered).await.is_err());
 }

@@ -169,8 +169,7 @@ fn new_resource_emits_controller_service_dto_module() {
         "controller.rs must use ValidatedBody extractor"
     );
 
-    let module_rs =
-        fs::read_to_string(resource_dir.join("module.rs")).expect("read module.rs");
+    let module_rs = fs::read_to_string(resource_dir.join("module.rs")).expect("read module.rs");
     assert!(
         module_rs.contains("#[module("),
         "module.rs must declare a #[module(...)]"
@@ -182,8 +181,7 @@ fn new_resource_emits_controller_service_dto_module() {
         "module.rs must list controllers / providers / exports"
     );
 
-    let service_rs =
-        fs::read_to_string(resource_dir.join("service.rs")).expect("read service.rs");
+    let service_rs = fs::read_to_string(resource_dir.join("service.rs")).expect("read service.rs");
     assert!(
         service_rs.contains("#[injectable]"),
         "service.rs must use #[injectable]"

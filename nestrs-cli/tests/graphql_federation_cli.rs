@@ -211,8 +211,14 @@ fn run_writes_federation_v2_sdl_when_at_link_present() {
     ];
     graphql_federation::run(&args).expect("run should accept v2 SDL");
     let body = fs::read_to_string(&out).expect("read");
-    assert!(body.contains("@link"), "on-disk SDL must contain @link: {body}");
-    assert!(body.contains("type User"), "on-disk SDL must have type User");
+    assert!(
+        body.contains("@link"),
+        "on-disk SDL must contain @link: {body}"
+    );
+    assert!(
+        body.contains("type User"),
+        "on-disk SDL must have type User"
+    );
     let _ = child.kill();
     let _ = child.wait();
 }

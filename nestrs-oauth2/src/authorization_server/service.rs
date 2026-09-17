@@ -197,7 +197,10 @@ impl std::fmt::Debug for IssuedTokens {
         f.debug_struct("IssuedTokens")
             .field("access_token", &"<redacted>")
             .field("expires_in", &self.expires_in)
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "<redacted>"))
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
             .field("scope", &self.scope)
             .finish()
     }
@@ -316,11 +319,12 @@ impl AuthorizationServer {
         client_id: Option<&str>,
         secret: Option<&str>,
     ) -> Result<OAuth2ClientRecord, TokenFailure> {
-        let client_id = client_id
-            .filter(|s| !s.trim().is_empty())
-            .ok_or(TokenFailure::InvalidClient {
-                description: "client_id is required".to_string(),
-            })?;
+        let client_id =
+            client_id
+                .filter(|s| !s.trim().is_empty())
+                .ok_or(TokenFailure::InvalidClient {
+                    description: "client_id is required".to_string(),
+                })?;
         let record = self
             .clients
             .find(client_id)
@@ -335,11 +339,12 @@ impl AuthorizationServer {
                 });
             }
         } else {
-            let presented = secret
-                .filter(|s| !s.trim().is_empty())
-                .ok_or(TokenFailure::InvalidClient {
-                    description: "client authentication (secret) is required".to_string(),
-                })?;
+            let presented =
+                secret
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or(TokenFailure::InvalidClient {
+                        description: "client authentication (secret) is required".to_string(),
+                    })?;
             if !record.check_secret(presented) {
                 return Err(TokenFailure::InvalidClient {
                     description: "invalid client credentials".to_string(),
@@ -366,9 +371,7 @@ impl AuthorizationServer {
             .clients
             .find(client_id)
             .await
-            .ok_or_else(|| {
-                AuthorizeFailure::direct(400, "invalid_client", "unknown client")
-            })?;
+            .ok_or_else(|| AuthorizeFailure::direct(400, "invalid_client", "unknown client"))?;
 
         // Open-redirect guard: never redirect anywhere until both the
         // client and its redirect URI are verified. Exact-match against
@@ -431,7 +434,10 @@ impl AuthorizationServer {
         // PKCE (RFC 7636). Only S256 is supported — `plain` is dead on
         // arrival by design. Public clients always require it; so do
         // confidential clients unless explicitly relaxed in config.
-        match (&params.code_challenge, params.code_challenge_method.as_deref()) {
+        match (
+            &params.code_challenge,
+            params.code_challenge_method.as_deref(),
+        ) {
             (Some(challenge), Some("S256")) if is_valid_challenge(challenge) => {}
             (Some(_), _) => {
                 return Err(fail(
@@ -508,13 +514,11 @@ impl AuthorizationServer {
             description: description.to_string(),
         };
 
-        let code = request
-            .code
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .ok_or(TokenFailure::InvalidRequest {
+        let code = request.code.as_deref().filter(|s| !s.is_empty()).ok_or(
+            TokenFailure::InvalidRequest {
                 description: "code is required for the authorization_code grant".to_string(),
-            })?;
+            },
+        )?;
 
         // Consume BEFORE any validation that can fail on attacker
         // input: a single failed redemption attempt burns the code,
@@ -525,15 +529,21 @@ impl AuthorizationServer {
                 // Replay. The only way a used code is presented twice is
                 // interception — kill the family it seeded.
                 self.revoke_family(&family_id).await;
-                return Err(invalid_grant("authorization code is unknown, expired, or already used"));
+                return Err(invalid_grant(
+                    "authorization code is unknown, expired, or already used",
+                ));
             }
             ConsumeCode::Missing => {
-                return Err(invalid_grant("authorization code is unknown, expired, or already used"))
+                return Err(invalid_grant(
+                    "authorization code is unknown, expired, or already used",
+                ))
             }
         };
 
         if record.client_id != client.client_id {
-            return Err(invalid_grant("authorization code was issued to a different client"));
+            return Err(invalid_grant(
+                "authorization code was issued to a different client",
+            ));
         }
         if record.expires_at <= now_epoch() {
             return Err(invalid_grant("authorization code has expired"));
@@ -546,7 +556,9 @@ impl AuthorizationServer {
                 description: "redirect_uri is required".to_string(),
             })?;
         if redirect_uri != record.redirect_uri {
-            return Err(invalid_grant("redirect_uri does not match the authorization request"));
+            return Err(invalid_grant(
+                "redirect_uri does not match the authorization request",
+            ));
         }
 
         // PKCE: when the code was minted with a challenge, the verifier
@@ -561,7 +573,9 @@ impl AuthorizationServer {
                 ))?;
             let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
             if !constant_time_eq(computed.as_bytes(), challenge.as_bytes()) {
-                return Err(invalid_grant("code_verifier does not match the code_challenge"));
+                return Err(invalid_grant(
+                    "code_verifier does not match the code_challenge",
+                ));
             }
         }
 
@@ -622,17 +636,25 @@ impl AuthorizationServer {
             });
         }
 
-        let record = match self.refresh.consume(&sha256_hex(presented.as_bytes())).await {
+        let record = match self
+            .refresh
+            .consume(&sha256_hex(presented.as_bytes()))
+            .await
+        {
             ConsumeRefresh::Fresh(record) => record,
             ConsumeRefresh::Reused { family_id } => {
                 // Reuse of a rotated/revoked token: theft with high
                 // probability. Revoke the whole family — every refresh
                 // token in the chain AND their access JWTs.
                 self.revoke_family(&family_id).await;
-                return Err(invalid_grant("refresh token is invalid, expired, or revoked"));
+                return Err(invalid_grant(
+                    "refresh token is invalid, expired, or revoked",
+                ));
             }
             ConsumeRefresh::Missing => {
-                return Err(invalid_grant("refresh token is invalid, expired, or revoked"))
+                return Err(invalid_grant(
+                    "refresh token is invalid, expired, or revoked",
+                ))
             }
         };
 
@@ -640,10 +662,14 @@ impl AuthorizationServer {
             // A refresh token crossing client boundaries is hostile —
             // burn the family too.
             self.revoke_family(&record.family_id).await;
-            return Err(invalid_grant("refresh token was issued to a different client"));
+            return Err(invalid_grant(
+                "refresh token was issued to a different client",
+            ));
         }
         if record.revoked {
-            return Err(invalid_grant("refresh token is invalid, expired, or revoked"));
+            return Err(invalid_grant(
+                "refresh token is invalid, expired, or revoked",
+            ));
         }
         if record.expires_at <= now_epoch() {
             return Err(invalid_grant("refresh token has expired"));
@@ -845,7 +871,9 @@ impl AuthorizationServer {
     /// outstanding access JWTs die with the chain.
     async fn revoke_family(&self, family_id: &str) {
         for record in self.refresh.revoke_family(family_id).await {
-            self.revocations.revoke(&record.access_jti, record.access_exp).await;
+            self.revocations
+                .revoke(&record.access_jti, record.access_exp)
+                .await;
         }
     }
 
@@ -910,7 +938,7 @@ fn is_valid_challenge(challenge: &str) -> bool {
 /// §4.1.
 fn is_valid_verifier(verifier: &str) -> bool {
     (43..=128).contains(&verifier.len())
-        && verifier.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~')
-        })
+        && verifier
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
 }

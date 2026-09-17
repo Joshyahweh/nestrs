@@ -246,7 +246,7 @@ fn bcrypt_verify(plain: &str, hash: &str) -> Result<bool, HashError> {
 #[cfg(feature = "password-argon2")]
 fn argon2_hash(plain: &str) -> Result<String, HashError> {
     use argon2::{
-        password_hash::{PasswordHasher as _, SaltString, rand_core::OsRng},
+        password_hash::{rand_core::OsRng, PasswordHasher as _, SaltString},
         Argon2,
     };
     let salt = SaltString::generate(&mut OsRng);
@@ -271,7 +271,6 @@ fn argon2_verify(plain: &str, hash: &str) -> Result<bool, HashError> {
         .is_ok())
 }
 
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -279,7 +278,11 @@ fn argon2_verify(plain: &str, hash: &str) -> Result<bool, HashError> {
 /// First up-to-12-char slice of the hash, used to build a useful
 /// `UnknownPrefix` error message without leaking the full hash.
 fn prefix_of(hash: &str) -> String {
-    let end = hash.char_indices().nth(12).map(|(i, _)| i).unwrap_or(hash.len());
+    let end = hash
+        .char_indices()
+        .nth(12)
+        .map(|(i, _)| i)
+        .unwrap_or(hash.len());
     hash[..end].to_string()
 }
 
@@ -328,25 +331,21 @@ fn verify_any_rejects_unknown_prefix() {
     assert!(matches!(err, HashError::UnknownPrefix(_)), "got: {err}");
 }
 
-#[cfg(all(
-    test,
-    feature = "password-bcrypt",
-    not(feature = "password-argon2")
-))]
+#[cfg(all(test, feature = "password-bcrypt", not(feature = "password-argon2")))]
 #[test]
 fn argon2_disabled_when_only_bcrypt_enabled() {
     let err = hash_with("x", Backend::Argon2).expect_err("should be disabled");
     assert!(matches!(err, HashError::Argon2Disabled), "got: {err}");
-    let err = verify_with("x", "$argon2id$v=19$m=19456,t=2,p=1$xxx$yyy", Backend::Argon2)
-        .expect_err("should be disabled");
+    let err = verify_with(
+        "x",
+        "$argon2id$v=19$m=19456,t=2,p=1$xxx$yyy",
+        Backend::Argon2,
+    )
+    .expect_err("should be disabled");
     assert!(matches!(err, HashError::Argon2Disabled), "got: {err}");
 }
 
-#[cfg(all(
-    test,
-    feature = "password-argon2",
-    not(feature = "password-bcrypt")
-))]
+#[cfg(all(test, feature = "password-argon2", not(feature = "password-bcrypt")))]
 #[test]
 fn bcrypt_disabled_when_only_argon2_enabled() {
     let err = hash_with("x", Backend::Bcrypt).expect_err("should be disabled");

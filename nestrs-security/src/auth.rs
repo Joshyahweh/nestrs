@@ -226,7 +226,10 @@ mod tests {
 
     #[test]
     fn parse_bearer_accepts_canonical_scheme() {
-        assert_eq!(parse_authorization_bearer("Bearer abc.def.ghi"), Some("abc.def.ghi"));
+        assert_eq!(
+            parse_authorization_bearer("Bearer abc.def.ghi"),
+            Some("abc.def.ghi")
+        );
         assert_eq!(parse_authorization_bearer("bearer xyz"), Some("xyz"));
         assert_eq!(parse_authorization_bearer("BEARER xyz"), Some("xyz"));
     }

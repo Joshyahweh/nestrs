@@ -135,9 +135,7 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
     let name = match kind {
         "app" | "lib" | "resource" => {
             if args.len() < 2 {
-                return Err(format!(
-                    "expected `nestrs-cli new {kind} <name> ...`"
-                ));
+                return Err(format!("expected `nestrs-cli new {kind} <name> ...`"));
             }
             args[1].clone()
         }

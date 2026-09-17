@@ -228,7 +228,10 @@ fn graph_finds_injectable_providers() {
     assert!(names.contains(&"UsersService"), "UsersService in {names:?}");
     assert!(names.contains(&"AppService"), "AppService in {names:?}");
     // AppController has no `#[injectable]` — must not appear.
-    assert!(!names.contains(&"AppController"), "AppController leaked into providers: {names:?}");
+    assert!(
+        !names.contains(&"AppController"),
+        "AppController leaked into providers: {names:?}"
+    );
 }
 
 #[test]
@@ -238,8 +241,14 @@ fn graph_finds_dtos() {
 
     let g = repl::scan(&root.join("src")).expect("scan");
     let names: Vec<&str> = g.dtos.iter().map(|d| d.name.as_str()).collect();
-    assert!(names.contains(&"CreateUserDto"), "CreateUserDto in {names:?}");
-    assert!(names.contains(&"UpdateUserDto"), "UpdateUserDto in {names:?}");
+    assert!(
+        names.contains(&"CreateUserDto"),
+        "CreateUserDto in {names:?}"
+    );
+    assert!(
+        names.contains(&"UpdateUserDto"),
+        "UpdateUserDto in {names:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

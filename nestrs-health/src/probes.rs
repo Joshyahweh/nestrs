@@ -92,8 +92,7 @@ impl ProbeKind {
 
 /// `(method, path)` of the handler stamped for each probe kind, resolved
 /// from the route registry at `build_router` time.
-static PROBE_ROUTES: OnceLock<RwLock<HashMap<ProbeKind, (&'static str, String)>>> =
-    OnceLock::new();
+static PROBE_ROUTES: OnceLock<RwLock<HashMap<ProbeKind, (&'static str, String)>>> = OnceLock::new();
 
 fn probe_routes() -> &'static RwLock<HashMap<ProbeKind, (&'static str, String)>> {
     PROBE_ROUTES.get_or_init(|| RwLock::new(HashMap::new()))

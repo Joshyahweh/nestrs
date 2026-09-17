@@ -27,7 +27,9 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 
 use super::model::OAuth2ClientRecord;
-use super::service::{AuthorizeFailure, AuthorizeParams, AuthorizationServer, TokenFailure, TokenRequest};
+use super::service::{
+    AuthorizationServer, AuthorizeFailure, AuthorizeParams, TokenFailure, TokenRequest,
+};
 
 /// Build the standalone authorization-server router (axum). Mount into
 /// any axum app, or let
@@ -134,10 +136,7 @@ async fn token(
         redirect_uri: f("redirect_uri"),
         code_verifier: f("code_verifier"),
         refresh_token: f("refresh_token"),
-        scope: form
-            .get("scope")
-            .cloned()
-            .filter(|v| !v.trim().is_empty()),
+        scope: form.get("scope").cloned().filter(|v| !v.trim().is_empty()),
     };
 
     match server.token(&request, &record).await {
@@ -217,9 +216,10 @@ async fn jwks(State(server): State<Arc<AuthorizationServer>>) -> Response {
     // Keys are content-addressed (kid); a short shared cache is safe
     // and keeps verifier-side JWKS fetches cheap.
     let mut response = Json(server.jwks_document().clone()).into_response();
-    response
-        .headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("public, max-age=300"));
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=300"),
+    );
     response
 }
 
@@ -233,11 +233,17 @@ async fn require_client(
     headers: &HeaderMap,
     form: &HashMap<String, String>,
 ) -> Result<OAuth2ClientRecord, Box<Response>> {
-    let via_basic = matches!(basic_auth(headers), BasicAuth::Valid(..) | BasicAuth::Malformed);
+    let via_basic = matches!(
+        basic_auth(headers),
+        BasicAuth::Valid(..) | BasicAuth::Malformed
+    );
     match extract_client_credentials(headers, form) {
         Ok(credentials) => {
             match server
-                .authenticate_client(credentials.client_id.as_deref(), credentials.secret.as_deref())
+                .authenticate_client(
+                    credentials.client_id.as_deref(),
+                    credentials.secret.as_deref(),
+                )
                 .await
             {
                 Ok(record) => Ok(record),
@@ -362,9 +368,10 @@ fn token_error(failure: TokenFailure, via_basic: bool) -> Response {
         }),
     );
     if matches!(failure, TokenFailure::InvalidClient { .. }) && via_basic {
-        response
-            .headers_mut()
-            .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"oauth2\""));
+        response.headers_mut().insert(
+            WWW_AUTHENTICATE,
+            HeaderValue::from_static("Basic realm=\"oauth2\""),
+        );
     }
     response
 }
@@ -397,8 +404,9 @@ fn no_store(response: Response) -> Response {
 
 fn redirect_302(location: &str) -> Response {
     let mut response = StatusCode::FOUND.into_response();
-    response
-        .headers_mut()
-        .insert(LOCATION, HeaderValue::from_str(location).expect("valid location"));
+    response.headers_mut().insert(
+        LOCATION,
+        HeaderValue::from_str(location).expect("valid location"),
+    );
     response
 }

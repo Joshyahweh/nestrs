@@ -86,11 +86,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
     let sdl = fetch_sdl(&url, bearer.as_deref(), federation)?;
     write_sdl(&out, &sdl)?;
-    println!(
-        "wrote {} bytes of SDL to {}",
-        sdl.len(),
-        out.display()
-    );
+    println!("wrote {} bytes of SDL to {}", sdl.len(), out.display());
     Ok(())
 }
 
@@ -130,9 +126,7 @@ pub fn fetch_sdl(url: &str, bearer: Option<&str>, federation: bool) -> Result<St
     cmd.stdin(Stdio::null());
 
     let output = cmd.output().map_err(|e| {
-        format!(
-            "failed to invoke `curl` against {url}: {e}. Is `curl` on your $PATH?"
-        )
+        format!("failed to invoke `curl` against {url}: {e}. Is `curl` on your $PATH?")
     })?;
     if !output.status.success() {
         return Err(format!(
@@ -171,9 +165,7 @@ pub fn fetch_sdl(url: &str, bearer: Option<&str>, federation: bool) -> Result<St
             ));
         }
         if parsed.get("data").is_none() {
-            return Err(format!(
-                "introspection query returned no `data`: {body}"
-            ));
+            return Err(format!("introspection query returned no `data`: {body}"));
         }
         Err(
             "non-federation SDL export via HTTP is not supported — call \

@@ -51,7 +51,7 @@ chrono = { version = "0.4.44", optional = true }
 uuid = { version = "1.23.0", optional = true, features = ["v4"] }
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-native-tls"], optional = true }
 lapin = { version = "4.11", optional = true }
-rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
+rustls = { version = "0.23.45", default-features = false, features = ["std", "tls12", "ring"], optional = true }
 webpki-roots = { version = "0.26", optional = true }
 metrics = { version = "0.24", default-features = false, optional = true }
 

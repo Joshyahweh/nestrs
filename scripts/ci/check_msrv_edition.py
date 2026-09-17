@@ -58,6 +58,29 @@ def main() -> int:
                 "(set rust-version = { workspace = true })"
             )
 
+        keywords = package.get("keywords", [])
+        if isinstance(keywords, list):
+            if len(keywords) > 5:
+                errors.append(
+                    f"{member}/Cargo.toml has {len(keywords)} keywords; "
+                    f"crates.io allows at most 5: {keywords}"
+                )
+            for kw in keywords:
+                if not isinstance(kw, str):
+                    continue
+                if len(kw) > 20:
+                    errors.append(
+                        f"{member}/Cargo.toml keyword {kw!r} is {len(kw)} chars; "
+                        "crates.io allows at most 20"
+                    )
+
+        categories = package.get("categories", [])
+        if isinstance(categories, list) and len(categories) > 5:
+            errors.append(
+                f"{member}/Cargo.toml has {len(categories)} categories; "
+                f"crates.io allows at most 5: {categories}"
+            )
+
     if errors:
         print("MSRV/edition policy check failed:")
         for err in errors:

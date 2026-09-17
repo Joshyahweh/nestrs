@@ -34,6 +34,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify workspace edition, MSRV, crates.io metadata
+        run: python3 scripts/ci/check_msrv_edition.py
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

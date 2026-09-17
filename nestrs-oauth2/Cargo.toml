@@ -7,7 +7,7 @@ rust-version.workspace = true
 repository.workspace = true
 readme = "README.md"
 description = "OAuth2 client (4 grant types incl. PKCE) + JWKS-backed resource server + social providers (Google/GitHub/Microsoft/Apple) + OAuth2Guard + full OAuth2 authorization server (issue Ed25519-signed JWTs) + bcrypt/argon2 password hashing (Wave 7.13) for nestrs."
-keywords = ["oauth2", "oidc", "auth", "nest", "axum", "password", "bcrypt", "argon2"]
+keywords = ["oauth2", "oidc", "auth", "nest", "axum"]
 categories = ["authentication", "api-bindings", "web-programming", "cryptography"]
 
 [dependencies]

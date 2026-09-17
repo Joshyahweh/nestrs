@@ -1,0 +1,15 @@
+[package]
+name = "nestrs-cli-new-lib-1789613851945125000"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nestrs = "0.1"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

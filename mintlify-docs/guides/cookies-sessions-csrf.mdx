@@ -1,14 +1,14 @@
 ---
 title: "Cookies, sessions, and CSRF protection"
-description: "Opt-in browser-facing state with `use_cookies`, `use_session_memory`, and `use_csrf_protection` — the @nestjs/csrf analogue built on tower-cookies + tower-sessions."
+description: "Opt-in browser-facing state with `use_cookies`, `use_session_memory`, `use_session_redis`, and `use_csrf_protection` — the @nestjs/csrf analogue built on tower-cookies + tower-sessions."
 ---
 
 Three feature flags in the `nestrs` umbrella crate cover browser-facing
 state: **`cookies`** (signed cookie parsing), **`session`** (in-memory
-server-side sessions via tower-sessions), and **`csrf`** (double-submit
-CSRF protection on unsafe methods). All three are opt-in — API-only
-services don't pay for them, browser-facing apps get the layers on the
-exact routes they need.
+server-side sessions via tower-sessions), **`session-redis`** (Redis-backed
+sessions), and **`csrf`** (double-submit CSRF protection on unsafe methods).
+All are opt-in — API-only services don't pay for them, browser-facing apps
+get the layers on the exact routes they need.
 
 The model matches the @nestjs/csrf recipe: a `csrf_token` cookie is
 issued on first visit, the browser sends the same value as a header on
@@ -22,7 +22,7 @@ in production — see below).
 ```toml
 # Cargo.toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["cookies", "session", "csrf"] }
+nestrs = { version = "1.2.0", features = ["cookies", "session", "csrf"] }
 ```
 
 ```rust
@@ -49,6 +49,9 @@ Each call is independent:
   Every route gets a `Cookies` extractor you can read and write.
 - **`use_session_memory()`** — installs `tower_sessions::SessionManagerLayer`
   with a `MemoryStore` *plus* the cookie layer (session implies cookies).
+  The session cookie is `Secure` in production environments.
+- **`use_session_redis(url)`** (feature **`session-redis`**) — same layers
+  with a Redis-backed store. Redis wins if both memory and Redis are set.
 - **`use_csrf_protection(config)`** — installs the double-submit
   middleware. Requires `use_cookies()`; the check reads the `Cookies`
   extension populated by the cookie layer.
@@ -121,11 +124,27 @@ pub async fn login(session: Session, /* ... */) -> StatusCode {
 ```
 
 `Session` is `tower_sessions::Session` — read/insert/remove typed
-values, the store handles serialization. `MemoryStore` is the right
-choice for single-process dev and tests; for multi-process prod, swap
-to `tower_sessions::MysqlStore` / `RedisStore` / `CachingStore`
-(whatever `tower-sessions` ships for your backing store) and wire it
-in place of the `MemoryStore::default()` the builder installs.
+values, the store handles serialization. `use_session_memory()` is the
+right choice for single-process dev and tests. For multi-process
+production, enable **`session-redis`** and call
+`use_session_redis(url)` — nestrs installs a `RedisSessionStore` that
+uses Redis `SET`/`GET`/`DEL` with a `PX` TTL. The session cookie is
+`Secure` when the process is running in production
+(`NESTRS_ENV`/`APP_ENV`/`RUST_ENV`). If both memory and Redis are
+configured, Redis wins and a warning is logged.
+
+```toml
+nestrs = { version = "1.2.0", features = ["cookies", "session-redis", "csrf"] }
+```
+
+```rust
+let app = NestFactory::create(AppModule).await?
+    .use_session_redis("redis://127.0.0.1:6379")
+    .use_csrf_protection(CsrfProtectionConfig::default());
+```
+
+`RedisSessionStore::Debug` redacts `user:pass@` from the URL; session
+ids are never written to logs.
 
 ## Issue a CSRF token on first visit
 
@@ -221,7 +240,7 @@ If you turn on `cookies` or `session` *without* `csrf` (either by
 forgetting the feature flag, or by skipping `use_csrf_protection(...)`),
 `nestrs` emits a `tracing::warn!` at startup:
 
-> nestrs security: cookies or in-memory sessions are enabled, but CSRF
+> nestrs security: cookies or sessions (memory or Redis) are enabled, but CSRF
 > protection is not configured. Cookie-authenticated browser clients
 > remain vulnerable to cross-site request forgery on unsafe HTTP methods
 > until you call NestApplication::use_csrf_protection(...)
@@ -241,6 +260,10 @@ restrict the cookie layer to non-mutating routes (e.g. analytics only).
 - **`use_session_memory()` for single-process dev** — fast to wire,
   no DB, sessions disappear on restart. Replace with a persistent
   store before going to prod with more than one instance.
+- **`use_session_redis(url)` (feature `session-redis`) for multi-instance
+  production** — Redis `SET`/`GET`/`DEL` with `PX` TTL. Redis wins if
+  both memory and Redis are configured. Pair with CSRF for browser
+  cookie auth; `Debug` redacts URL userinfo and never logs session ids.
 - **`use_csrf_protection(...)` for every browser-mutation surface** —
   the default config is fine. Custom names only when an upstream
   constraint forces them.

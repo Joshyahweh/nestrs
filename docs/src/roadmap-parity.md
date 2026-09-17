@@ -59,7 +59,7 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 |--------|--------|--------|--------|
 | Caching | `CacheModule` / `CacheService` | **Partial** | In-memory + optional Redis—[Ecosystem modules](ecosystem.md). |
 | Scheduling | `ScheduleModule`, `#[cron]`, `#[interval]` | **Partial** | Feature `schedule`—[Ecosystem modules](ecosystem.md). |
-| Queues | `QueuesModule` | **Partial** | In-process baseline; feature `queues`—[Ecosystem modules](ecosystem.md). |
+| Queues | `QueuesModule` | **Ready** | In-process `queues`; multi-instance `queues-redis` (LPUSH/BRPOP, not BullMQ). |
 | i18n | `I18nModule` | **Partial** | Catalogs + locale resolver—[Ecosystem modules](ecosystem.md). |
 
 ## CLI and developer experience

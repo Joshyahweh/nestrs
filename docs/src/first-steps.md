@@ -41,7 +41,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nestrs = "1.0.0"
+nestrs = "1.2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

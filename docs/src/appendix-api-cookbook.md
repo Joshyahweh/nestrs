@@ -404,11 +404,10 @@ struct AppModule;
 
 fn main() {
     let _router = NestFactory::create::<AppModule>()
-        .use_throttler(
-            ThrottlerOptions::builder()
-                .global(ThrottleSpec::parse("100/minute"))
-                .build(),
-        )
+        .use_throttler(ThrottlerOptions {
+            global: ThrottleSpec::parse("100/minute"),
+            ..ThrottlerOptions::default()
+        })
         .into_router();
 }
 ```

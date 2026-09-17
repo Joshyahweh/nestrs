@@ -123,6 +123,7 @@ nestrs_mcp::server::NestrsMcpServer
 nestrs_mcp::server::NestrsMcpServer::spawn_task
 nestrs_mcp::server::NestrsMcpServer::with_surfaces
 nestrs_mcp::server::SubServers
+nestrs_mcp::server::bundled_tools
 nestrs_mcp::surfaces
 nestrs_mcp::surfaces::CacheHints
 nestrs_mcp::surfaces::CompleteHandler

@@ -155,6 +155,28 @@ NestFactory::create::<AppModule>()
     .into_router();
 ```
 
+### `use_throttler`
+
+Installs per-route throttling (`#[throttle(n, "per")]` / `#[skip_throttle]`) plus a 429 layer with `Retry-After` and `X-RateLimit-Remaining`. Requires the `throttler` feature. `ThrottlerOptions` has no builder — construct the struct. `global: None` (default) throttles only decorated routes.
+
+```rust
+#[cfg(feature = "throttler")]
+pub fn use_throttler(self, options: ThrottlerOptions) -> Self
+```
+
+```rust
+use nestrs_throttle::{ThrottleSpec, ThrottlerOptions};
+
+NestFactory::create::<AppModule>()
+    .use_throttler(ThrottlerOptions {
+        global: ThrottleSpec::parse("100/minute"),
+        ..ThrottlerOptions::default()
+    })
+    .into_router();
+```
+
+See the [throttling guide](/guides/throttling) for Redis backends, skippers, and key generators.
+
 ### `use_csrf_protection`
 
 Enables double-submit CSRF middleware on `POST`, `PUT`, `PATCH`, and `DELETE`. Requires the `csrf` feature. Must be paired with `use_cookies()`.
@@ -187,6 +209,22 @@ Enables in-memory server-side sessions via `tower_sessions`. Implies `use_cookie
 ```rust
 #[cfg(feature = "session")]
 pub fn use_session_memory(self) -> Self
+```
+
+### `use_session_redis`
+
+Enables Redis-backed server-side sessions via `RedisSessionStore` (`SET`/`GET`/`DEL` with `PX` TTL). Implies `use_cookies`. Requires the `session-redis` feature. If both memory and Redis are set, Redis wins and a warning is logged. The session cookie is `Secure` when the process is in production (`NESTRS_ENV` / `APP_ENV` / `RUST_ENV`). `Debug` redacts `user:pass@`; session ids are never logged.
+
+```rust
+#[cfg(feature = "session-redis")]
+pub fn use_session_redis(self, url: impl Into<String>) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .use_session_redis("redis://127.0.0.1:6379")
+    .use_csrf_protection(CsrfProtectionConfig::default())
+    .into_router();
 ```
 
 ---

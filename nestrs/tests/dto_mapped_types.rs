@@ -1,15 +1,18 @@
-//! Wave 7.5 — `#[partial_type]` / `#[omit_type(...)]` / `#[pick_type(...)]`
-//! mapped-type macros.
+//! Wave 7.5 / 8.1 — mapped-type macros.
 //!
 //! Mirrors NestJS's `@nestjs/mapped-types`:
 //!   - `#[nestrs::partial_type]`     — every field becomes `Option<T>`
 //!     (already-`Option` fields are not double-wrapped).
 //!   - `#[nestrs::omit_type(a, b)]`  — drop named fields.
 //!   - `#[nestrs::pick_type(a, b)]`  — keep only named fields.
+//!   - `#[nestrs::intersection_type]` — flatten ≥2 parent DTOs into one JSON
+//!     object (`IntersectionType(A, B)`). Parent DTOs must use
+//!     `#[dto(allow_unknown_fields)]` so sibling flattened keys are not
+//!     rejected as unknown.
 //!
-//! All three emit the same derive set as `#[dto]` (`Debug`, `Clone`,
-//! `Serialize`, `Deserialize`, `NestDto`, `JsonSchema`, `Validate`) plus the
-//! default `#[serde(deny_unknown_fields)]`.
+//! Partial/Omit/Pick emit the same derive set as `#[dto]` plus
+//! `#[serde(deny_unknown_fields)]`. Intersection omits `deny_unknown_fields`
+//! because serde forbids it on structs that contain `#[serde(flatten)]`.
 
 use nestrs::prelude::*;
 use nestrs::schemars;
@@ -77,7 +80,9 @@ fn partial_type_skips_already_optional_fields() {
     };
     let json = serde_json::to_value(&dto).expect("serializes");
     let obj = json.as_object().expect("object");
-    assert!(obj["nickname"].is_null(), "nickname stays a flat Option<String>");
+    // `nickname: Some("ada".to_string())` only typechecks if the field is
+    // `Option<String>`, not `Option<Option<String>>`. Serde then emits a
+    // JSON string (not an object / nested null).
     assert_eq!(obj["nickname"], Value::String("ada".to_string()));
 }
 
@@ -106,7 +111,9 @@ fn partial_type_preserves_min_length_validator() {
         age: Some(36),
         nickname: None,
     };
-    let err = dto.validate().expect_err("1-char name must fail MinLength(2)");
+    let err = dto
+        .validate()
+        .expect_err("1-char name must fail MinLength(2)");
     assert!(
         err.field_errors().contains_key("name"),
         "MinLength should still fire on the wrapped Option<String>"
@@ -118,7 +125,7 @@ fn partial_type_skips_validators_when_none() {
     // An `Option` field with `None` skips its inner validator — this is
     // exactly the contract that makes PartialType useful for PATCH bodies.
     let dto = UpdateUserDto {
-        email: None,                         // no validation when absent
+        email: None, // no validation when absent
         name: None,
         age: None,
         nickname: None,
@@ -238,14 +245,13 @@ fn partial_type_schema_marks_every_field_optional() {
 
 #[test]
 fn omit_type_schema_drops_named_field() {
-    let schema: Value = serde_json::to_value(schemars::schema_for!(
-        CreateUserNoNicknameDto
-    ))
-    .expect("schema serializes");
-    let props = schema["properties"]
-        .as_object()
-        .expect("properties");
-    assert!(!props.contains_key("nickname"), "nickname dropped from schema");
+    let schema: Value = serde_json::to_value(schemars::schema_for!(CreateUserNoNicknameDto))
+        .expect("schema serializes");
+    let props = schema["properties"].as_object().expect("properties");
+    assert!(
+        !props.contains_key("nickname"),
+        "nickname dropped from schema"
+    );
     assert!(props.contains_key("email"));
     assert!(props.contains_key("name"));
     assert!(props.contains_key("age"));
@@ -255,14 +261,77 @@ fn omit_type_schema_drops_named_field() {
 fn pick_type_schema_keeps_only_named_fields() {
     let schema: Value =
         serde_json::to_value(schemars::schema_for!(UserIdentityDto)).expect("schema serializes");
-    let props = schema["properties"]
-        .as_object()
-        .expect("properties");
+    let props = schema["properties"].as_object().expect("properties");
     let mut keys: Vec<_> = props.keys().map(String::as_str).collect();
     keys.sort_unstable();
     assert_eq!(
         keys,
         vec!["email", "name"],
         "only picked fields in the reflected schema"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `#[intersection_type]` — NestJS IntersectionType(A, B)
+// ---------------------------------------------------------------------------
+
+#[dto(allow_unknown_fields)]
+struct IdentDto {
+    #[IsEmail]
+    email: String,
+}
+
+#[dto(allow_unknown_fields)]
+struct ProfileDto {
+    #[MinLength(2)]
+    name: String,
+}
+
+#[nestrs::intersection_type]
+struct CreateUserMergedDto {
+    ident: IdentDto,
+    profile: ProfileDto,
+}
+
+#[test]
+fn intersection_type_deserializes_flat_json() {
+    let dto: CreateUserMergedDto =
+        serde_json::from_str(r#"{"email":"ada@example.com","name":"Ada"}"#)
+            .expect("flat JSON deserializes into flattened parents");
+    assert_eq!(dto.ident.email, "ada@example.com");
+    assert_eq!(dto.profile.name, "Ada");
+}
+
+#[test]
+fn intersection_type_serializes_flat_json() {
+    let dto = CreateUserMergedDto {
+        ident: IdentDto {
+            email: "ada@example.com".to_string(),
+        },
+        profile: ProfileDto {
+            name: "Ada".to_string(),
+        },
+    };
+    let json = serde_json::to_value(&dto).expect("serializes");
+    let obj = json.as_object().expect("object");
+    let mut keys: Vec<_> = obj.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["email", "name"]);
+}
+
+#[test]
+fn intersection_type_validates_nested_parents() {
+    let dto: CreateUserMergedDto = serde_json::from_str(r#"{"email":"not-an-email","name":"Ada"}"#)
+        .expect("shape is valid even when email fails IsEmail");
+    let err = dto
+        .validate()
+        .expect_err("bad email must fail nested Validate");
+    // Nested `#[validate(nested)]` reports `ValidationErrorsKind::Struct`,
+    // which `field_errors()` filters out. Look at the full map instead.
+    let errors = err.errors();
+    assert!(
+        errors.contains_key("ident"),
+        "nested IsEmail should fire on the ident parent; got {:?}",
+        errors.keys().collect::<Vec<_>>()
     );
 }

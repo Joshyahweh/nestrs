@@ -3,14 +3,14 @@
 //! [`@nestjs/mongoose`](https://docs.nestjs.com/techniques/mongodb).
 //!
 //! See the [`README`](https://github.com/Joshyahweh/nestrs/tree/main/nestrs-mongodb)
-//! for the high-level API. This crate is intentionally small at the entry point;
-//! the public surface is split across modules that come online in subsequent phases:
+//! for the high-level API. Public surface:
 //!
-//! - [`client`] — connection options, client lifecycle, `MongoModule::for_root`.
+//! - [`client`] — connection options, client lifecycle, `MongoModule::for_root` /
+//!   `for_root_async` / `for_feature`, injectable [`MongoService`] (including
+//!   [`MongoService::model`]).
 //! - [`schema`] — `Document` trait, `#[schema(...)]` / `#[prop(...)]` derive surface.
 //! - [`repository`] — typed `MongoRepository<T>` CRUD wrapper.
-//! - [`module`] — `MongoModule`, `forRootAsync`, `forFeature` model registration,
-//!   `#[inject_model]` macro surface.
+//! - [`error`] — [`MongoError`].
 //!
 //! Feature flags:
 //! - `default = []` — TLS via `rustls`, BSON `compat-3-0-0` codec.

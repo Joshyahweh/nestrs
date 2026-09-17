@@ -6,8 +6,10 @@
 //! (contains the `@link` directive) before writing it to disk.
 //!
 //! Federation v2 is the Apollo Federation shape that nestrs-graphql
-//! emits via [`nestrs_graphql::export_subgraph_v2_sdl`] (re-exported
-//! by the umbrella as `nestrs::graphql::export_subgraph_v2_sdl`).
+//! emits via `export_subgraph_v2_sdl` (re-exported by the umbrella as
+//! `nestrs::graphql::export_subgraph_v2_sdl`). HTTP SDL export is
+//! federation-only (`{_service { sdl }}`); non-federation schemas
+//! should print SDL at build time.
 //! Running against a federation-v1 or non-federation endpoint by
 //! mistake is a common CI failure — the CLI surfaces it as an error
 //! rather than silently writing a broken SDL.
@@ -26,8 +28,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut url: Option<String> = None;
     let mut out: Option<PathBuf> = None;
     let mut bearer: Option<String> = None;
-    /// Default = strict (federation v2 only). `--lenient` accepts v1
-    /// SDLs that lack the `@link` directive.
+    // Default = strict (federation v2 only). `--lenient` accepts v1
+    // SDLs that lack the `@link` directive.
     let mut lenient = false;
     let mut i = 0usize;
     while i < args.len() {
@@ -92,7 +94,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 }
 
 /// Detect whether a federation v2 SDL string was emitted by
-/// [`nestrs_graphql::export_subgraph_v2_sdl`]. Mirrors the helper of
+/// `nestrs_graphql::export_subgraph_v2_sdl`. Mirrors the helper of
 /// the same name in `nestrs-graphql::federation` — duplicated here
 /// because the CLI does not depend on `nestrs-graphql` (the check is
 /// a one-liner substring match, not worth pulling the dep).

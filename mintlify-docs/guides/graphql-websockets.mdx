@@ -13,7 +13,7 @@ Add the `graphql` feature to your `nestrs` dependency and add `async-graphql` an
 
 ```toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["graphql"] }
+nestrs = { version = "1.2.0", features = ["graphql"] }
 async-graphql = "7"
 ```
 
@@ -129,7 +129,7 @@ async-graphql 7 registers the federation entity field as **`entities`** (no unde
 
 ```toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["graphql-federation-gateway"] }
+nestrs = { version = "1.2.0", features = ["graphql-federation-gateway"] }
 ```
 
 The feature implies `graphql-authz`, and the gateway types are re-exported under `nestrs::graphql::federation`: `federation_router`, `federation_router_with_options`, `federation_router_with_hook`, `FederationConfig`, `SubgraphSpec`, `EntityResolver`, and `FederationError`.
@@ -146,7 +146,14 @@ There is no query planner and no automatic stitching of type fields across subgr
 
 #### Exporting a subgraph's federation SDL
 
-Each subgraph contributes a federation-shaped SDL. Export one from an async-graphql `Schema` with `SDLExportOptions::default().federation()`:
+Each subgraph contributes a federation-shaped SDL. Export one from an async-graphql `Schema` with `SDLExportOptions::default().federation()`, or from a running federation subgraph:
+
+```bash
+nestrs-cli graphql sdl --url http://127.0.0.1:3000/graphql --out subgraph.graphql
+nestrs-cli graphql federation export --url http://127.0.0.1:3000/graphql --out subgraph.graphql
+```
+
+Non-federation HTTP SDL export is not supported — call `nestrs_graphql::export_schema_sdl(&schema)` at build time instead.
 
 ```rust
 use nestrs::graphql::{export_schema_sdl_with_options, SDLExportOptions};
@@ -256,7 +263,7 @@ Add the `ws` feature:
 
 ```toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["ws"] }
+nestrs = { version = "1.2.0", features = ["ws"] }
 ```
 
 `nestrs-ws` is re-exported as `nestrs::ws` when the feature is enabled.

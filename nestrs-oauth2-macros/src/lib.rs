@@ -42,9 +42,10 @@
 //! }
 //! ```
 
-use proc_macro2::TokenStream;
+use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, spanned::Spanned, Attribute, Data, DeriveInput, Field, Fields, Meta};
+use syn::{parse_macro_input, Attribute, Data, DeriveInput, Fields, Meta};
 
 /// Derive `HashOnNew` on a named-field struct. Generates an inherent
 /// `new_with_hashed(...)` constructor that hashes every field tagged
@@ -53,8 +54,8 @@ use syn::{parse_macro_input, spanned::Spanned, Attribute, Data, DeriveInput, Fie
 pub fn derive_hash_on_new(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
     match impl_hash_on_new(&ast) {
-        Ok(ts) => ts,
-        Err(e) => e.to_compile_error(),
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
     }
 }
 
@@ -81,7 +82,7 @@ struct FieldMeta {
     is_hashed: bool,
 }
 
-fn impl_hash_on_new(ast: &DeriveInput) -> syn::Result<TokenStream> {
+fn impl_hash_on_new(ast: &DeriveInput) -> syn::Result<TokenStream2> {
     let name = &ast.ident;
     let generics = &ast.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -153,9 +154,10 @@ fn impl_hash_on_new(ast: &DeriveInput) -> syn::Result<TokenStream> {
             let span = fname.span();
             quote_spanned! { span =>
                 #fname: ::nestrs_oauth2::password::hash(&#fname)
+                    .expect("nestrs-oauth2: password hash failed")
             }
         } else {
-            quote! { #fname: #fname }
+            quote! { #fname }
         }
     });
 

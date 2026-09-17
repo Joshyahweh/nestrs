@@ -22,7 +22,7 @@ Cross-check each row against the tables below when something behaves differently
 
 | Condition | What happens | What to do |
 |-----------|----------------|------------|
-| `use_cookies()` or `use_session_memory()` without `use_csrf_protection` (and feature `csrf` enabled) | `tracing` **WARN** at router build | Enable `csrf` + `use_cookies()` + `use_csrf_protection(...)` for cookie session flows that accept browser POSTs |
+| `use_cookies()` / `use_session_memory()` / `use_session_redis(...)` without `use_csrf_protection` (and feature `csrf` enabled) | `tracing` **WARN** at router build | Enable `csrf` + `use_cookies()` + `use_csrf_protection(...)` for cookie session flows that accept browser POSTs |
 | Cookies/sessions with **`csrf` feature disabled** on the `nestrs` dependency | `tracing` **WARN** at router build | Add `features = ["csrf"]` (implies `cookies`) if you need built-in double-submit CSRF |
 | `enable_cors` with **permissive** policy in a **production** environment (`NESTRS_ENV` / `APP_ENV` / `RUST_ENV`) | `tracing` **WARN** | Replace with explicit `CorsOptions` allowlists |
 
@@ -59,7 +59,7 @@ The full model — abilities, guards, row predicates, SQL pushdown, masking — 
 | CORS | Off until configured | Explicit allowlist per environment |
 | Security headers | Off until `use_security_headers` | Enable `SecurityHeaders` / `helmet_like()` + CSP |
 | CSRF | Off (feature + API opt-in) | On for cookie auth + unsafe methods |
-| Cookies / sessions | Off until `use_cookies` / `use_session_memory` | Pair with CSRF when browsers mutate state |
+| Cookies / sessions | Off until `use_cookies` / `use_session_memory` / `use_session_redis` | Pair with CSRF when browsers mutate state |
 | Body size | Off until `use_body_limit` | Set per route class / deployment |
 | Request timeout | Off until `use_request_timeout` | Set for public endpoints |
 | Rate limit | Off until `use_rate_limit` | Set at edge + optionally in-app |

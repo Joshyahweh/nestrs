@@ -8,7 +8,7 @@ use crate::options::ThrottlerOptions;
 use crate::service::ThrottlerService;
 use crate::spec::ThrottleSpec;
 use axum::Router;
-use nestrs_core::{DynamicModule, Injectable, ProviderRegistry};
+use nestrs_core::{DynamicModule, ProviderRegistry};
 use std::sync::Arc;
 
 /// Marker for [`ThrottlerModule::register`]. Carries no state — the work
@@ -22,7 +22,7 @@ impl ThrottlerModule {
     pub fn register(options: ThrottlerOptions) -> DynamicModule {
         let mut registry = ProviderRegistry::new();
         let service = Arc::new(ThrottlerService::from_options(&options));
-        registry.register::<ThrottlerService>(service);
+        registry.register_use_value::<ThrottlerService>(service);
         DynamicModule::from_parts(registry, Router::new(), Default::default())
     }
 }

@@ -1,6 +1,6 @@
 name: publish-crates
 
-# Publishes only after preflight passes. Use a tag on `main` (e.g. `v0.4.0`) or manual dispatch.
+# Publishes every workspace member after preflight. Tag `v1.2.0` on `main` or use manual dispatch.
 # After a successful tag-triggered publish, creates a GitHub Release (shows "Latest" on the repo).
 on:
   push:
@@ -118,10 +118,20 @@ jobs:
             echo "::error::cargo publish for $pkg failed after $max_attempts attempts"
             return 1
           }
+          # Dependency order for every publishable workspace member at
+          # workspace.package.version (currently 1.2.0). `nestrs-drizzle`
+          # stays carved out (not a workspace member).
+          #
+          # Leaves (no nestrs-* deps):
           publish_pkg nestrs-macros
+          sleep 60
+          publish_pkg nestrs-oauth2-macros
+          sleep 60
+          publish_pkg nestrs-storage
           sleep 60
           publish_pkg nestrs-core
           sleep 60
+          # Depend on nestrs-core (and macros where noted):
           publish_pkg nestrs-events
           sleep 60
           publish_pkg nestrs-ws
@@ -134,10 +144,19 @@ jobs:
           sleep 60
           publish_pkg nestrs-microservices
           sleep 60
+          publish_pkg nestrs-security
+          sleep 60
+          publish_pkg nestrs-throttle
+          sleep 60
+          publish_pkg nestrs-health
+          sleep 60
+          publish_pkg nestrs-mongodb
+          sleep 60
+          publish_pkg nestrs-http
+          sleep 60
           publish_pkg nestrs-oauth2
           sleep 60
-          publish_pkg nestrs-storage
-          sleep 60
+          # Umbrella + crates that depend on it:
           publish_pkg nestrs
           sleep 60
           publish_pkg nestrs-prisma

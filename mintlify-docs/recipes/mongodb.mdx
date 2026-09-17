@@ -13,8 +13,8 @@ that reads `#[schema(...)]` / `#[prop(...)]` attributes, and the same
 
 ```toml
 [dependencies]
-nestrs = { version = "1.1", features = ["mongo"] }
-nestrs-mongodb = "1.1"
+nestrs = { version = "1.2.0", features = ["mongo"] }
+nestrs-mongodb = "1.2.0"
 serde = { version = "1", features = ["derive"] }
 bson = "2"
 ```
@@ -27,15 +27,41 @@ direct dep. Add `mongo-dns` for `mongodb+srv://` Atlas seed lists.
 
 ```rust
 use nestrs::prelude::*;
-use nestrs::mongo::{MongoModule, MongoService};
+use nestrs::mongo::MongoModule;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     MongoModule::for_root("mongodb://127.0.0.1:27017");
+    MongoModule::for_feature("app");
     NestFactory::create::<AppModule>().listen(3000).await;
 }
 
-#[module(imports = [MongoModule::for_feature("app")])]
+#[module(imports = [DynamicModule::from_module::<MongoModule>()])]
 struct AppModule;
+```
+
+`MongoModule` implements `nestrs_core::Module` (registers and exports
+`MongoService`), so it enters the graph through
+`DynamicModule::from_module`. `for_root` / `for_feature` are static
+setters called once at boot — they are not themselves import
+expressions.
+
+For vault / env / `ConfigService` lookups, use the NestJS
+`MongooseModule.forRootAsync` analogue **before** `NestFactory::create`:
+
+```rust
+use nestrs::mongo::{MongoModule, MongoOptions};
+
+#[tokio::main]
+async fn main() -> Result<(), nestrs::mongo::MongoError> {
+    MongoModule::for_root_async(|| async {
+        Ok(MongoOptions::new(std::env::var("MONGO_URI").expect("MONGO_URI")))
+    })
+    .await?;
+    MongoModule::for_feature("app");
+    NestFactory::create::<AppModule>().listen(3000).await;
+    Ok(())
+}
 ```
 
 ## Define a schema
@@ -102,6 +128,14 @@ async fn find_by_email(svc: &MongoService, email: &str)
     users.find_one(bson::doc! { "email": email }).await
 }
 
+async fn find_via_inject_model(svc: &MongoService, email: &str)
+    -> Result<Option<User>, nestrs::mongo::MongoError>
+{
+    // NestJS `@InjectModel(User)` analogue — same as `MongoRepository::for_feature`.
+    let users = svc.model::<User>().await?;
+    users.find_one(bson::doc! { "email": email }).await
+}
+
 async fn delete_by_id(svc: &MongoService, id: ObjectId)
     -> Result<u64, nestrs::mongo::MongoError>
 {
@@ -147,8 +181,9 @@ two names should match in single-database apps.
 |--------|---------|
 | `MongoModule::for_root(uri)` | Static URI setter; call once at boot. |
 | `MongoModule::for_root_with_options(opts)` | Same, with a [`MongoOptions`] builder. |
+| `MongoModule::for_root_async(factory)` | Async factory that returns `Result<MongoOptions>` (vault / env / `ConfigService`). |
 | `MongoModule::for_feature(db_name)` | Register the default database name for [`MongoRepository::for_feature`]. |
-| `MongoService` | Injectable handle: `client()`, `database(name)`, `default_database()`, `ping()`, `list_databases()`. |
+| `MongoService` | Injectable handle: `client()`, `database(name)`, `default_database()`, `ping()`, `list_databases()`, `model::<T>()`. |
 | `MongoRepository<T>` | Typed CRUD wrapper (see below). |
 | `Document` | Trait + `#[derive(Document)]` macro. |
 | `MongoError` | Wraps `mongodb::error::Error`, `bson::ser::Error`, `bson::de::Error`, plus `NotConfigured` / `Timeout` / `InvalidArgument`. |
@@ -174,6 +209,7 @@ two names should match in single-database apps.
 | `delete_by_id(id)` | `u64` |
 | `from_service(svc, db_name)` | `MongoRepository<T>` |
 | `for_feature(svc)` | `MongoRepository<T>` (uses `MongoModule::feature_db()`) |
+| `MongoService::model::<T>()` | Same as `for_feature` — NestJS `@InjectModel` analogue |
 
 Filters and updates are typed aliases over `bson::Document` so any
 driver-level filter / update is reachable without depending on

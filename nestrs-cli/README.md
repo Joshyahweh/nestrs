@@ -32,6 +32,13 @@ Add a REST resource (from your crate root):
 nestrs-cli generate resource users
 ```
 
+Inspect a crate's DI graph (static) or a running admin sidecar (live):
+
+```bash
+nestrs-cli repl routes
+nestrs-cli repl live --url http://127.0.0.1:7777 --bearer-token "$ADMIN_TOKEN"
+```
+
 Other subcommands and flags are listed in `nestrs-cli --help` / `nestrs-cli generate --help`.
 
 ## Scope vs Nest CLI

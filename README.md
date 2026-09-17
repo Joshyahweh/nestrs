@@ -35,7 +35,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `1.0.0` (from `VERSION` and workspace package settings) — the first stable release; the public API is now covered by full semver (see `STABILITY.md`)
+- Current workspace version: `1.2.0` (from `VERSION` and workspace package settings) — a minor release on the 1.0 stable contract; the public API is covered by full semver (see `STABILITY.md`)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
@@ -66,6 +66,11 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs-storage/` - multi-cloud object storage (S3 / GCS / Azure / Local)
 - `nestrs-openapi/`, `nestrs-graphql/`, `nestrs-ws/` - parity extension crates
 - `nestrs-mcp/` - Model Context Protocol server (stdio + Streamable HTTP)
+- `nestrs-mongodb/` - Mongoose-style MongoDB adapter (`MongoModule`, `MongoRepository<T>`)
+- `nestrs-http/` - outbound HTTP client (`HttpModule` / `HttpService`)
+- `nestrs-throttle/` - per-route rate limits (`ThrottlerGuard`, in-memory or Redis)
+- `nestrs-health/` - readiness / liveness indicators
+- `nestrs-security/` - Bearer parsing, helmet headers, CSRF middleware
 - `website/` - landing page + docs hub (light/dark theme)
 
 ## Quick Start

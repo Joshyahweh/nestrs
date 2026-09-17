@@ -7,12 +7,15 @@
 
 use crate::keys::ThrottlerRequest;
 use crate::module::ThrottleSpecFor;
+use crate::options::ThrottlerOptions;
 use crate::service::ThrottlerService;
 use crate::spec::{ThrottleOutcome, ThrottleSpec};
 use async_trait::async_trait;
 use axum::http::request::Parts;
 use nestrs_core::client_ip::{rate_limit_key_ip_or_unknown, trusted_hops_from_parts};
-use nestrs_core::{CanActivate, GuardError, HandlerKey, Injectable, MetadataRegistry, ProviderRegistry};
+use nestrs_core::{
+    CanActivate, GuardError, HandlerKey, Injectable, MetadataRegistry, ProviderRegistry,
+};
 use std::sync::Arc;
 
 pub struct ThrottlerGuard {
@@ -25,6 +28,16 @@ pub struct ThrottlerGuard {
 impl std::fmt::Debug for ThrottlerGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ThrottlerGuard").finish_non_exhaustive()
+    }
+}
+
+impl Default for ThrottlerGuard {
+    fn default() -> Self {
+        Self {
+            service: Arc::new(ThrottlerService::from_options(&ThrottlerOptions::default())),
+            global: None,
+            trusted_proxy_hops: None,
+        }
     }
 }
 
@@ -52,16 +65,16 @@ impl ThrottlerGuard {
 
 #[async_trait]
 impl CanActivate for ThrottlerGuard {
-    async fn can_activate(&self, parts: &mut Parts) -> Result<(), GuardError> {
+    async fn can_activate(&self, parts: &Parts) -> Result<(), GuardError> {
         let handler = parts
             .extensions
             .get::<HandlerKey>()
             .map(|h| h.0)
             .unwrap_or("");
 
-        let decorated = MetadataRegistry::get(parts, "throttle")
-            .and_then(|s| ThrottleSpec::parse(&s));
-        let skip = MetadataRegistry::get(parts, "skip_throttle")
+        let decorated =
+            MetadataRegistry::get(handler, "throttle").and_then(|s| ThrottleSpec::parse(&s));
+        let skip = MetadataRegistry::get(handler, "skip_throttle")
             .map(|v| v == "true")
             .unwrap_or(false);
 
@@ -83,7 +96,12 @@ impl CanActivate for ThrottlerGuard {
         let key = self.service.key_generator().key(&tr_req);
         match self.service.check(handler, &key, &spec).await {
             ThrottleOutcome::Allowed { .. } => Ok(()),
-            ThrottleOutcome::Limited { .. } => Err(GuardError::TooManyRequests),
+            ThrottleOutcome::Limited {
+                retry_after_secs, ..
+            } => Err(GuardError::too_many_requests(
+                "Too Many Requests".to_string(),
+                retry_after_secs,
+            )),
         }
     }
 }

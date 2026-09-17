@@ -29,10 +29,14 @@ pub trait HealthIndicator: Send + Sync {
 /// reuse or test checks.
 #[derive(Clone)]
 pub struct ReadinessContext {
-    indicators: Vec<std::sync::Arc<dyn HealthIndicator>>,
+    pub indicators: Vec<std::sync::Arc<dyn HealthIndicator>>,
 }
 
 impl ReadinessContext {
+    pub fn new(indicators: Vec<std::sync::Arc<dyn HealthIndicator>>) -> Self {
+        Self { indicators }
+    }
+
     pub fn indicators(&self) -> &[std::sync::Arc<dyn HealthIndicator>] {
         &self.indicators
     }

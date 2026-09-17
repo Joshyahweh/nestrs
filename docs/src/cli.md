@@ -18,6 +18,13 @@ nestrs-cli --help
 | `nestrs-cli db migrate …` | Create, apply, revert, and inspect SQL migrations (`add`, `run`, `revert`, `info`). Default backend `sqlx`; `--backend prisma` passes through to `npx prisma`. |
 | `nestrs-cli db seed …` | Seed the database from a Cargo seed binary (`--bin`) or a transactional SQL file (`--seed-file`). |
 | `nestrs-cli doctor` | Print `rustc` / `cargo` versions, scan `Cargo.toml` for `nestrs` feature hints, and heuristically check `src/**/*.rs` for common misconfigurations (e.g. `enable_openapi()` without the `openapi` feature). Does not replace `cargo check`. |
+| `nestrs-cli repl …` | Static DI graph explorer (`graph` / `routes` / `providers` / `dtos`) plus `repl live --url` against a running admin sidecar (`GET /__nestrs/providers` + `/routes`; bearer header; curl `--` before URL). |
+
+`nestrs-cli repl live` dumps **running** providers and routes (`GET /__nestrs/providers` and `/__nestrs/routes`) from an app that enabled the `admin` feature. The CLI shells out to `curl`: bearer is an `Authorization` **header only** (never a query string); argv places `--` before the URL; `curl` must be on `$PATH`.
+
+```bash
+nestrs-cli repl live --url http://127.0.0.1:7777 --bearer-token secret --format json
+```
 
 The `db` family ships behind the `db` Cargo feature (it pulls in `sqlx` and `tokio` as CLI dependencies):
 

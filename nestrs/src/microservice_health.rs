@@ -8,4 +8,10 @@
 //! Feature gates on the underlying crate mirror the umbrella's
 //! `microservices-redis` / `microservices-nats` flags.
 
-pub use nestrs_health::microservice_indicators::*;
+pub use nestrs_health::BrokerHealthStub;
+
+#[cfg(feature = "microservices-redis")]
+pub use nestrs_health::RedisBrokerHealth;
+
+#[cfg(feature = "microservices-nats")]
+pub use nestrs_health::NatsBrokerHealth;

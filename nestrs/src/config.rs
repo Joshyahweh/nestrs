@@ -285,7 +285,9 @@ impl ConfigService {
         let mut current = &tree;
         for segment in key.split('.') {
             current = match current {
-                serde_json::Value::Object(map) => map.get(segment).unwrap_or(&serde_json::Value::Null),
+                serde_json::Value::Object(map) => {
+                    map.get(segment).unwrap_or(&serde_json::Value::Null)
+                }
                 serde_json::Value::Null => &serde_json::Value::Null,
                 _ => {
                     return Err(ConfigError {
@@ -309,14 +311,16 @@ impl ConfigService {
         })
     }
 
-    /// Look up the raw string value behind a dotted key (last write wins,
-    /// no JSON coercion). Returns `None` if the key was deleted by a later
-    /// source.
+    /// Look up the raw string value behind a flattened key (last write wins,
+    /// no JSON coercion). Nested object keys use `__` (`auth__name`); array
+    /// indices use `.` (`items.0`). Returns `None` if the key was deleted
+    /// by a later source.
     pub fn raw(&self, key: &str) -> Option<&str> {
         self.raw.get(key).map(String::as_str)
     }
 
     /// `true` when `key` exists in the merged view and was not deleted.
+    /// Uses the same flattened-key spelling as [`Self::raw`].
     pub fn has(&self, key: &str) -> bool {
         self.raw.contains_key(key)
     }
@@ -513,10 +517,16 @@ pub enum ConfigSource {
     /// sources.
     Env { prefix: Option<String> },
     /// A required config file — missing files surface as [`ConfigError`].
-    File { path: std::path::PathBuf, format: FileFormat },
+    File {
+        path: std::path::PathBuf,
+        format: FileFormat,
+    },
     /// An optional config file — missing files are silently skipped (the
     /// `Optional` analogue from `@nestjs/config`'s `ignoreEnvFile`).
-    OptionalFile { path: std::path::PathBuf, format: FileFormat },
+    OptionalFile {
+        path: std::path::PathBuf,
+        format: FileFormat,
+    },
     /// Inline values, fed straight into the merged tree. `null` deletes
     /// the previous key (consistent with file+env semantics).
     Inline(serde_json::Value),
@@ -582,11 +592,7 @@ pub(crate) fn coerce_string_to_json(raw: &str) -> serde_json::Value {
 
 /// Recursively flatten an inline `serde_json::Value` into the dotted-key map.
 /// `Value::Null` deletes the previous key (matches `@nestjs/config`).
-fn flatten_inline(
-    value: serde_json::Value,
-    prefix: &str,
-    out: &mut HashMap<String, String>,
-) {
+fn flatten_inline(value: serde_json::Value, prefix: &str, out: &mut HashMap<String, String>) {
     match value {
         serde_json::Value::Null => {
             if !prefix.is_empty() {
@@ -636,11 +642,11 @@ fn load_file(path: &Path, format: FileFormat) -> Result<serde_json::Value, Confi
         message: format!("failed to read config file `{}`: {e}", path.display()),
     })?;
     match format {
-        FileFormat::Json => serde_json::from_str::<serde_json::Value>(&text).map_err(|e| {
-            ConfigError {
+        FileFormat::Json => {
+            serde_json::from_str::<serde_json::Value>(&text).map_err(|e| ConfigError {
                 message: format!("failed to parse JSON config `{}`: {e}", path.display()),
-            }
-        }),
+            })
+        }
         FileFormat::Toml => {
             let v: toml::Value = toml::from_str(&text).map_err(|e| ConfigError {
                 message: format!("failed to parse TOML config `{}`: {e}", path.display()),
@@ -670,10 +676,8 @@ fn toml_to_json(v: toml::Value) -> serde_json::Value {
             serde_json::Value::Array(items.into_iter().map(toml_to_json).collect())
         }
         toml::Value::Table(map) => {
-            let json_map: serde_json::Map<String, serde_json::Value> = map
-                .into_iter()
-                .map(|(k, v)| (k, toml_to_json(v)))
-                .collect();
+            let json_map: serde_json::Map<String, serde_json::Value> =
+                map.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect();
             serde_json::Value::Object(json_map)
         }
         toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
@@ -1155,7 +1159,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("nestrs-cfg-{suffix}-{nanos}-{n}.{ext}"))
+        std::env::temp_dir().join(format!(
+            "nestrs-cfg-{suffix}-{}-{nanos}-{n}.{ext}",
+            std::process::id()
+        ))
     }
 
     fn write_file(path: &Path, body: &str) {
@@ -1204,7 +1211,10 @@ mod tests {
         let merged = build_sources_overlay(&opts.sources, &env_overlay).expect("merge");
         assert_eq!(merged.get("db__host").map(String::as_str), Some("h.local"));
         assert_eq!(merged.get("db__port").map(String::as_str), Some("5432"));
-        assert_eq!(merged.get("auth__name").map(String::as_str), Some("authsvc"));
+        assert_eq!(
+            merged.get("auth__name").map(String::as_str),
+            Some("authsvc")
+        );
         std::fs::remove_file(&p).ok();
     }
 
@@ -1232,7 +1242,10 @@ name = "authsvc"
         let merged = build_sources_overlay(&opts.sources, &env_overlay).expect("merge");
         assert_eq!(merged.get("db__host").map(String::as_str), Some("h.toml"));
         assert_eq!(merged.get("db__port").map(String::as_str), Some("1234"));
-        assert_eq!(merged.get("auth__name").map(String::as_str), Some("authsvc"));
+        assert_eq!(
+            merged.get("auth__name").map(String::as_str),
+            Some("authsvc")
+        );
         std::fs::remove_file(&p).ok();
     }
 
@@ -1260,7 +1273,10 @@ auth:
         let merged = build_sources_overlay(&opts.sources, &env_overlay).expect("merge");
         assert_eq!(merged.get("db__host").map(String::as_str), Some("h.yaml"));
         assert_eq!(merged.get("db__port").map(String::as_str), Some("9000"));
-        assert_eq!(merged.get("auth__name").map(String::as_str), Some("authsvc"));
+        assert_eq!(
+            merged.get("auth__name").map(String::as_str),
+            Some("authsvc")
+        );
         std::fs::remove_file(&p).ok();
     }
 
@@ -1282,7 +1298,10 @@ auth:
             })),
         ];
         let merged = build_sources_overlay(&sources, &HashMap::new()).expect("merge");
-        assert_eq!(merged.get("db__host").map(String::as_str), Some("from-inline"));
+        assert_eq!(
+            merged.get("db__host").map(String::as_str),
+            Some("from-inline")
+        );
         // `kill` was deleted by the inline `null`.
         assert!(!merged.contains_key("kill"));
         std::fs::remove_file(&p).ok();
@@ -1353,10 +1372,7 @@ auth:
     fn coerce_string_to_json_handles_primitives_and_empty() {
         assert_eq!(coerce_string_to_json(""), serde_json::Value::Null);
         assert_eq!(coerce_string_to_json("null"), serde_json::Value::Null);
-        assert_eq!(
-            coerce_string_to_json("true"),
-            serde_json::Value::Bool(true)
-        );
+        assert_eq!(coerce_string_to_json("true"), serde_json::Value::Bool(true));
         assert_eq!(
             coerce_string_to_json("false"),
             serde_json::Value::Bool(false)
@@ -1374,10 +1390,7 @@ auth:
             serde_json::Value::String("hello".into())
         );
         // A bare JSON literal should round-trip.
-        assert_eq!(
-            coerce_string_to_json("[1,2]"),
-            serde_json::json!([1, 2])
-        );
+        assert_eq!(coerce_string_to_json("[1,2]"), serde_json::json!([1, 2]));
     }
 
     #[test]
@@ -1476,7 +1489,11 @@ auth:
         let svc = ConfigModule::build_service(&opts.entries, &opts).expect("initial build");
         let watcher = ConfigWatcher::new(svc, opts);
         assert_eq!(
-            watcher.snapshot().get::<DbConfig>().expect("typed get").host,
+            watcher
+                .snapshot()
+                .get::<DbConfig>()
+                .expect("typed get")
+                .host,
             "v1.local"
         );
         // Mutate the file; the watcher should pick it up within ~300 ms
@@ -1520,7 +1537,13 @@ auth:
         let svc = ConfigModule::build_service(&opts.entries, &opts).expect("build");
         let watcher = ConfigWatcher::new(svc, opts);
         let handle = watcher.service();
-        assert!(handle.read().expect("lock").has("auth.name"));
+        {
+            let guard = handle.read().expect("lock");
+            assert!(
+                guard.get::<AuthConfig>().is_ok(),
+                "initial snapshot keeps typed auth config"
+            );
+        }
         watcher.stop().await;
         // The shared state remains readable after stop (no panic, no poison).
         drop(handle.read().expect("lock-after-stop"));

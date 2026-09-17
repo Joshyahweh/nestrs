@@ -57,6 +57,11 @@ impl CartController {
         "ok"
     }
 
+    #[get("/echo")]
+    async fn echo_get() -> &'static str {
+        "ok"
+    }
+
     #[put("/echo")]
     async fn echo_put() -> &'static str {
         "ok"
@@ -118,7 +123,11 @@ async fn cookies_extractor_writes_a_cookie() {
         .filter_map(|v| v.to_str().ok())
         .filter(|s| s.starts_with("cart_id="))
         .collect();
-    assert_eq!(set_cookies.len(), 1, "expected exactly one cart_id Set-Cookie");
+    assert_eq!(
+        set_cookies.len(),
+        1,
+        "expected exactly one cart_id Set-Cookie"
+    );
     assert!(
         set_cookies[0].contains("cart-1"),
         "cart_id cookie body should be cart-1, got {}",

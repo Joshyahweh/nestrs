@@ -12,7 +12,7 @@ use bson::{Bson, Document as BsonDoc};
 /// Implemented by types that can be persisted as a MongoDB document.
 ///
 /// The trait is the typed counterpart of Mongoose's `@Schema` decorator. It
-/// carries the collection name (via [`Schema::collection_name`]) and provides
+/// carries the collection name (via [`Document::collection_name`]) and provides
 /// conversion to / from a raw `bson::Document` for the times you want to
 /// drop down to the driver directly.
 ///
@@ -20,7 +20,9 @@ use bson::{Bson, Document as BsonDoc};
 /// in Phase C) wires up `collection_name` from the `#[schema(collection = …)]`
 /// attribute, the auto-generated `_id` field, and the `to_bson` / `from_bson`
 /// round-trip through `serde`.
-pub trait Document: Sized + Send + Sync + 'static {
+pub trait Document:
+    Sized + Send + Sync + 'static + serde::Serialize + for<'de> serde::Deserialize<'de>
+{
     /// Mongo collection name. Maps to Mongoose's `MongooseModule.forFeature`
     /// registration key.
     fn collection_name() -> &'static str;
@@ -28,19 +30,29 @@ pub trait Document: Sized + Send + Sync + 'static {
     /// Convert into a raw `bson::Document`. The default impl delegates to
     /// `bson::to_document`; override only if you need full control over the
     /// BSON shape (rare — usually `#[serde(rename = "...")]` is enough).
-    fn to_bson(&self) -> Result<BsonDoc, bson::ser::Error> {
+    fn to_bson(&self) -> Result<BsonDoc, bson::ser::Error>
+    where
+        Self: serde::Serialize,
+    {
         bson::to_document(self)
     }
 
     /// Build from a raw `bson::Document`. The default impl delegates to
     /// `bson::from_document`.
-    fn from_bson(doc: &BsonDoc) -> Result<Self, bson::de::Error> {
-        bson::from_document(doc)
+    fn from_bson(doc: &BsonDoc) -> Result<Self, bson::de::Error>
+    where
+        Self: for<'de> serde::Deserialize<'de>,
+    {
+        let owned = doc.clone();
+        bson::from_document(owned)
     }
 
     /// Convert into a generic `Bson` value (used when the field type is
     /// `Bson` itself). Default impl serializes via `serde`.
-    fn to_bson_value(&self) -> Result<Bson, bson::ser::Error> {
+    fn to_bson_value(&self) -> Result<Bson, bson::ser::Error>
+    where
+        Self: serde::Serialize,
+    {
         bson::to_bson(self)
     }
 }

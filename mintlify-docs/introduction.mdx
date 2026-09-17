@@ -6,7 +6,7 @@ description: "nestrs brings the NestJS module/controller/provider model to Rust,
 nestrs is a Rust web framework that lets you build structured APIs using the same architectural patterns as NestJS — modules, controllers, providers, and dependency injection — while running on [Axum](https://github.com/tokio-rs/axum) and [Tower](https://github.com/tower-rs/tower). If your team already knows NestJS, nestrs gives you the same mental model with Rust's performance and safety guarantees.
 
 <Note>
-**nestrs is 1.0.** The public API follows semantic versioning — breaking changes only ship in a new major version — and the public API surface of the core crates is snapshot-tested in CI, so accidental breaking changes are caught before a release lands.
+**nestrs is 1.2.** The public API follows semantic versioning — breaking changes only ship in a new major version — and the public API surface of the core crates is snapshot-tested in CI, so accidental breaking changes are caught before a release lands. 1.2 adds `#[intersection_type]`, Redis sessions (`session-redis`), Mongo `for_root_async` / `MongoService::model`, live `nestrs-cli repl live`, and MCP tool dispatch.
 </Note>
 
 ## Why nestrs exists
@@ -86,7 +86,7 @@ async fn main() {
     `#[get]`, `#[post]`, `#[put]`, `#[delete]`, and `#[patch]` decorators on handler functions inside a `#[routes]` impl block.
   </Card>
   <Card title="DTO validation" icon="shield-check" href="/guides/validation">
-    `#[dto]` + `#[IsEmail]`, `#[Length]`, and other validation macros powered by the `validator` crate.
+    `#[dto]` + `#[IsEmail]`, `#[Length]`, mapped types (`#[partial_type]`, `#[omit_type]`, `#[pick_type]`, `#[intersection_type]`), powered by the `validator` crate.
   </Card>
   <Card title="Middleware pipeline" icon="layer-group" href="/concepts/middleware-pipeline">
     Tower middleware layers — CORS, rate limiting, request IDs, tracing, and compression — applied through the `NestApplication` builder.
@@ -120,7 +120,14 @@ nestrs is a thin façade over a set of focused crates. You can depend on them in
 | [`nestrs-openapi`](https://crates.io/crates/nestrs-openapi) | OpenAPI spec generation and Swagger UI |
 | [`nestrs-microservices`](https://crates.io/crates/nestrs-microservices) | Transport adapters: NATS, Redis, Kafka, MQTT, RabbitMQ, gRPC |
 | [`nestrs-prisma`](https://crates.io/crates/nestrs-prisma) | Prisma-oriented database module |
-| [`nestrs-scaffold`](https://crates.io/crates/nestrs-scaffold) | CLI — install with `cargo install nestrs-scaffold`, binary name `nestrs` |
+| [`nestrs-mcp`](https://crates.io/crates/nestrs-mcp) | Model Context Protocol server |
+| [`nestrs-mongodb`](https://crates.io/crates/nestrs-mongodb) | MongoDB adapter (`MongoModule`, `MongoRepository`) |
+| [`nestrs-http`](https://crates.io/crates/nestrs-http) | Outbound HTTP client |
+| [`nestrs-throttle`](https://crates.io/crates/nestrs-throttle) | Per-route rate limits (`ThrottlerGuard`; umbrella feature `throttler`) |
+| [`nestrs-health`](https://crates.io/crates/nestrs-health) | Liveness / readiness indicators |
+| [`nestrs-security`](https://crates.io/crates/nestrs-security) | Auth helpers, helmet headers, CSRF |
+| [`nestrs-oauth2`](https://crates.io/crates/nestrs-oauth2) | OAuth2 client, resource server, `OAuth2Guard` |
+| [`nestrs-scaffold`](https://crates.io/crates/nestrs-scaffold) | CLI — install with `cargo install nestrs-scaffold`, binary name `nestrs-cli` |
 
 <Tip>
   You rarely need to add these crates directly. Enable the corresponding feature flag on `nestrs` in your `Cargo.toml` and the framework activates the right integration. See [Installation](/installation) for the full feature flag reference.

@@ -45,7 +45,7 @@ not need to change their imports.
 nestrs-security = "1.0"
 
 # CSRF middleware (pulls in tower-cookies + subtle):
-nestrs-security = { version = "1.0", features = ["csrf"] }
+nestrs-security = { version = "1.2.0", features = ["csrf"] }
 ```
 
 ## Reuse from the umbrella
@@ -54,7 +54,7 @@ Every symbol is re-exported at the same path on the `nestrs` crate behind the
 **`security`** feature (default for `nestrs` is no security — opt in):
 
 ```toml
-nestrs = { version = "1.0", features = ["security", "csrf"] }
+nestrs = { version = "1.2.0", features = ["security", "csrf"] }
 ```
 
 `nestrs::parse_authorization_bearer`, `nestrs::BearerToken`, `nestrs::HelmetConfig`,

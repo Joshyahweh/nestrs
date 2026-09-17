@@ -3,7 +3,7 @@
 Mongoose-style MongoDB adapter for the [nestrs](https://crates.io/crates/nestrs) framework — the Rust equivalent of [`@nestjs/mongoose`](https://docs.nestjs.com/techniques/mongodb).
 
 ```rust,ignore
-use nestrs_mongodb::{MongoModule, MongoService, Document, MongoRepository};
+use nestrs_mongodb::{MongoModule, MongoService, MongoOptions, Document, MongoRepository};
 use bson::oid::ObjectId;
 use serde::{Serialize, Deserialize};
 
@@ -24,16 +24,32 @@ struct User {
 #[tokio::main]
 async fn main() {
     MongoModule::for_root("mongodb://127.0.0.1:27017");
+    MongoModule::for_feature("app");
     let svc = MongoService::new();
-    let users: MongoRepository<User> = svc.repository("app");
-    users.insert_one(User { _id: None, email: "ada@example.com".into(), name: "Ada".into(), created_at: None, updated_at: None }).await.unwrap();
+    let users: MongoRepository<User> = MongoRepository::for_feature(&svc).await.unwrap();
+    let mut doc = User {
+        _id: None,
+        email: "ada@example.com".into(),
+        name: "Ada".into(),
+        created_at: None,
+        updated_at: None,
+    };
+    users.insert_one(&mut doc).await.unwrap();
 }
 ```
 
 ## What you get
 
-- `MongoModule::for_root(uri)` — global singleton client + named-database service.
-- `MongoService` — async client / database / ping / list-databases helpers, ready to inject.
+- `MongoModule::for_root(uri)` / `for_root_with_options` / `for_root_async` — global singleton client + named-database service.
+
+```rust,ignore
+MongoModule::for_root_async(|| async {
+    Ok(MongoOptions::new(std::env::var("MONGO_URI")?))
+})
+.await?;
+let users = svc.model::<User>().await?;
+```
+- `MongoService` — async client / database / ping / list-databases helpers, plus `model::<T>()` (`@InjectModel` analogue), ready to inject.
 - `Document` derive macro + `#[schema(...)]` / `#[prop(...)]` attributes for typed Mongoose-style schemas (collection name, indexes, defaults, renames, refs).
 - `MongoRepository<T>` — typed CRUD wrapper over a `Collection<T>`: `find_by_id`, `find_one`, `find`, `insert_one`, `insert_many`, `update_one`, `update_many`, `replace_one`, `delete_one`, `delete_many`, `count_documents`, `find_one_and_*`.
 - `MongoOptions` builder for non-default URIs (app name, timeouts, direct-connection, replica-set).

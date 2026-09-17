@@ -2,7 +2,7 @@
 //!
 //! The shape of this module is intentionally minimal so it can live in
 //! `nestrs-core` without pulling axum's response types. Platform-specific
-//! helpers ([`crate::client_ip::ClientIp`] extractor, [`crate::client_ip::ClientIpMissing`]
+//! helpers (`nestrs::client_ip::ClientIp` extractor, `nestrs::client_ip::ClientIpMissing`
 //! rejection) stay in `nestrs/src/client_ip.rs`, which re-exports the
 //! shared pieces from here.
 //!
@@ -112,7 +112,7 @@ pub fn best_effort_client_ip(
 /// a transport without socket metadata). Every such request lands in ONE
 /// shared `unknown` bucket, coupling the rate limits of unrelated clients —
 /// so callers typically log when this fallback fires (see
-/// [`nestrs::client_ip::rate_limit_key_ip`] for the wrapper that does so).
+/// `nestrs::client_ip::rate_limit_key_ip` for the wrapper that does so).
 pub fn rate_limit_key_ip_or_unknown(
     headers: &HeaderMap,
     extensions: &Extensions,
@@ -166,8 +166,8 @@ pub fn trusted_hops_from_parts(parts: &Parts, fallback: Option<u16>) -> Option<u
 #[cfg(test)]
 mod tests {
     use super::{
-        best_effort_client_ip, rate_limit_key_ip, trusted_hops_from_parts, TrustedProxyHops,
-        X_FORWARDED_FOR, X_REAL_IP,
+        best_effort_client_ip, rate_limit_key_ip_or_unknown, trusted_hops_from_parts,
+        TrustedProxyHops, X_FORWARDED_FOR, X_REAL_IP,
     };
     use axum::extract::connect_info::{ConnectInfo, MockConnectInfo};
     use axum::http::{Extensions, HeaderMap, HeaderValue};
@@ -303,7 +303,7 @@ mod tests {
         extensions.insert(MockConnectInfo(SocketAddr::from(([203, 0, 113, 9], 443))));
 
         assert_eq!(
-            rate_limit_key_ip(&HeaderMap::new(), &extensions, None),
+            rate_limit_key_ip_or_unknown(&HeaderMap::new(), &extensions, None),
             "203.0.113.9"
         );
     }
@@ -311,20 +311,20 @@ mod tests {
     #[test]
     fn rate_limit_key_ip_falls_back_to_unknown_when_unresolvable() {
         assert_eq!(
-            rate_limit_key_ip(&HeaderMap::new(), &Extensions::new(), None),
+            rate_limit_key_ip_or_unknown(&HeaderMap::new(), &Extensions::new(), None),
             "unknown"
         );
         let mut headers = HeaderMap::new();
         headers.insert(&X_FORWARDED_FOR, HeaderValue::from_static("not-an-ip"));
         assert_eq!(
-            rate_limit_key_ip(&headers, &Extensions::new(), Some(1)),
+            rate_limit_key_ip_or_unknown(&headers, &Extensions::new(), Some(1)),
             "unknown"
         );
     }
 
     #[test]
     fn trusted_hops_from_parts_prefers_extension_then_fallback() {
-        let mut parts = axum::http::Request::new(()).into_parts();
+        let mut parts = axum::http::Request::new(()).into_parts().0;
         assert_eq!(trusted_hops_from_parts(&parts, None), None);
         assert_eq!(trusted_hops_from_parts(&parts, Some(0)), Some(0));
 

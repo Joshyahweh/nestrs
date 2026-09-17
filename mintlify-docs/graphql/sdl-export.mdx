@@ -73,9 +73,15 @@ Flags:
   `Authorization: Bearer <token>` header.
 - `--federation` (default) — query `{_service{sdl}}` (Apollo
   Federation v2 introspection).
-- `--no-federation` — query standard introspection instead. Note:
-  standard introspection does not return SDL directly; this mode
-  exists for live-schema validation, not for SDL export.
+- `--no-federation` — query standard introspection instead.
+
+<Warning>
+`--no-federation` does **not** return SDL. Standard GraphQL
+introspection is a type graph, not Schema Definition Language. Use it
+only to confirm the endpoint is alive. For SDL, use build-time
+`export_schema_sdl` / `export_sdl_to_file`, or keep `--federation`
+against a subgraph that implements `_service { sdl }`.
+</Warning>
 
 ## When to use which
 

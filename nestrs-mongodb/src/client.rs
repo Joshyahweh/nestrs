@@ -1,26 +1,34 @@
 //! MongoDB client lifecycle: connection options, module setup, and the
 //! injectable `MongoService`.
 //!
-//! This module ships the Phase B surface: connection configuration, the
-//! `MongoModule::for_root` static setter, and a `MongoService` that callers
+//! This module ships the connection configuration, the
+//! `MongoModule::for_root` / [`MongoModule::for_root_async`] /
+//! [`MongoModule::for_feature`] setters, and a `MongoService` that callers
 //! can resolve out of the DI container. The typed `MongoRepository<T>`
 //! CRUD wrapper lives in [`crate::repository`].
+//!
+//! `MongoService::model::<T>()` is the Rust analogue of NestJS
+//! `@InjectModel(T)` — it resolves a typed repository from the
+//! `for_feature` database name.
 //!
 //! ## Example
 //!
 //! ```ignore
 //! use nestrs_mongodb::{MongoModule, MongoService};
 //!
-//! fn main() {
+//! #[tokio::main]
+//! async fn main() {
 //!     MongoModule::for_root("mongodb://127.0.0.1:27017");
 //!     let svc = MongoService::new();
-//!     let db = svc.database("app");
+//!     let db = svc.database("app").await?;
 //! }
 //! ```
 
 use crate::error::{MongoError, Result};
 use mongodb::options::ClientOptions;
 use mongodb::{Client, Database};
+use nestrs_core::{Injectable, Module, ProviderRegistry};
+use std::any::TypeId;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::OnceCell;
@@ -34,7 +42,7 @@ use tokio::sync::OnceCell;
 ///
 /// Mirrors the relevant subset of `mongodb::options::ClientOptions` so
 /// drivers can pass the constructed `ClientOptions` straight through.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MongoOptions {
     /// Full connection string (`mongodb://…` or `mongodb+srv://…` when the
     /// `dns-resolver` feature is enabled).
@@ -52,6 +60,32 @@ pub struct MongoOptions {
     /// Default database name. `MongoService::default_database()` reads this
     /// so callers don't have to thread the db name through every call.
     pub default_database: Option<String>,
+}
+
+/// Redact `user:pass@` from a connection URI so `Debug` / logs cannot
+/// leak credentials. URIs without userinfo are returned unchanged.
+fn redact_userinfo(uri: &str) -> String {
+    let Some(scheme_end) = uri.find("://") else {
+        return uri.to_string();
+    };
+    let rest = &uri[scheme_end + 3..];
+    let Some(at) = rest.find('@') else {
+        return uri.to_string();
+    };
+    format!("{}***@{}", &uri[..=scheme_end + 2], &rest[at + 1..])
+}
+
+impl std::fmt::Debug for MongoOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MongoOptions")
+            .field("uri", &redact_userinfo(&self.uri))
+            .field("app_name", &self.app_name)
+            .field("server_selection_timeout", &self.server_selection_timeout)
+            .field("connect_timeout", &self.connect_timeout)
+            .field("direct_connection", &self.direct_connection)
+            .field("default_database", &self.default_database)
+            .finish()
+    }
 }
 
 impl MongoOptions {
@@ -127,7 +161,7 @@ impl MongoOptions {
 /// to use a `OnceLock<String>` for the URI and a `OnceCell<Client>` for the
 /// resolved driver client).
 static MONGO_OPTIONS: OnceLock<MongoOptions> = OnceLock::new();
-static MONGO_CLIENT: OnceCell<Result<Arc<Client>>> = OnceCell::const_new();
+static MONGO_CLIENT: OnceCell<Arc<Client>> = OnceCell::const_new();
 
 /// Default database name registered by `MongoModule::for_feature(db_name)`.
 /// Mirrors MongooseModule's `forFeature` registration key — apps list the
@@ -137,7 +171,7 @@ static MONGO_CLIENT: OnceCell<Result<Arc<Client>>> = OnceCell::const_new();
 static FEATURE_DB: OnceLock<String> = OnceLock::new();
 
 async fn ensure_client() -> Result<Arc<Client>> {
-    let cell = MONGO_CLIENT
+    let client = MONGO_CLIENT
         .get_or_try_init(|| async {
             let opts = MONGO_OPTIONS
                 .get()
@@ -149,11 +183,7 @@ async fn ensure_client() -> Result<Arc<Client>> {
                 .map_err(MongoError::from)
         })
         .await?;
-    cell.clone().map_err(|e| match e {
-        // Avoid double-wrapping: the OnceCell stores the Err directly.
-        MongoError::Driver(e) => MongoError::Driver(e),
-        other => other,
-    })
+    Ok(client.clone())
 }
 
 /// Injectable MongoDB service.
@@ -169,8 +199,8 @@ pub struct MongoService;
 
 impl MongoService {
     /// Construct a service handle. The handle is cheap (it's a unit
-    /// wrapper); the heavy lifting lives in the `Arc<Client>` singleton
-    /// built by [`ensure_client`].
+    /// wrapper); the heavy lifting lives in the process-wide `Arc<Client>`
+    /// singleton this service resolves on first use.
     pub fn new() -> Self {
         Self
     }
@@ -194,11 +224,9 @@ impl MongoService {
     /// Convenience: resolve the default database (if one was configured) and
     /// surface a clear error otherwise.
     pub async fn default_database(&self) -> Result<Database> {
-        let name = self
-            .default_database_name()
-            .ok_or_else(|| MongoError::InvalidArgument(
-                "no default database configured on MongoOptions".into(),
-            ))?;
+        let name = self.default_database_name().ok_or_else(|| {
+            MongoError::InvalidArgument("no default database configured on MongoOptions".into())
+        })?;
         self.database(&name).await
     }
 
@@ -206,9 +234,7 @@ impl MongoService {
     /// successful round-trip; surfaces driver errors as `MongoError::Driver`.
     pub async fn ping(&self) -> Result<()> {
         let c = ensure_client().await?;
-        c.list_database_names()
-            .await
-            .map_err(MongoError::from)?;
+        c.list_database_names().await.map_err(MongoError::from)?;
         Ok(())
     }
 
@@ -216,6 +242,19 @@ impl MongoService {
     pub async fn list_databases(&self) -> Result<Vec<String>> {
         let c = ensure_client().await?;
         c.list_database_names().await.map_err(MongoError::from)
+    }
+
+    /// NestJS `@InjectModel(T)` analogue: resolve a typed
+    /// [`crate::repository::MongoRepository<T>`] from the database name
+    /// registered by [`MongoModule::for_feature`].
+    ///
+    /// ```ignore
+    /// let users: MongoRepository<User> = svc.model().await?;
+    /// ```
+    pub async fn model<T: crate::schema::Schema>(
+        &self,
+    ) -> Result<crate::repository::MongoRepository<T>> {
+        crate::repository::MongoRepository::for_feature(self).await
     }
 }
 
@@ -225,14 +264,20 @@ impl std::fmt::Debug for MongoService {
     }
 }
 
+impl Injectable for MongoService {
+    fn construct(_registry: &ProviderRegistry) -> Arc<Self> {
+        Arc::new(Self::new())
+    }
+}
+
 /// The static module that owns the connection URI. Mirrors the umbrella's
 /// pre-extraction `MongoModule` shape: `MongoModule::for_root(uri)` is the
 /// pre-app config step, `MongoModule` itself is what you list under
 /// `#[module(imports = …)]`.
 ///
-/// Phase E will add `for_root_async` (reads the URI from a
-/// `ConfigService` snapshot) and `for_feature` (registers typed
-/// `MongoRepository<T>` instances for DI).
+/// Async boot uses [`MongoModule::for_root_async`]. Typed repositories
+/// register via [`MongoModule::for_feature`] and resolve through
+/// [`MongoService::model`] or [`crate::repository::MongoRepository::for_feature`].
 pub struct MongoModule;
 
 impl MongoModule {
@@ -256,10 +301,30 @@ impl MongoModule {
 
     /// Configuration-driven variant: takes a fully-built [`MongoOptions`]
     /// (typically constructed from a `ConfigService` snapshot). Like
-    /// [`for_root`], must be called once before the app starts.
+    /// [`Self::for_root`], must be called once before the app starts.
     pub fn for_root_with_options(opts: MongoOptions) -> Self {
         let _ = MONGO_OPTIONS.set(opts);
         Self
+    }
+
+    /// NestJS `MongooseModule.forRootAsync` analogue: run an async factory
+    /// that builds [`MongoOptions`] (vault lookup, `ConfigService` snapshot,
+    /// etc.) then register the result. Must complete before
+    /// `NestFactory::create`.
+    ///
+    /// ```ignore
+    /// MongoModule::for_root_async(|| async {
+    ///     Ok(MongoOptions::new(std::env::var("MONGO_URI")?))
+    /// })
+    /// .await?;
+    /// ```
+    pub async fn for_root_async<F, Fut>(factory: F) -> Result<Self>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<MongoOptions>>,
+    {
+        let opts = factory().await?;
+        Ok(Self::for_root_with_options(opts))
     }
 
     /// Feature-registration step (NestJS MongooseModule `forFeature`
@@ -302,5 +367,43 @@ impl MongoModule {
 impl std::fmt::Debug for MongoModule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MongoModule").finish()
+    }
+}
+
+impl Module for MongoModule {
+    fn build() -> (ProviderRegistry, axum::Router) {
+        let mut registry = ProviderRegistry::new();
+        registry.register_use_value::<MongoService>(Arc::new(MongoService::new()));
+        (registry, axum::Router::new())
+    }
+
+    fn exports() -> Vec<TypeId> {
+        vec![TypeId::of::<MongoService>()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_uri_userinfo() {
+        let opts = MongoOptions::new("mongodb://ada:s3cret@localhost:27017/app");
+        let dbg = format!("{opts:?}");
+        assert!(
+            !dbg.contains("s3cret"),
+            "password must not appear in Debug: {dbg}"
+        );
+        assert!(
+            dbg.contains("***@localhost:27017/app"),
+            "userinfo should be redacted, got: {dbg}"
+        );
+    }
+
+    #[test]
+    fn debug_leaves_uris_without_userinfo_intact() {
+        let opts = MongoOptions::new("mongodb://127.0.0.1:27017");
+        let dbg = format!("{opts:?}");
+        assert!(dbg.contains("mongodb://127.0.0.1:27017"));
     }
 }

@@ -6,14 +6,14 @@ description: "ScheduleModule runs cron jobs and interval tasks inside nestrs. De
 `ScheduleModule` brings recurring background tasks into your nestrs application without relying on the OS cron daemon or an external scheduler. It is backed by `tokio-cron-scheduler` and starts automatically when your app calls `listen`. Declare task handlers with `#[cron("...")]` or `#[interval(ms)]` on a `#[schedule_routes]` impl block, register the service as a provider, and import `ScheduleModule::for_root()`.
 
 <Note>
-`ScheduleModule` is designed for app-local tasks — work that belongs in the same process as your HTTP server. It is not a distributed scheduler. For durable, multi-instance job queues, see `QueuesModule`.
+`ScheduleModule` is designed for app-local tasks — work that belongs in the same process as your HTTP server. It is not a distributed scheduler. For durable, multi-instance job queues, enable **`queues-redis`** on `QueuesModule` (Redis `LPUSH` / `BRPOP`). That backend is Bull-style (lists + JSON envelopes), not the BullMQ wire protocol.
 </Note>
 
 ## Enable the feature
 
 ```toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["schedule"] }
+nestrs = { version = "1.2.0", features = ["schedule"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

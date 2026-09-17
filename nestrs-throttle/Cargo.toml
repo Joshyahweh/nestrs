@@ -1,5 +1,5 @@
 [package]
-name = "nestrs-throttler"
+name = "nestrs-throttle"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ keywords = ["throttler", "rate-limit", "ratelimit", "nest", "axum"]
 categories = ["api-bindings", "web-programming"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.0.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.2.0" }
 axum.workspace = true
 tokio.workspace = true
 async-trait = "0.1"

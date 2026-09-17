@@ -9,6 +9,7 @@
 //! `mongo-dns` flags mirror the underlying crate's feature flags.
 
 #[cfg(feature = "mongo")]
+#[allow(unused_imports)]
 pub use nestrs_mongodb::{
     client::{MongoModule, MongoOptions, MongoService},
     error::{MongoError, Result as MongoResult},

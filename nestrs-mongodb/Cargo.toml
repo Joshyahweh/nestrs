@@ -11,16 +11,13 @@ keywords = ["mongodb", "mongoose", "orm", "nest", "axum"]
 categories = ["database", "api-bindings", "web-programming"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.0.0" }
-nestrs-macros = { path = "../nestrs-macros", version = "1.0.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.2.0" }
+nestrs-macros = { path = "../nestrs-macros", version = "1.2.0" }
 mongodb = { version = "3", default-features = false, features = ["compat-3-0-0", "rustls-tls"] }
 bson = "2"
-async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "1"
+axum.workspace = true
 tokio.workspace = true
-tracing = "0.1"
 futures = "0.3"
 
 [dev-dependencies]

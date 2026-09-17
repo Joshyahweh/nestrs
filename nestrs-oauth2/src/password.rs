@@ -53,18 +53,13 @@ use std::fmt;
 use thiserror::Error;
 
 /// Password-hashing backend selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Backend {
     /// Bcrypt (legacy). Use only for hash migration.
     Bcrypt,
     /// Argon2id (default). Modern OWASP recommendation.
+    #[default]
     Argon2,
-}
-
-impl Default for Backend {
-    fn default() -> Self {
-        Backend::Argon2
-    }
 }
 
 impl fmt::Display for Backend {
@@ -231,10 +226,7 @@ impl PasswordHasher for Argon2Hasher {
 #[cfg(feature = "password-bcrypt")]
 fn bcrypt_hash(plain: &str) -> Result<String, HashError> {
     use bcrypt::{hash as bcrypt_hash_inner, DEFAULT_COST};
-    bcrypt_hash_inner(plain, DEFAULT_COST).map_err(|e| match e {
-        bcrypt::BcryptError::InvalidPassword(_) => HashError::InvalidPassword(e.to_string()),
-        _ => HashError::InvalidHash(e.to_string()),
-    })
+    bcrypt_hash_inner(plain, DEFAULT_COST).map_err(|e| HashError::InvalidHash(e.to_string()))
 }
 
 #[cfg(feature = "password-bcrypt")]
@@ -254,10 +246,10 @@ fn bcrypt_verify(plain: &str, hash: &str) -> Result<bool, HashError> {
 #[cfg(feature = "password-argon2")]
 fn argon2_hash(plain: &str) -> Result<String, HashError> {
     use argon2::{
-        password_hash::{PasswordHasher as _, SaltString},
+        password_hash::{PasswordHasher as _, SaltString, rand_core::OsRng},
         Argon2,
     };
-    let salt = SaltString::generate(&mut argon2_rng()).map_err(|_| HashError::SaltGeneration)?;
+    let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(plain.as_bytes(), &salt)
         .map(|h| h.to_string())
@@ -279,11 +271,6 @@ fn argon2_verify(plain: &str, hash: &str) -> Result<bool, HashError> {
         .is_ok())
 }
 
-#[cfg(feature = "password-argon2")]
-fn argon2_rng() -> impl argon2::password_hash::rand_core::RngCore {
-    use argon2::password_hash::rand_core::OsRng;
-    OsRng
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -307,16 +294,8 @@ fn prefix_of(hash: &str) -> String {
 fn bcrypt_round_trip() {
     let h = hash_with("hunter2", Backend::Bcrypt).expect("bcrypt hash");
     assert!(h.starts_with("$2"), "bcrypt hash must start with $2: {h}");
-    assert_eq!(
-        verify_with("hunter2", &h, Backend::Bcrypt),
-        Ok(true),
-        "correct password must verify"
-    );
-    assert_eq!(
-        verify_with("wrong", &h, Backend::Bcrypt),
-        Ok(false),
-        "wrong password must not verify"
-    );
+    assert!(verify_with("hunter2", &h, Backend::Bcrypt).expect("verify ok"));
+    assert!(!verify_with("wrong", &h, Backend::Bcrypt).expect("verify ok"));
 }
 
 #[cfg(all(test, feature = "password-argon2"))]
@@ -327,16 +306,8 @@ fn argon2_round_trip() {
         h.starts_with("$argon2"),
         "argon2 hash must start with $argon2: {h}"
     );
-    assert_eq!(
-        verify_with("hunter2", &h, Backend::Argon2),
-        Ok(true),
-        "correct password must verify"
-    );
-    assert_eq!(
-        verify_with("wrong", &h, Backend::Argon2),
-        Ok(false),
-        "wrong password must not verify"
-    );
+    assert!(verify_with("hunter2", &h, Backend::Argon2).expect("verify ok"));
+    assert!(!verify_with("wrong", &h, Backend::Argon2).expect("verify ok"));
 }
 
 #[cfg(all(test, feature = "password"))]
@@ -344,10 +315,10 @@ fn argon2_round_trip() {
 fn verify_any_dispatches_on_prefix() {
     let bcrypt = hash_with("hunter2", Backend::Bcrypt).expect("bcrypt");
     let argon2 = hash_with("hunter2", Backend::Argon2).expect("argon2");
-    assert_eq!(verify_any("hunter2", &bcrypt), Ok(true));
-    assert_eq!(verify_any("hunter2", &argon2), Ok(true));
-    assert_eq!(verify_any("wrong", &bcrypt), Ok(false));
-    assert_eq!(verify_any("wrong", &argon2), Ok(false));
+    assert!(verify_any("hunter2", &bcrypt).expect("verify ok"));
+    assert!(verify_any("hunter2", &argon2).expect("verify ok"));
+    assert!(!verify_any("wrong", &bcrypt).expect("verify ok"));
+    assert!(!verify_any("wrong", &argon2).expect("verify ok"));
 }
 
 #[cfg(all(test, feature = "password"))]

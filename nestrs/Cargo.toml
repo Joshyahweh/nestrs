@@ -70,8 +70,13 @@ security = []
 ## Double-submit CSRF middleware (`csrf_double_submit_middleware` +
 ## `CsrfProtectionConfig`) on top of `security` — pulls in `tower-cookies`
 ## and `subtle` via the underlying crate.
-csrf = ["security", "cookies", "dep:subtle"]
+csrf = ["security", "cookies", "dep:subtle", "nestrs-security/csrf"]
 session = ["cookies", "dep:tower-sessions"]
+## Redis-backed `tower_sessions::SessionStore` (`RedisSessionStore` +
+## `NestApplication::use_session_redis`). Implies `session` / cookies.
+## Production counterpart of in-memory sessions; URL userinfo is redacted
+## in `Debug`.
+session-redis = ["session", "dep:redis", "dep:time"]
 mvc = ["dep:minijinja"]
 files = ["dep:tokio-util"]
 otel = [
@@ -125,32 +130,36 @@ authn-oauth2 = ["authn", "oauth2"]
 admin = ["dep:subtle"]
 ## Clears `nestrs-core` global registries in tests (`RouteRegistry`, `MetadataRegistry`). See `STABILITY.md`.
 test-hooks = ["nestrs-core/test-hooks"]
+## Server-Sent Events wrapper (`SseResponse`, `IntoSseEvent`,
+## `serialize_to_event`). Forwards `nestrs-core/sse` so apps can enable
+## SSE on the umbrella crate instead of depending on `nestrs-core`
+## directly.
+sse = ["nestrs-core/sse"]
 ## Route throttling (`#[throttle(n, "per")]` / `#[skip_throttle]`); provides
 ## `ThrottlerModule::register`, `ThrottlerGuard`, and the global middleware
 ## installed by `NestApplication::use_throttler`. Underlying crate is
-## `nestrs-throttler`; the main crate re-exports its public types.
-throttler = ["dep:nestrs-throttler"]
+## `nestrs-throttle`; the main crate re-exports its public types.
+throttler = ["dep:nestrs-throttle"]
 ## Pulls in the Redis backend (`ThrottlerBackendKind::Redis` +
 ## `RedisThrottler`) on top of `throttler`. Same flag name as the crate-level
 ## `cache-redis` so feature surfaces stay symmetric.
-throttler-redis = ["throttler", "nestrs-throttler/cache-redis"]
+throttler-redis = ["throttler", "nestrs-throttle/cache-redis"]
 
 [dependencies]
 axum = { workspace = true, features = ["multipart", "macros"] }
 tokio.workspace = true
-nestrs-core = { version = "1.0.0", path = "../nestrs-core" }
-nestrs-macros = { version = "1.0.0", path = "../nestrs-macros" }
-nestrs-microservices = { version = "1.0.0", path = "../nestrs-microservices", optional = true }
-nestrs-events = { version = "1.0.0", path = "../nestrs-events", optional = true }
-nestrs-ws = { version = "1.0.0", path = "../nestrs-ws", optional = true }
-nestrs-graphql = { version = "1.0.0", path = "../nestrs-graphql", optional = true }
-nestrs-openapi = { version = "1.0.0", path = "../nestrs-openapi", optional = true }
-nestrs-security = { version = "1.0.0", path = "../nestrs-security", default-features = false }
-nestrs-throttler = { version = "1.0.0", path = "../nestrs-throttler", optional = true, default-features = false }
-nestrs-health = { version = "1.0.0", path = "../nestrs-health", default-features = false }
-nestrs-mongodb = { version = "1.0.0", path = "../nestrs-mongodb", optional = true, default-features = false }
-nestrs-drizzle = { version = "1.0.0", path = "../nestrs-drizzle", optional = true, default-features = false }
-nestrs-http = { version = "1.0.0", path = "../nestrs-http", optional = true, default-features = false }
+nestrs-core = { version = "1.2.0", path = "../nestrs-core" }
+nestrs-macros = { version = "1.2.0", path = "../nestrs-macros" }
+nestrs-microservices = { version = "1.2.0", path = "../nestrs-microservices", optional = true }
+nestrs-events = { version = "1.2.0", path = "../nestrs-events", optional = true }
+nestrs-ws = { version = "1.2.0", path = "../nestrs-ws", optional = true }
+nestrs-graphql = { version = "1.2.0", path = "../nestrs-graphql", optional = true }
+nestrs-openapi = { version = "1.2.0", path = "../nestrs-openapi", optional = true }
+nestrs-security = { version = "1.2.0", path = "../nestrs-security", default-features = false }
+nestrs-throttle = { version = "1.2.0", path = "../nestrs-throttle", optional = true, default-features = false }
+nestrs-health = { version = "1.2.0", path = "../nestrs-health", default-features = false }
+nestrs-mongodb = { version = "1.2.0", path = "../nestrs-mongodb", optional = true, default-features = false }
+nestrs-http = { version = "1.2.0", path = "../nestrs-http", optional = true, default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1"
@@ -202,13 +211,14 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 serde_qs = { version = "0.13", optional = true }
 tower-cookies = { version = "0.10", optional = true }
 subtle = { version = "2.6", optional = true }
-tower-sessions = { version = "0.10", default-features = false, features = ["memory-store"], optional = true }
+tower-sessions = { version = "0.10", default-features = false, features = ["memory-store", "axum-core"], optional = true }
+time = { version = "0.3", optional = true }
 minijinja = { version = "2", optional = true, default-features = false, features = ["serde"] }
 tokio-util = { version = "0.7", features = ["io"], optional = true }
 jsonwebtoken = { workspace = true, optional = true }
 argon2 = { workspace = true, optional = true, features = ["rand"] }
 getrandom = { version = "0.2", optional = true }
-nestrs-oauth2 = { version = "1.0.0", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
+nestrs-oauth2 = { version = "1.2.0", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
 
 [dev-dependencies]
 async-graphql = "=7.0.17"

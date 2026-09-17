@@ -5,6 +5,8 @@
 //! via `tower::ServiceExt::oneshot`. Redis cross-instance tests are gated on
 //! `NESTRS_TEST_REDIS_URL` (no mini-redis in CI).
 
+#![cfg(feature = "throttler")]
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
@@ -232,6 +234,7 @@ async fn module_register_publishes_throttler_service() {
     let service: Arc<ThrottlerService> = module.registry.get::<ThrottlerService>();
     let outcome = service
         .check(
+            "module_register",
             "k1",
             &ThrottleSpec {
                 limit: 1,
@@ -242,6 +245,7 @@ async fn module_register_publishes_throttler_service() {
     assert!(matches!(outcome, nestrs::ThrottleOutcome::Allowed { .. }));
     let outcome = service
         .check(
+            "module_register",
             "k1",
             &ThrottleSpec {
                 limit: 1,

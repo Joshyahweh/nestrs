@@ -35,8 +35,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nestrs = "1.0.0"
-nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
+nestrs = "1.2.0"
+nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-postgres"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -47,8 +47,8 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 ### A.2 Same stack + OpenAPI + JSON
 
 ```toml
-nestrs = { version = "1.0.0", features = ["openapi"] }
-nestrs-openapi = "1.0.0"
+nestrs = { version = "1.2.0", features = ["openapi"] }
+nestrs-openapi = "1.2.0"
 utoipa = { version = "5", features = ["axum_extras"] }
 ```
 
@@ -57,7 +57,7 @@ Wire **[OpenAPI](openapi-http.md)** on [`NestApplication`](appendix-api-cookbook
 ### A.3 MySQL variant (feature swap only)
 
 ```toml
-nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-mysql"] }
+nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-mysql"] }
 ```
 
 `DATABASE_URL` example: `mysql://user:pass@localhost:3306/mydb`
@@ -65,7 +65,7 @@ nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-mysql"] }
 ### A.4 SQLite local / CI (matches [`examples/hello-app`](../../examples/hello-app))
 
 ```toml
-nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-sqlite"] }
+nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-sqlite"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "sqlite"] }
 ```
 
@@ -283,7 +283,7 @@ curl -s "http://127.0.0.1:3000/api/v1/users/"
 
 The repository ships a full **end-to-end** example at:
 
-**[`nestrs-prisma/examples/quickstart.rs`](../../nestrs-prisma/examples/quickstart.rs)** (also on GitHub: `nestrs-prisma/examples/quickstart.rs` on tag **`v1.0.0`**).
+**[`nestrs-prisma/examples/quickstart.rs`](../../nestrs-prisma/examples/quickstart.rs)** (also on GitHub: `nestrs-prisma/examples/quickstart.rs` on tag **`v1.2.0`**).
 
 It demonstrates:
 
@@ -646,7 +646,7 @@ Expose **`GET /users?skip=&take=`** via **`ValidatedQuery`** and return **`Json<
 
 ```toml
 [dependencies]
-nestrs = { version = "1.0.0", features = ["mongo"] }
+nestrs = { version = "1.2.0", features = ["mongo"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 mongodb = "3"
 bson = "3"
@@ -773,7 +773,7 @@ docker run --name nestrs-mongo -p 27017:27017 -d mongo:7
 export MONGODB_URI="mongodb://127.0.0.1:27017"
 ```
 
-Use **`MongoModule::for_root`** with that URI (or **`mongodb://user:pass@host:27017/db?authSource=admin`** for Atlas-style URLs). For **`mongodb+srv://`** Atlas URIs, enable **`mongo-dns`** on **`nestrs`** as in **§ B.1**.
+Use **`MongoModule::for_root`** with that URI (or **`mongodb://user:pass@host:27017/db?authSource=admin`** for Atlas-style URLs). For vault / env factories, **`MongoModule::for_root_async`** must complete before **`NestFactory::create`**. Typed repositories: **`MongoService::model::<T>()`** after **`MongoModule::for_feature`**. For **`mongodb+srv://`** Atlas URIs, enable **`mongo-dns`** on **`nestrs`** as in **§ B.1**.
 
 ### B.9 Writes: `insert_one`, `replace_one`, `update_one`, `delete_one`
 
@@ -972,8 +972,8 @@ Then **`GET /:id`** can **`find_one`** into **`ProfileDoc`** and serialize **`id
 ### C.1 `Cargo.toml`
 
 ```toml
-nestrs = { version = "1.0.0", features = ["graphql"] }
-nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
+nestrs = { version = "1.2.0", features = ["graphql"] }
+nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-postgres"] }
 async-graphql = "=7.0.17"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -1258,7 +1258,7 @@ Keep **thin resolvers**; put transaction boundaries in a **`UserRepository`** `#
 ### D.1 `Cargo.toml`
 
 ```toml
-nestrs = { version = "1.0.0", features = ["graphql", "mongo"] }
+nestrs = { version = "1.2.0", features = ["graphql", "mongo"] }
 mongodb = "3"
 bson = "3"
 async-graphql = "=7.0.17"
@@ -1578,8 +1578,8 @@ Add **`#[derive(Debug, serde::Deserialize, serde::Serialize)]`** on **`ProfileDo
 ### E.1 `Cargo.toml`
 
 ```toml
-nestrs = { version = "1.0.0", features = ["microservices", "microservices-grpc"] }
-nestrs-prisma = { version = "1.0.0", features = ["sqlx", "sqlx-postgres"] }
+nestrs = { version = "1.2.0", features = ["microservices", "microservices-grpc"] }
+nestrs-prisma = { version = "1.2.0", features = ["sqlx", "sqlx-postgres"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -1960,16 +1960,16 @@ All transports deserialize the same **`WireRequest`** JSON (**[`wire`](https://d
 
 ```toml
 # NATS micro listener + NATS client in another crate
-nestrs = { version = "1.0.0", features = ["microservices", "microservices-nats"] }
+nestrs = { version = "1.2.0", features = ["microservices", "microservices-nats"] }
 
 # Redis micro listener
-nestrs = { version = "1.0.0", features = ["microservices", "microservices-redis"] }
+nestrs = { version = "1.2.0", features = ["microservices", "microservices-redis"] }
 
 # RabbitMQ work-queue listener
-nestrs = { version = "1.0.0", features = ["microservices", "microservices-rabbitmq"] }
+nestrs = { version = "1.2.0", features = ["microservices", "microservices-rabbitmq"] }
 
 # Kafka transport (client) — enable kafka on nestrs-microservices transitively
-nestrs = { version = "1.0.0", features = ["microservices", "microservices-kafka"] }
+nestrs = { version = "1.2.0", features = ["microservices", "microservices-kafka"] }
 ```
 
 Match **exactly one** broker feature set per binary unless you know how layers compose.

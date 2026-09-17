@@ -8,11 +8,20 @@ description: "Typed SQL query builder for nestrs — DrizzleModule, DrizzleServi
 is the chosen query builder. The crate re-exports `drizzle_orm::*` at the
 crate root and adds the boot-time module / service shape NestJS apps expect.
 
+<Warning>
+**Not a workspace member in 1.2.0.** Upstream `drizzle-orm 0.36` is not
+published on crates.io, and crates.io's `drizzle` 0.1.x requires MSRV 1.95
+(workspace MSRV is 1.88). The `nestrs-drizzle/` directory stays on disk for
+re-introduction once a compatible crate publishes. Do not add it to
+workspace `members` until then. Use `database-sqlx` or `nestrs-prisma` for
+production SQL.
+</Warning>
+
 ## Install
 
 ```toml
 [dependencies]
-nestrs-drizzle = { version = "1.1", features = ["postgres"] }
+nestrs-drizzle = { version = "1.2.0", features = ["postgres"] }
 # or features = ["mysql"], features = ["sqlite"], or features = ["all"]
 ```
 

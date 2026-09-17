@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nestrs_cli::repl;
+use nestrs_scaffold::repl;
 
 fn unique_tmp_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -302,4 +302,35 @@ fn missing_path_errors_cleanly() {
         msg.contains("does not exist"),
         "missing-path error should explain: {msg}"
     );
+}
+
+#[test]
+fn parse_live_args_requires_url() {
+    let err = repl::parse_live_args(&[]).expect_err("url required");
+    assert!(err.contains("--url"), "{err}");
+}
+
+#[test]
+fn parse_live_args_rejects_unknown_option() {
+    let err = repl::parse_live_args(&[
+        "--url".to_string(),
+        "http://127.0.0.1:7777".to_string(),
+        "--nope".to_string(),
+    ])
+    .expect_err("unknown option");
+    assert!(err.contains("unknown option"), "{err}");
+}
+
+#[test]
+fn parse_live_args_accepts_url_and_format() {
+    let opts = repl::parse_live_args(&[
+        "--url".to_string(),
+        "http://127.0.0.1:7777".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ])
+    .expect("parse");
+    assert_eq!(opts.url, "http://127.0.0.1:7777");
+    assert_eq!(opts.format, "json");
+    assert!(opts.bearer.is_none());
 }

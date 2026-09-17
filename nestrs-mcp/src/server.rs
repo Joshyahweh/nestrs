@@ -78,13 +78,10 @@ impl std::fmt::Debug for NestrsMcpServer {
 
 impl NestrsMcpServer {
     pub fn new() -> Self {
-        // We don't aggregate sub-routers here because the rmcp router
-        // type is invariant in `Self`. Each `*Tools` struct is meant to
-        // be served as its own handler when the user wants one area;
-        // for the all-tools case, the binary spawns one server per
-        // area and the MCP client multiplexes. The top-level
-        // `NestrsMcpServer` exists so embedders (e.g. `nestrs-cli`) can
-        // mount a single default handler without picking an area.
+        // Area routers cannot be merged into this wrapper: rmcp's
+        // `ToolRouter<S>` is invariant in `S`. `list_tools` / `get_tool` /
+        // `call_tool` dispatch to the four area handlers instead (see
+        // `bundled_tools` / `dispatch_bundled_tool`).
         Self {
             tool_router: ToolRouter::<Self>::new(),
             #[cfg(feature = "authz")]
@@ -202,7 +199,8 @@ impl NestrsMcpServer {
 }
 
 /// The four area-specific servers. Each can be served on its own
-/// transport. The top-level `NestrsMcpServer` is a thin shim.
+/// transport. The top-level `NestrsMcpServer` is a thin shim that
+/// still dispatches every area tool from the stock binary.
 #[derive(Debug)]
 pub struct SubServers {
     pub introspection: IntrospectionTools,
@@ -211,10 +209,63 @@ pub struct SubServers {
     pub docs: DocsTools,
 }
 
+/// All tools registered on the four area handlers, in name order per
+/// area then concatenated. Used by the stock `NestrsMcpServer` because
+/// `ToolRouter<S>` cannot merge across handler types.
+pub fn bundled_tools() -> Vec<Tool> {
+    let mut tools = IntrospectionTools::tool_router().list_all();
+    tools.extend(RuntimeTools::tool_router().list_all());
+    tools.extend(ScaffoldTools::tool_router().list_all());
+    tools.extend(DocsTools::tool_router().list_all());
+    tools
+}
+
+fn bundled_tool(name: &str) -> Option<Tool> {
+    IntrospectionTools::tool_router()
+        .get(name)
+        .cloned()
+        .or_else(|| RuntimeTools::tool_router().get(name).cloned())
+        .or_else(|| ScaffoldTools::tool_router().get(name).cloned())
+        .or_else(|| DocsTools::tool_router().get(name).cloned())
+}
+
+async fn dispatch_bundled_tool(
+    request: CallToolRequestParams,
+    context: RequestContext<RoleServer>,
+) -> Result<CallToolResponse, ErrorData> {
+    let name = request.name.as_ref();
+    if IntrospectionTools::tool_router().get(name).is_some() {
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(
+            &IntrospectionTools,
+            request,
+            context,
+        );
+        return IntrospectionTools::tool_router().call(tcc).await;
+    }
+    if RuntimeTools::tool_router().get(name).is_some() {
+        let tcc =
+            rmcp::handler::server::tool::ToolCallContext::new(&RuntimeTools, request, context);
+        return RuntimeTools::tool_router().call(tcc).await;
+    }
+    if ScaffoldTools::tool_router().get(name).is_some() {
+        let tcc =
+            rmcp::handler::server::tool::ToolCallContext::new(&ScaffoldTools, request, context);
+        return ScaffoldTools::tool_router().call(tcc).await;
+    }
+    if DocsTools::tool_router().get(name).is_some() {
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(&DocsTools, request, context);
+        return DocsTools::tool_router().call(tcc).await;
+    }
+    Err(ErrorData::invalid_params(
+        format!("unknown tool `{name}`"),
+        None,
+    ))
+}
+
 #[tool_router]
 impl NestrsMcpServer {
-    // No tools here — `NestrsMcpServer` is just the wrapper. Use
-    // `SubServers` to get the actual tool-bearing handlers.
+    // No tools declared on the wrapper. `list_tools` / `get_tool` /
+    // `call_tool` below dispatch to the four area handlers.
 }
 
 #[tool_handler]
@@ -262,80 +313,75 @@ impl ServerHandler for NestrsMcpServer {
         Ok(self.get_info())
     }
 
-    /// Per-tool-call dispatch with the optional ambient ability +
-    /// transaction + outbound masking. Without `feature = "authz"`,
-    /// the macro-generated default fires (plain
-    /// `self.tool_router.call(tcc).await`). With the feature on, the
-    /// override installs the per-task scopes, dispatches, then
-    /// post-masks + commits/rolls back.
-    #[cfg(feature = "authz")]
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, rmcp::ErrorData> {
+        let mut result = ListToolsResult::with_all_items(bundled_tools());
+        if protocol_supports_cache_hints(&context) {
+            result.ttl_ms = Some(0);
+            result.cache_scope = Some(CacheScope::Public);
+        }
+        Ok(result)
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        bundled_tool(name)
+    }
+
+    /// Dispatch to the four area handlers. With `feature = "authz"`,
+    /// wraps the call in the per-task ability + transaction + mask
+    /// pipeline.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, rmcp::ErrorData> {
-        // Snapshot data context before the async move.
-        let ctx = self.data_context.clone();
-        // Capture the ability for the post-mask step. None means
-        // "no masking" — we still want to commit/rollback based on
-        // the response.
-        let ability_for_mask = ctx.ability.clone();
-        // Pre-open a tx so we can decide commit/rollback after the
-        // dispatch returns. The slot is also installed into the
-        // per-task scope inside `run_with_mcp_scopes` so the tool
-        // body can read it via `current_mcp_transaction`.
-        let slot: Option<std::sync::Arc<TransactionSlot>> = if let Some(pool) = &ctx.pool {
-            let pool = pool.clone();
-            match pool.begin().await {
-                Ok(tx) => Some(std::sync::Arc::new(TransactionSlot::new(tx))),
-                Err(e) => {
-                    tracing::warn!(
-                        target: "nestrs::mcp_data_context",
-                        "failed to open per-tool-call transaction: {e}"
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let slot_for_post = slot.clone();
-
-        // Inner dispatch: install scopes, run the tool router, mask
-        // the response. The `&self` reference here is fine because
-        // `run_with_mcp_scopes` takes a future that's polled on the
-        // current task and the response future just borrows `self`
-        // for the duration of the dispatch.
-        let dispatch_result = run_with_mcp_scopes(&ctx, slot, async {
-            let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-            self.tool_router.call(tcc).await
-        })
-        .await;
-
-        // Match on the dispatch outcome:
-        // - `Err(e)`: tool wasn't found / routing failed / RPC-level
-        //   error. The slot's `Drop` would roll back, but be explicit
-        //   so the warning log surfaces on a stale connection.
-        // - `Ok(resp)`: post-mask, then commit/rollback based on
-        //   whether the tool itself flagged `is_error`.
-        let mut response = match dispatch_result {
-            Ok(r) => r,
-            Err(e) => {
-                commit_or_rollback(slot_for_post, &tool_error_marker()).await;
-                return Err(e);
-            }
-        };
-
-        // Post-mask the response in place if we have an ability.
-        if let Some(ability) = ability_for_mask.as_ref() {
-            mask_response(&mut response, ability);
+        #[cfg(not(feature = "authz"))]
+        {
+            dispatch_bundled_tool(request, context).await
         }
-        // Commit on success, roll back on tool-level error. The
-        // slot's `Drop` would also roll back, but explicit commit
-        // surfaces the success path and the warning log on commit
-        // failure (e.g. broken connection).
-        commit_or_rollback(slot_for_post, &response).await;
-        Ok(response)
+        #[cfg(feature = "authz")]
+        {
+            let ctx = self.data_context.clone();
+            let ability_for_mask = ctx.ability.clone();
+            let slot: Option<std::sync::Arc<TransactionSlot>> = if let Some(pool) = &ctx.pool {
+                let pool = pool.clone();
+                match pool.begin().await {
+                    Ok(tx) => Some(std::sync::Arc::new(TransactionSlot::new(tx))),
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "nestrs::mcp_data_context",
+                            "failed to open per-tool-call transaction: {e}"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            let slot_for_post = slot.clone();
+
+            let dispatch_result = run_with_mcp_scopes(&ctx, slot, async {
+                dispatch_bundled_tool(request, context).await
+            })
+            .await;
+
+            let mut response = match dispatch_result {
+                Ok(r) => r,
+                Err(e) => {
+                    commit_or_rollback(slot_for_post, &tool_error_marker()).await;
+                    return Err(e);
+                }
+            };
+
+            if let Some(ability) = ability_for_mask.as_ref() {
+                mask_response(&mut response, ability);
+            }
+            commit_or_rollback(slot_for_post, &response).await;
+            Ok(response)
+        }
     }
 
     // -------------------------------------------------------------
@@ -571,4 +617,33 @@ fn new_subscription_id() -> String {
 fn tool_error_marker() -> rmcp::model::CallToolResponse {
     rmcp::model::CallToolResult::error(vec![rmcp::model::ContentBlock::text("dispatch error")])
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_tools_include_all_areas() {
+        let names: Vec<String> = bundled_tools()
+            .into_iter()
+            .map(|t| t.name.into_owned())
+            .collect();
+        for expected in [
+            "list_modules",
+            "get_app_health",
+            "new_project",
+            "search_docs",
+        ] {
+            assert!(
+                names.iter().any(|n| n == expected),
+                "missing {expected} in {names:?}"
+            );
+        }
+        assert!(
+            names.len() >= 20,
+            "expected the full 24-tool surface, got {}",
+            names.len()
+        );
+    }
 }

@@ -30,7 +30,7 @@
 //!
 //! **Docs:** mdBook **Security** (`docs/src/security.md`).
 
-#![doc(html_root_url = "https://docs.rs/nestrs-security/1.0.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-security/1.2.0")]
 
 mod auth;
 mod helmet;
@@ -48,10 +48,11 @@ pub use nestrs_core::{
 
 pub use auth::{
     parse_authorization_bearer, route_roles_csv, AuthStrategyGuard, BearerToken,
-    DemoXRoleMetadataGuard, OptionalBearerToken, SecurityRejection, XRoleMetadataGuard,
+    DemoXRoleMetadataGuard, OptionalBearerToken, SecurityRejection,
 };
-#[cfg(feature = "authz")]
 pub use auth::route_metadata_csv;
+#[allow(deprecated)]
+pub use auth::XRoleMetadataGuard;
 
 #[cfg(feature = "csrf")]
 pub use csrf::{csrf_double_submit_middleware, CsrfProtectionConfig};

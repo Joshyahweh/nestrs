@@ -1,6 +1,6 @@
 # nestrs-macros
 
-**Procedural macros** for [nestrs](https://crates.io/crates/nestrs): `#[module]`, `#[controller]`, HTTP verbs (`#[get]`, `#[post]`, …), `#[injectable]`, validation/DTO helpers, WebSocket routing (`#[ws_routes]` + `#[use_ws_*]`), microservice patterns (`#[micro_routes]`, `#[message_pattern]`, `#[use_micro_*]`), and more.
+**Procedural macros** for [nestrs](https://crates.io/crates/nestrs): `#[module]`, `#[controller]`, HTTP verbs (`#[get]`, `#[post]`, …), `#[injectable]`, `#[als]` (async-local storage), validation/DTO helpers (`#[dto]`, `#[partial_type]`, `#[omit_type]`, `#[pick_type]`, `#[intersection_type]`), WebSocket routing (`#[ws_routes]` + `#[use_ws_*]`), microservice patterns (`#[micro_routes]`, `#[message_pattern]`, `#[use_micro_*]`), and more.
 
 This crate is a **proc-macro** dependency of `nestrs`; you do not usually add it explicitly unless you are experimenting with macro expansion or building a fork.
 
@@ -13,7 +13,7 @@ This crate is a **proc-macro** dependency of `nestrs`; you do not usually add it
 Prefer the umbrella crate:
 
 ```toml
-nestrs = "1.0.0"
+nestrs = "1.2.0"
 ```
 
 `nestrs` already depends on `nestrs-macros`.
@@ -22,7 +22,7 @@ nestrs = "1.0.0"
 
 ```toml
 [dependencies]
-nestrs-macros = "1.0.0"
+nestrs-macros = "1.2.0"
 ```
 
 ## What you get (surface sketch)
@@ -46,6 +46,8 @@ impl ApiController {
 ```
 
 See [docs.rs/nestrs](https://docs.rs/nestrs) for the full attribute reference.
+
+DTO mapped types: `#[partial_type]`, `#[omit_type(...)]`, `#[pick_type(...)]`, and `#[intersection_type]` (NestJS `IntersectionType` — flatten parent DTOs; parents need `#[dto(allow_unknown_fields)]`). Per-route throttling: `#[throttle(n, "minute")]` / `#[skip_throttle]`.
 
 ## License
 

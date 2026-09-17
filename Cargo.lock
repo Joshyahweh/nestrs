@@ -695,6 +695,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bcrypt"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e65938ed058ef47d92cf8b346cc76ef48984572ade631927e9937b5ffc7662c7"
+dependencies = [
+ "base64 0.22.1",
+ "blowfish",
+ "getrandom 0.2.17",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -768,6 +781,16 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
+]
+
+[[package]]
+name = "blowfish"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7"
+dependencies = [
+ "byteorder",
+ "cipher",
 ]
 
 [[package]]
@@ -2247,7 +2270,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-app"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs",
@@ -2920,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "lab"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-graphql",
  "async-trait",
@@ -3436,7 +3459,7 @@ checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "nestrs"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "argon2",
  "async-graphql",
@@ -3455,19 +3478,22 @@ dependencies = [
  "http-body-util",
  "josekit",
  "jsonwebtoken",
- "libc",
  "linkme",
  "metrics",
  "metrics-exporter-prometheus",
  "minijinja",
- "mongodb",
  "nestrs-core",
  "nestrs-events",
  "nestrs-graphql",
+ "nestrs-health",
+ "nestrs-http",
  "nestrs-macros",
  "nestrs-microservices",
+ "nestrs-mongodb",
  "nestrs-oauth2",
  "nestrs-openapi",
+ "nestrs-security",
+ "nestrs-throttle",
  "nestrs-ws",
  "notify",
  "opentelemetry",
@@ -3477,7 +3503,6 @@ dependencies = [
  "pkcs8",
  "rand 0.8.8",
  "redis",
- "reqwest 0.12.28",
  "schemars",
  "serde",
  "serde_json",
@@ -3486,6 +3511,7 @@ dependencies = [
  "serial_test",
  "sqlx",
  "subtle",
+ "time",
  "tokio",
  "tokio-cron-scheduler",
  "tokio-util",
@@ -3505,17 +3531,21 @@ dependencies = [
 
 [[package]]
 name = "nestrs-core"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
+ "bytes",
+ "futures-core",
+ "http-body-util",
+ "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
 name = "nestrs-cqrs"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3525,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-events"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "nestrs-core",
@@ -3535,7 +3565,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-graphql"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-graphql",
  "async-graphql-derive",
@@ -3547,17 +3577,47 @@ dependencies = [
 ]
 
 [[package]]
-name = "nestrs-macros"
-version = "1.0.0"
+name = "nestrs-health"
+version = "1.2.0"
 dependencies = [
+ "async-nats",
+ "async-trait",
+ "axum 0.7.9",
+ "libc",
+ "nestrs-core",
+ "redis",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
+name = "nestrs-http"
+version = "1.2.0"
+dependencies = [
+ "async-trait",
+ "nestrs-core",
+ "reqwest 0.12.28",
+ "tokio",
+]
+
+[[package]]
+name = "nestrs-macros"
+version = "1.2.0"
+dependencies = [
+ "axum 0.7.9",
+ "nestrs-core",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+ "tokio",
 ]
 
 [[package]]
 name = "nestrs-mcp"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -3588,7 +3648,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-microservices"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -3620,19 +3680,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-mongodb"
+version = "1.2.0"
+dependencies = [
+ "axum 0.7.9",
+ "bson",
+ "futures",
+ "mongodb",
+ "nestrs-core",
+ "nestrs-macros",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "nestrs-oauth2"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "arc-swap",
+ "argon2",
  "async-trait",
  "axum 0.7.9",
  "base64 0.22.1",
+ "bcrypt",
  "chrono",
  "ed25519-dalek",
  "http-body-util",
  "josekit",
  "jsonwebtoken",
  "nestrs-core",
+ "nestrs-oauth2-macros",
  "oauth2",
  "parking_lot",
  "pkcs8",
@@ -3650,8 +3727,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-oauth2-macros"
+version = "1.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "nestrs-openapi"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -3661,7 +3747,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-prisma"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3678,17 +3764,34 @@ dependencies = [
 
 [[package]]
 name = "nestrs-scaffold"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "nestrs-mcp",
+ "regex",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",
 ]
 
 [[package]]
+name = "nestrs-security"
+version = "1.2.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "nestrs-core",
+ "serde_json",
+ "subtle",
+ "tokio",
+ "tower",
+ "tower-cookies",
+ "tracing",
+]
+
+[[package]]
 name = "nestrs-storage"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3705,8 +3808,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-throttle"
+version = "1.2.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "nestrs-core",
+ "redis",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nestrs-ws"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -6812,6 +6929,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc792f6a4179356f9093447edebe14bb73dbc99be636886281313cb98b47201b"
 dependencies = [
  "async-trait",
+ "axum-core 0.4.5",
  "base64 0.21.7",
  "futures",
  "http",

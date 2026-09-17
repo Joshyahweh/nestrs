@@ -12,7 +12,6 @@
 //! transitive deps).
 
 use axum::extract::FromRequestParts;
-use axum::http::request::Parts;
 use nestrs_core::als::AlsError;
 use nestrs_macros::als;
 
@@ -117,7 +116,7 @@ async fn extractor_reads_value_installed_by_middleware() {
             // The generated FromRequestParts impl reads from the
             // task-local cell. We don't need a real `Request` — the
             // impl ignores the parts entirely.
-            let mut parts = Parts::default();
+            let mut parts = axum::http::Request::new(()).into_parts().0;
             let state = ();
             RequestContext::from_request_parts(&mut parts, &state).await
         },
@@ -134,7 +133,7 @@ async fn extractor_reads_value_installed_by_middleware() {
 
 #[tokio::test]
 async fn extractor_rejects_when_value_is_not_installed() {
-    let mut parts = Parts::default();
+    let mut parts = axum::http::Request::new(()).into_parts().0;
     let state = ();
     let result = RequestContext::from_request_parts(&mut parts, &state).await;
     assert_eq!(result, Err(AlsError::NotSet));
@@ -145,7 +144,7 @@ async fn extractor_works_for_single_field_struct() {
     let result = SingleField::with_single_field(
         SingleField { value: -1 },
         async {
-            let mut parts = Parts::default();
+            let mut parts = axum::http::Request::new(()).into_parts().0;
             SingleField::from_request_parts(&mut parts, &()).await
         },
     )
@@ -158,7 +157,7 @@ async fn extractor_works_for_tuple_struct() {
     let result = TupleCtx::with_tuple_ctx(
         TupleCtx(99, "tuple".into()),
         async {
-            let mut parts = Parts::default();
+            let mut parts = axum::http::Request::new(()).into_parts().0;
             TupleCtx::from_request_parts(&mut parts, &()).await
         },
     )
@@ -169,7 +168,7 @@ async fn extractor_works_for_tuple_struct() {
 #[tokio::test]
 async fn extractor_works_for_unit_struct() {
     let result = UnitCtx::with_unit_ctx(UnitCtx, async {
-        let mut parts = Parts::default();
+        let mut parts = axum::http::Request::new(()).into_parts().0;
         UnitCtx::from_request_parts(&mut parts, &()).await
     })
     .await;
@@ -178,7 +177,7 @@ async fn extractor_works_for_unit_struct() {
 
 #[tokio::test]
 async fn extractor_rejects_unit_struct_when_not_set() {
-    let mut parts = Parts::default();
+    let mut parts = axum::http::Request::new(()).into_parts().0;
     let result = UnitCtx::from_request_parts(&mut parts, &()).await;
     assert_eq!(result, Err(AlsError::NotSet));
 }

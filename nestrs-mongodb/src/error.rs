@@ -65,4 +65,5 @@ impl From<bson::de::Error> for MongoError {
     }
 }
 
+/// Convenience type alias for `nestrs-mongodb` results.
 pub type Result<T> = std::result::Result<T, MongoError>;

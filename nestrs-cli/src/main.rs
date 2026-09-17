@@ -5,10 +5,9 @@ mod db_migrate;
 #[cfg(feature = "db")]
 mod db_seed;
 mod doctor;
-pub mod graphql_federation;
-pub mod graphql_sdl;
-pub mod repl;
 mod resource_templates;
+
+use nestrs_scaffold::{graphql_federation, graphql_sdl, repl};
 
 use std::env;
 use std::fs;
@@ -65,12 +64,10 @@ fn run() -> Result<(), String> {
             None => graphql_sdl::run(&[]),
             Some("sdl") => graphql_sdl::run(&args[2..]),
             Some("federation") => graphql_federation::dispatch(&args[2..]),
-            Some(other) => {
-                return Err(format!(
-                    "unknown `nestrs-cli graphql {other}` subcommand; \
-                     currently: `sdl`, `federation`"
-                ));
-            }
+            Some(other) => Err(format!(
+                "unknown `nestrs-cli graphql {other}` subcommand; \
+                 currently: `sdl`, `federation`"
+            )),
         },
         "doctor" => doctor::run(),
         "db" => {
@@ -104,8 +101,10 @@ fn print_help() -> Result<(), String> {
     println!("  nestrs-cli doctor   (toolchain + nestrs feature hints for the current crate)");
     println!("  nestrs-cli repl <graph|routes|providers|dtos> [--path <dir>] [--format text|json]");
     println!("    Static source-level DI graph explorer. Scans the crate for #[module]/#[controller]/#[injectable]/#[dto]/impl_routes! without launching the app.");
+    println!("  nestrs-cli repl live --url <http> [--bearer-token <token>] [--format text|json]");
+    println!("    Live dump of a running app's admin sidecar (`GET /__nestrs/providers` and `/__nestrs/routes`). Bearer is sent as a header only; shells out to `curl`.");
     println!("  nestrs-cli graphql sdl --url <http> --out <path> [--bearer-token <token>] [--federation|--no-federation]");
-    println!("    Federation-aware SDL exporter. POSTs `{_service{sdl}}` (Apollo Federation v2 introspection) and writes the SDL string to disk. Shells out to `curl`.");
+    println!("    Federation-aware SDL exporter. POSTs `{{_service{{sdl}}}}` (Apollo Federation v2 introspection) and writes the SDL string to disk. Shells out to `curl`.");
     println!("  nestrs-cli graphql federation export --url <http> --out <path> [--bearer-token <token>] [--lenient]");
     println!("    Fetch a federation v2 subgraph SDL (Apollo Federation v2 introspection). Validates the response contains `@link`; `--lenient` accepts v1 / non-federation SDLs.");
     println!("  nestrs-cli g|generate <resource|resources|service|controller|module|dto|guard|pipe|filter|interceptor|strategy|resolver|gateway|microservice|transport> <name> [--style nest|rust] [--path <dir>] [--dry-run] [--force] [--quiet]");

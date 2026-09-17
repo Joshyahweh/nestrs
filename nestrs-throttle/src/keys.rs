@@ -19,12 +19,13 @@ use axum::http::HeaderName;
 
 /// Per-request view handed to [`ThrottleKeyGenerator`] and [`ThrottleSkipper`].
 ///
-/// `handler` is the route's handler id (from the `HandlerKey` extension) when
-/// known — empty for the global middleware path where the handler hasn't been
-/// resolved yet. `ip` is the rate-limit key string (already the
-/// `"unknown"` fallback when unresolvable).
+/// `handler` is the route's handler id when known — from the `HandlerKey`
+/// extension (guard path) or [`nestrs_core::RouteRegistry::handler_for`]
+/// (app-level middleware). Empty when the route isn't registered. `ip` is
+/// the rate-limit key string (already the `"unknown"` fallback when
+/// unresolvable).
 pub struct ThrottlerRequest<'a> {
-    pub handler: &'static str,
+    pub handler: &'a str,
     pub ip: String,
     pub parts: &'a Parts,
 }

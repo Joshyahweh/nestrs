@@ -27,6 +27,10 @@ Moving an HTTP API from NestJS to nestrs means trading TypeScript decorators for
 | `app.setGlobalPrefix('api')` | `.set_global_prefix("api")` | Builder method on `NestApplication` |
 | `app.enableVersioning(...)` | `.enable_uri_versioning("v")` / `.enable_header_versioning(...)` | Multiple versioning strategies |
 | `app.listen(3000)` | `.listen(3000).await` | Async; also `listen_graceful` and `listen_with_shutdown` |
+| `PartialType` / `OmitType` / `PickType` / `IntersectionType` | `#[partial_type]` / `#[omit_type(...)]` / `#[pick_type(...)]` / `#[intersection_type]` | Intersection flattens parent DTOs; parents need `#[dto(allow_unknown_fields)]` |
+| `@InjectModel(User)` | `MongoService::model::<User>()` | After `MongoModule::for_feature`; also `MongoRepository::for_feature` |
+| `MongooseModule.forRootAsync(...)` | `MongoModule::for_root_async(factory).await?` | Must complete before `NestFactory::create` |
+| Redis session store | `.use_session_redis(url)` | Feature `session-redis`; Redis wins if memory is also set |
 
 ## Side-by-side code: modules and controllers
 

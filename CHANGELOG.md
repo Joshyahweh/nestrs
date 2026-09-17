@@ -7,6 +7,108 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-17
+
+Wave 8 NestJS-parity depth leftovers plus a production/security pass on
+the new surfaces. Additive minor on the 1.0 / 1.1 contract.
+
+### Changed
+
+- **Crate rename `nestrs-throttler` → `nestrs-throttle`.** crates.io already
+  has `nestrs-throttler` (yanked `0.1.0`, different owner). Types, macros,
+  and umbrella features are unchanged (`#[throttle]`, `ThrottlerModule`,
+  `throttler` / `throttler-redis`). Direct deps use
+  `nestrs-throttle = "1.2.0"` / `use nestrs_throttle::…`.
+
+### Added
+
+- **`#[intersection_type]`** — NestJS `IntersectionType(A, B)` analogue.
+  Parent DTO fields are `#[serde(flatten)]`'d into one JSON object with
+  nested `Validate`. Parent DTOs must use `#[dto(allow_unknown_fields)]`.
+- **`session-redis`** — `RedisSessionStore` + `NestApplication::use_session_redis`.
+  Redis `SET`/`GET`/`DEL` with `PX` TTL. Session cookie is `Secure` in
+  production. URL userinfo is redacted in `Debug`; session ids are never
+  logged. Redis wins if both memory and Redis are configured.
+- **`nestrs-mcp` stock binary tools** — `list_tools` / `get_tool` /
+  `call_tool` dispatch to the four area handlers (rmcp routers cannot
+  merge across handler types). The stock binary advertises the full
+  24-tool surface.
+- **`MongoModule::for_root_async`** and **`MongoService::model::<T>()`**
+  (`@InjectModel` analogue over `for_feature`).
+- **`nestrs-cli repl live`** — dump live providers + routes from a running
+  admin sidecar. Bearer is a header only; curl argv uses `--` before the URL.
+
+### Documented
+
+- `queues-redis` is the multi-instance production queue path (Bull-style
+  LPUSH/BRPOP, not the BullMQ protocol).
+- Federation SDL export remains HTTP `_service { sdl }` or build-time
+  `export_schema_sdl`; non-federation HTTP SDL is unsupported.
+- **`nestrs-drizzle` stays carved out** of the workspace: unpublished
+  `drizzle-orm 0.36` on crates.io, and crates.io `drizzle` 0.1.x requires
+  MSRV 1.95 > workspace 1.88.
+
+### Docs — rustdoc + mintlify synced to 1.2.0
+
+- Workspace version, path-dep pins, crate READMEs, mintlify/mdBook
+  install snippets, and `html_root_url` all read `1.2.0`.
+- `publish-crates.yml` publishes all **20** workspace crates (including
+  `nestrs-oauth2-macros`, `nestrs-security`, `nestrs-throttle`,
+  `nestrs-health`, `nestrs-mongodb`, `nestrs-http`). `nestrs-drizzle`
+  remains unpublished.
+- Mintlify Wave 8 pages: introduction is 1.2; `use_session_redis` /
+  `use_throttler` on NestApplication; Mongo `for_root_async` /
+  `model::<T>()` examples; mapped-types / IntersectionType on
+  validation + NestJS migration; `repl live` curl/bearer/`--` URL;
+  federation HTTP SDL is subgraph-only; throttling guide matches
+  `ThrottleSpec { limit, window_secs }` (no builder, no `window_ms`).
+
+### Fixed
+
+- **`throttler_middleware`** honors `#[throttle]` / `#[skip_throttle]` on the
+  app-level layer. Route-level `HandlerKey` is not available there, so the
+  middleware resolves the handler via `RouteRegistry::handler_for` and applies
+  the same `skip → decorated → global` precedence as `ThrottlerGuard`.
+  `ThrottlerRequest.handler` is `&str` (tied to the request) rather than
+  `&'static str`, so the looked-up handler id can be passed through without
+  leaking.
+
+## [1.1.0] - 2026-09-17
+
+Wave 7 NestJS-parity surfaces plus the post-wave clippy/test gate and a
+production/security pass on those new APIs. Additive minor: new crates
+and features, no breaking changes to the 1.0.0 contract.
+
+### Docs — rustdoc + mintlify synced to the shipped 1.1.0 API
+
+- Workspace version, path-dep pins, crate READMEs, mintlify/mdBook
+  install snippets, and `html_root_url` all read `1.1.0`.
+- SSE docs use `serialize_to_event` (no `IntoSseEvent for T: Serialize`)
+  and `from_stream` / `from_fallible_stream` as aliases over
+  `Stream<Item = Result<Event, E>>`.
+- ALS docs match tokio 1.51 `task_local!` (no `= const` initializer)
+  and a single generic `FromRequestParts<S>` impl via the
+  `nestrs_core::als::async_trait` re-export.
+- Mongo recipe boot uses `DynamicModule::from_module::<MongoModule>()`
+  plus `for_root` / `for_feature`, matching the `Module` impl.
+- Umbrella `nestrs` re-exports `#[als]` and forwards `feature = "sse"`
+  to `nestrs-core/sse`.
+- Public-API snapshots updated: `nestrs-core` (ALS + SSE + client-ip),
+  `nestrs-graphql` (federation v2 / SDL file export), `nestrs-oauth2`
+  (password hashing). The `nestrs` snapshot follows current rustdoc
+  JSON (cross-crate `pub use` items are attributed to the defining
+  crate — `nestrs-health`, `nestrs-throttle`, `nestrs-mongodb`,
+  `nestrs-http`, `nestrs-security` — and remain public re-exports).
+
+### Fixed — production/security audit 2026-09-17 (Wave 7 surfaces)
+
+- **`nestrs-cli graphql sdl` curl argv** — pass the endpoint after `--` so a
+  URL that starts with `-` cannot be interpreted as extra curl flags.
+- **`MongoOptions` Debug** — redacts `user:pass@` from the connection URI so
+  traces / `dbg!` cannot leak database credentials.
+- **`ThrottlerBackendKind::Redis` / `RedisThrottler` Debug** — same userinfo
+  redaction; `RedisThrottler` no longer Debug-prints the `redis::Client`.
+
 ### Added — Wave 7.16: Async-local-storage `#[als]` proc-macro + `nestrs_core::als` runtime
 
 A typed cell that propagates a value through every `.await` on the
@@ -40,18 +142,21 @@ and an axum extractor.
     whichever fits your codebase.
 - **`#[als]` proc-macro** in `nestrs-macros` — applied to a struct,
   generates alongside the original:
-  - `task_local!` cell `<SNAKE_UPPER>_ALS: Option<Self> = None` —
-    names derived from the type itself so two ALS values can't share
-    state.
+  - `task_local!` cell `<SNAKE_UPPER>_ALS: Option<Self>` (no
+    `=` initializer — tokio 1.51 `task_local!` takes a type, not a
+    value) — names derived from the type itself so two ALS values
+    can't share state.
   - `with_<snake>(value, future) -> R` — install the value for the
     duration of `future`. After `future` completes (success, error,
     or panic), the prior value (or absence) is restored.
   - `current_<snake>() -> Option<Self>` — read the current value
     (where `Self: Clone`), returns `None` outside any active scope.
     Cheap (single task-local lookup + clone).
-  - `impl<S> FromRequestParts<S> for Self` for both `S = ()` and
-    `S = Parts` (axum's request parts type) — handlers extract the
-    value as a normal axum extractor. `Rejection = AlsError`.
+  - generic `impl<S> FromRequestParts<S> for Self` (any state type
+    `S: Send + Sync`) via `#[::nestrs_core::als::async_trait]` —
+    axum 0.7's extractor trait is `async_trait`-based; the re-export
+    means callers don't add `async-trait` themselves.
+    `Rejection = AlsError` (maps to HTTP 500).
   - Generic-aware — preserves `impl_generics`, `ty_generics`,
     `where_clause` through the generated impls.
   - Inline `to_snake_case` helper (handles `RequestContext` →
@@ -96,22 +201,20 @@ from upstream services don't pay the compile cost of `bytes` /
   `text/event-stream` content-type, chunked transfer encoding, and
   retry semantics stay identical).
 - **Constructors** —
-  `SseResponse::from_stream(stream)` for infallible streams,
-  `SseResponse::from_fallible_stream(stream)` for
-  `Stream<Item = Result<Event, axum::Error>>` (the producer's
-  structured-error path), `.keep_alive(KeepAlive)` to attach a
-  heartbeat policy, `From<Sse<S>> for SseResponse<S>` for
-  already-constructed `Sse<S>` values, plus `into_inner` /
-  `as_inner` accessors for reaching axum-only APIs the wrapper
-  doesn't expose.
-- **`IntoSseEvent` trait** — covers the four payload shapes handler
-  authors reach for: `&str` / `String` (default `message` event),
-  `Bytes` (raw byte payload), any `T: Serialize` (auto-JSON-encoded
-  via `serde_json`, `event: message`). `Event` itself is a passthrough.
-  Serialization failures (e.g. `f64::NAN`) emit a structured
-  `event: error` event instead of crashing the stream — SSE consumers
-  treat stream termination as a connection drop, so a structured
-  error keeps the consumer alive and in charge.
+  `SseResponse::from_stream(stream)` and
+  `SseResponse::from_fallible_stream(stream)` are aliases: both
+  take `Stream<Item = Result<Event, E>>` where `E: Into<Box<dyn Error
+  + Send + Sync>>` (axum 0.7's SSE contract — there is no infallible
+  stream constructor). `.keep_alive(KeepAlive)` attaches a heartbeat
+  policy, `From<Sse<S>> for SseResponse<S>` wraps an already-constructed
+  `Sse<S>`, plus `into_inner` / `as_inner` accessors for axum-only APIs.
+- **`IntoSseEvent` trait** — `&str` / `String` / `Bytes` / `Event`
+  (passthrough). JSON payloads use the free function
+  `serialize_to_event` instead of a `T: Serialize` blanket impl —
+  `Event` itself implements `Serialize`, so a blanket impl would
+  conflict with the passthrough. Serialization failures (e.g.
+  `f64::NAN`) still emit a structured `event: error` rather than
+  crashing the stream.
 - **Feature flag** — `sse = ["dep:bytes", "dep:futures-core",
   "dep:serde"]`. Off by default. `nestrs-core`'s default feature set
   is unchanged — apps opt in only when they actually emit SSE.
@@ -123,7 +226,7 @@ from upstream services don't pay the compile cost of `bytes` /
   `retry: 250`; `KeepAlive` attaches without breaking conversion;
   empty streams produce no `data:` lines; `IntoSseEvent` impls for
   `&str` / `String` / `Bytes` use the default event name;
-  `IntoSseEvent for T: Serialize` uses `message`; serialization
+  `serialize_to_event` uses `message`; serialization
   failure emits `error`; `Event` passthrough preserves name and
   data; `From<Sse<S>>` works; `into_inner` / `as_inner` return the
   inner `Sse<S>`; `from_fallible_stream` accepts a stream of

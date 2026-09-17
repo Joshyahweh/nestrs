@@ -21,10 +21,10 @@ The narrative guide — install, client wiring for each editor, live-runtime set
 ```toml
 # Cargo.toml
 [dependencies]
-nestrs-mcp = "1.0"
+nestrs-mcp = "1.2.0"
 
 # Or pull in the optional features:
-# nestrs-mcp = { version = "1.0", features = ["http", "admin", "authz", "elicitation"] }
+# nestrs-mcp = { version = "1.2.0", features = ["http", "admin", "authz", "elicitation"] }
 ```
 
 ## Crate layout
@@ -154,9 +154,9 @@ impl NestrsMcpServer {
 
 The `ServerHandler` impl provides `get_info` (server name `nestrs-mcp`, version from Cargo), the full surface set (`list_prompts`, `get_prompt`, `list_resources`, `list_resource_templates`, `read_resource`, `complete`), subscriptions (`accepted_subscription_filter`, `listen`), and the task RPCs (`get_task`, `update_task`, `cancel_task`).
 
-<Warning>
-The wrapper declares **no tools** — its `#[tool_router]` impl block is empty, so a `tools/list` against the stock binary returns `[]`. The tools live on the four area handlers below; serve one of those (or your own) from your binary. See [Embedding in another binary](#embedding-in-another-binary).
-</Warning>
+<Note>
+The wrapper's `#[tool_router]` impl block stays empty (rmcp routers are invariant in the handler type). `list_tools` / `get_tool` / `call_tool` dispatch to the four area handlers, so a `tools/list` against the stock binary returns the full 24-tool surface. Embedding a single area handler is still supported — see [Embedding in another binary](#embedding-in-another-binary).
+</Note>
 
 `SubServers` bundles the four handlers:
 

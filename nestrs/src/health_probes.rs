@@ -4,6 +4,3 @@
 //! change imports (`nestrs::health_probes::ProbeKind` still works).
 
 pub use nestrs_health::*;
-</content>
-</invoke>
-</function_calls>

@@ -69,7 +69,15 @@ The check is a one-liner: federation v2 SDLs always contain the
 
 For CI jobs that hit a running federation v2 subgraph, the CLI
 ships a thin exporter that fetches and validates the SDL before
-writing it to disk:
+writing it to disk.
+
+<Note>
+HTTP SDL export is **federation-only** (`{_service { sdl }}`). For a
+non-federation schema, print SDL at build time with
+`export_schema_sdl` / `export_sdl_to_file`. `nestrs-cli graphql sdl
+--no-federation` runs standard introspection and does **not** produce
+SDL.
+</Note>
 
 ```bash
 nestrs-cli graphql federation export \

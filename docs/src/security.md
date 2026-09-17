@@ -20,11 +20,10 @@ Where the global rate limiter applies one budget to everything, **`use_throttler
 
 ```rust
 NestFactory::create::<AppModule>()
-    .use_throttler(
-        ThrottlerOptions::builder()
-            .global(ThrottleSpec::parse("100/minute")) // fallback for undecorated routes
-            .build(),
-    )
+    .use_throttler(ThrottlerOptions {
+        global: ThrottleSpec::parse("100/minute"), // fallback for undecorated routes
+        ..ThrottlerOptions::default()
+    })
     .listen(3000)
     .await;
 ```

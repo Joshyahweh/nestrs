@@ -6,7 +6,9 @@
 //! whole-request / 10s connect deadline, tunable via `HttpServiceOptions`
 //! (raw `reqwest::Client` access stays available via `.client()`).
 
-use nestrs_http::{HttpService, HttpServiceOptions, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
+use nestrs_http::{
+    HttpService, HttpServiceOptions, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT,
+};
 use std::time::Duration;
 
 #[test]

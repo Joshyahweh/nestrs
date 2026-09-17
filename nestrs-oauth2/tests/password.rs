@@ -77,20 +77,14 @@ fn verify_any_unknown_prefix_returns_error() {
 // so we don't repeat the disabled-path tests in the full build.
 // ---------------------------------------------------------------------------
 
-#[cfg(all(
-    feature = "password-bcrypt",
-    not(feature = "password-argon2")
-))]
+#[cfg(all(feature = "password-bcrypt", not(feature = "password-argon2")))]
 #[test]
 fn argon2_disabled_when_only_bcrypt_enabled() {
     let err = hash_with("x", Backend::Argon2).expect_err("should be disabled");
     assert!(matches!(err, HashError::Argon2Disabled), "got: {err}");
 }
 
-#[cfg(all(
-    feature = "password-argon2",
-    not(feature = "password-bcrypt")
-))]
+#[cfg(all(feature = "password-argon2", not(feature = "password-bcrypt")))]
 #[test]
 fn bcrypt_disabled_when_only_argon2_enabled() {
     let err = hash_with("x", Backend::Bcrypt).expect_err("should be disabled");
@@ -208,7 +202,15 @@ fn hash_on_new_derive_preserves_struct_field_order() {
         "D-plain".to_string(),
     );
     assert_eq!(row.a, "A");
-    assert!(row.b.starts_with("$argon2"), "b should be hashed: {}", row.b);
+    assert!(
+        row.b.starts_with("$argon2"),
+        "b should be hashed: {}",
+        row.b
+    );
     assert_eq!(row.c, "C");
-    assert!(row.d.starts_with("$argon2"), "d should be hashed: {}", row.d);
+    assert!(
+        row.d.starts_with("$argon2"),
+        "d should be hashed: {}",
+        row.d
+    );
 }

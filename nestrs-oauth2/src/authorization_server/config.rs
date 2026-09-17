@@ -18,10 +18,7 @@ pub enum AuthorizationServerConfigError {
     Issuer(String),
     /// A mounted path must start with `/` and not end with `/`.
     #[error("{what} must start with '/' and not end with '/' (got {value:?})")]
-    Path {
-        what: &'static str,
-        value: String,
-    },
+    Path { what: &'static str, value: String },
     /// A TTL must be non-zero.
     #[error("{which} must be non-zero")]
     ZeroTtl { which: &'static str },

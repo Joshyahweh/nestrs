@@ -113,8 +113,7 @@ pub mod stores;
 
 pub use config::{AuthorizationServerConfig, AuthorizationServerConfigError};
 pub use model::{
-    ClientRecordError, GrantType, OAuth2ClientRecord, StoredAuthorizationCode,
-    StoredRefreshToken,
+    ClientRecordError, GrantType, OAuth2ClientRecord, StoredAuthorizationCode, StoredRefreshToken,
 };
 pub use service::{
     AuthorizationServer, AuthorizationServerSetupError, IssuedTokens, ResourceOwnerSource,

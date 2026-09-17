@@ -91,9 +91,7 @@ async fn nested_with_scopes_join_the_outer() {
                     user_id: 2,
                     tenant: "inner".into(),
                 },
-                async {
-                    RequestContext::current_request_context().map(|c| c.user_id)
-                },
+                async { RequestContext::current_request_context().map(|c| c.user_id) },
             )
             .await;
             assert_eq!(inner_observed, Some(2));
@@ -141,26 +139,20 @@ async fn extractor_rejects_when_value_is_not_installed() {
 
 #[tokio::test]
 async fn extractor_works_for_single_field_struct() {
-    let result = SingleField::with_single_field(
-        SingleField { value: -1 },
-        async {
-            let mut parts = axum::http::Request::new(()).into_parts().0;
-            SingleField::from_request_parts(&mut parts, &()).await
-        },
-    )
+    let result = SingleField::with_single_field(SingleField { value: -1 }, async {
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        SingleField::from_request_parts(&mut parts, &()).await
+    })
     .await;
     assert_eq!(result, Ok(SingleField { value: -1 }));
 }
 
 #[tokio::test]
 async fn extractor_works_for_tuple_struct() {
-    let result = TupleCtx::with_tuple_ctx(
-        TupleCtx(99, "tuple".into()),
-        async {
-            let mut parts = axum::http::Request::new(()).into_parts().0;
-            TupleCtx::from_request_parts(&mut parts, &()).await
-        },
-    )
+    let result = TupleCtx::with_tuple_ctx(TupleCtx(99, "tuple".into()), async {
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        TupleCtx::from_request_parts(&mut parts, &()).await
+    })
     .await;
     assert_eq!(result, Ok(TupleCtx(99, "tuple".into())));
 }

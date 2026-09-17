@@ -108,9 +108,7 @@ impl HealthIndicator for HttpIndicator {
                 self.url,
                 resp.status()
             )),
-            Ok(Err(e)) => {
-                HealthStatus::down(format!("dependency {} unreachable: {e}", self.url))
-            }
+            Ok(Err(e)) => HealthStatus::down(format!("dependency {} unreachable: {e}", self.url)),
             Err(_) => HealthStatus::down(format!(
                 "dependency {} timed out after {:?}",
                 self.url, self.timeout

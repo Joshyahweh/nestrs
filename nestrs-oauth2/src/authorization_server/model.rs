@@ -172,7 +172,10 @@ impl fmt::Debug for OAuth2ClientRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OAuth2ClientRecord")
             .field("client_id", &self.client_id)
-            .field("client_secret_hash", &self.client_secret_hash.as_ref().map(|_| "<redacted>"))
+            .field(
+                "client_secret_hash",
+                &self.client_secret_hash.as_ref().map(|_| "<redacted>"),
+            )
             .field("is_public", &self.is_public)
             .field("redirect_uris", &self.redirect_uris)
             .field("allowed_grants", &self.allowed_grants)
@@ -288,7 +291,10 @@ mod tests {
         )
         .unwrap();
         let debug = format!("{record:?}");
-        assert!(!debug.contains("top-secret"), "the secret must never appear");
+        assert!(
+            !debug.contains("top-secret"),
+            "the secret must never appear"
+        );
         assert!(
             !debug.contains(&sha256_hex(b"top-secret")),
             "the secret's digest must never appear either"
@@ -322,13 +328,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ClientRecordError::InvalidRedirectUri { .. }));
-        let err = OAuth2ClientRecord::public(
-            "spa",
-            vec!["https://a/cb#frag".into()],
-            vec![],
-            vec![],
-        )
-        .unwrap_err();
+        let err =
+            OAuth2ClientRecord::public("spa", vec!["https://a/cb#frag".into()], vec![], vec![])
+                .unwrap_err();
         assert!(matches!(err, ClientRecordError::InvalidRedirectUri { .. }));
     }
 

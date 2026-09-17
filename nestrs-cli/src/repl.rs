@@ -165,7 +165,11 @@ fn admin_url(base: &str, path: &str) -> String {
 
 fn curl_get(url: &str, bearer: Option<&str>) -> Result<String, String> {
     let mut cmd = Command::new("curl");
-    cmd.arg("-sS").arg("-X").arg("GET").arg("--max-time").arg("15");
+    cmd.arg("-sS")
+        .arg("-X")
+        .arg("GET")
+        .arg("--max-time")
+        .arg("15");
     if let Some(token) = bearer {
         cmd.arg("-H").arg(format!("Authorization: Bearer {token}"));
     }
@@ -277,8 +281,7 @@ pub fn scan(root: &Path) -> Result<Graph, String> {
     )
     .unwrap();
     let re_impl_routes = Regex::new(r"impl_routes!\s*\(").unwrap();
-    let re_prefix =
-        Regex::new(r#"prefix\s*=\s*"([^"]+)""#).unwrap();
+    let re_prefix = Regex::new(r#"prefix\s*=\s*"([^"]+)""#).unwrap();
     let re_method_route = Regex::new(
         r#"#\s*\[\s*(get|post|put|patch|delete|head|options)\s*\(\s*"([^"]*)"\s*\)\s*\]"#,
     )
@@ -516,10 +519,7 @@ fn find_impl_block(content: &str, struct_name: &str) -> Option<usize> {
     re.find(content).map(|m| m.start())
 }
 
-fn parse_lists(
-    inner: &str,
-    re_keyed_list: &Regex,
-) -> (Vec<String>, Vec<String>, Vec<String>) {
+fn parse_lists(inner: &str, re_keyed_list: &Regex) -> (Vec<String>, Vec<String>, Vec<String>) {
     let mut controllers = Vec::new();
     let mut providers = Vec::new();
     let mut imports = Vec::new();
@@ -543,7 +543,10 @@ fn parse_lists(
 fn parse_ident_list(body: &str) -> Vec<String> {
     body.split(|c: char| c == ',' || c.is_whitespace())
         .filter(|s| !s.is_empty())
-        .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_').to_string())
+        .map(|s| {
+            s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                .to_string()
+        })
         .filter(|s| !s.is_empty() && s.chars().next().is_some_and(|c| c.is_uppercase()))
         .collect()
 }
@@ -555,7 +558,8 @@ fn parse_ident_list(body: &str) -> Vec<String> {
 fn print_graph(graph: &Graph, format: &str) -> Result<(), String> {
     match format {
         "text" => {
-            println!("nestrs DI graph ({} modules, {} controllers, {} providers, {} DTOs)",
+            println!(
+                "nestrs DI graph ({} modules, {} controllers, {} providers, {} DTOs)",
                 graph.modules.len(),
                 graph.controllers.len(),
                 graph.providers.len(),
@@ -579,7 +583,10 @@ fn print_graph(graph: &Graph, format: &str) -> Result<(), String> {
                         println!("    controller {} (prefix = {prefix})", c.name);
                         for route in &c.routes {
                             let full_path = join_route(&prefix, &route.path);
-                            println!("      {:>6} {full_path:30} -> {}::{}", route.method, c.name, route.handler);
+                            println!(
+                                "      {:>6} {full_path:30} -> {}::{}",
+                                route.method, c.name, route.handler
+                            );
                         }
                     }
                 }
@@ -588,7 +595,10 @@ fn print_graph(graph: &Graph, format: &str) -> Result<(), String> {
             Ok(())
         }
         "json" => {
-            println!("{}", serde_json::to_string_pretty(graph).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(graph).map_err(|e| e.to_string())?
+            );
             Ok(())
         }
         other => Err(format!("unknown format `{other}`; expected text or json")),
@@ -636,7 +646,10 @@ fn print_routes(graph: &Graph, format: &str) -> Result<(), String> {
                     });
                 }
             }
-            println!("{}", serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())?
+            );
             Ok(())
         }
         other => Err(format!("unknown format `{other}`; expected text or json")),
@@ -652,10 +665,7 @@ fn print_providers(graph: &Graph, format: &str) -> Result<(), String> {
             for module in &graph.modules {
                 for p in &graph.providers {
                     if module.providers.contains(&p.name) {
-                        by_module
-                            .entry(module.name.clone())
-                            .or_default()
-                            .push(p);
+                        by_module.entry(module.name.clone()).or_default().push(p);
                     }
                 }
             }
@@ -679,7 +689,10 @@ fn print_providers(graph: &Graph, format: &str) -> Result<(), String> {
             Ok(())
         }
         "json" => {
-            println!("{}", serde_json::to_string_pretty(&graph.providers).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&graph.providers).map_err(|e| e.to_string())?
+            );
             Ok(())
         }
         other => Err(format!("unknown format `{other}`; expected text or json")),
@@ -695,7 +708,10 @@ fn print_dtos(graph: &Graph, format: &str) -> Result<(), String> {
             Ok(())
         }
         "json" => {
-            println!("{}", serde_json::to_string_pretty(&graph.dtos).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&graph.dtos).map_err(|e| e.to_string())?
+            );
             Ok(())
         }
         other => Err(format!("unknown format `{other}`; expected text or json")),

@@ -118,11 +118,9 @@ pub fn dispatch(args: &[String]) -> Result<(), String> {
             "unknown `nestrs-cli graphql federation {other}` subcommand; \
              currently only `export` is implemented"
         )),
-        None => Err(
-            "expected `nestrs-cli graphql federation <subcommand>` \
+        None => Err("expected `nestrs-cli graphql federation <subcommand>` \
              (currently: `export`)"
-                .to_string(),
-        ),
+            .to_string()),
     }
 }
 
@@ -132,8 +130,7 @@ mod tests {
 
     #[test]
     fn is_federation_v2_sdl_detects_at_link() {
-        let sdl =
-            "directive @link(url: String) on FIELD_DEFINITION\ntype Query { ping: String }\n";
+        let sdl = "directive @link(url: String) on FIELD_DEFINITION\ntype Query { ping: String }\n";
         assert!(is_federation_v2_sdl(sdl));
     }
 

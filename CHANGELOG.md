@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`cargo fmt --all`** so `ci / lint-and-docs` rustfmt check is clean.
+- **`rustls` ≥ 0.23.45** (`RUSTSEC-2026-0285`: TLS 1.3 handshake messages
+  accepted across encryption-level boundaries). Direct pin in
+  `nestrs-microservices`; lockfile refresh covers transitive copies.
+
 ## [1.2.0] - 2026-09-17
 
 Wave 8 NestJS-parity depth leftovers plus a production/security pass on

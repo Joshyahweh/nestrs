@@ -53,7 +53,7 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 | Transport microservices | `nestrs-microservices` | **Partial** | Kafka, NATS, Redis, MQTT, RabbitMQ, gRPC—[Microservices](microservices.md). |
 | Socket.IO | **`nestrs-socketio`** | **Partial** | socketioxide layer on the Axum router; nestrs-ws stays RFC 6455. |
 | Serverless / Lambda | **`nestrs-lambda`** | **Partial** | `listen_lambda(router)` via `lambda_http`. No Fastify/Express adapter. |
-| Passport | **`nestrs-passport`** | **Partial** | `JwtStrategy` / `LocalBasicStrategy` on `AuthStrategy`. |
+| Passport | **`nestrs-auth-strategy`** | **Partial** | `JwtStrategy` / `LocalBasicStrategy` on `AuthStrategy`. |
 | Better Auth | **`nestrs-better-auth`** | **Partial** | Nest better-auth.rs router + session-cookie guard. |
 | SAML / LDAP | **`nestrs-saml`**, **`nestrs-ldap`** | **Partial** | SP redirect + bind auth; assertion crypto stays in the app. |
 | TypeORM / Sequelize | **`nestrs-sea-orm`** | **Partial** | SeaORM `for_root_async`; drizzle still carved out. |

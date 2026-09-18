@@ -159,7 +159,7 @@ jobs:
           sleep 60
           publish_pkg nestrs-security
           sleep 60
-          publish_pkg nestrs-passport
+          publish_pkg nestrs-auth-strategy
           sleep 60
           publish_pkg nestrs-better-auth
           sleep 60

@@ -24,7 +24,7 @@ members = [
   "nestrs-lambda",
   "nestrs-better-auth",
   "nestrs-bullmq",
-  "nestrs-passport",
+  "nestrs-auth-strategy",
   "nestrs-saml",
   "nestrs-ldap",
   "nestrs-sea-orm",

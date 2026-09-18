@@ -76,7 +76,7 @@
               "adapters/overview",
               "adapters/socketio",
               "adapters/lambda",
-              "adapters/passport",
+              "adapters/auth-strategy",
               "adapters/better-auth",
               "adapters/bullmq",
               "adapters/saml",

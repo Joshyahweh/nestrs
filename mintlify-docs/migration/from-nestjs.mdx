@@ -35,7 +35,7 @@ Moving an HTTP API from NestJS to nestrs means trading TypeScript decorators for
 | `@nestjs/platform-socket.io` | [`nestrs-socketio`](/adapters/socketio) | socketioxide layer on the Axum router |
 | `@nestjs/platform-fastify` | — | Out of scope (ADR-0001, Axum-only) |
 | AWS Lambda / serverless | [`nestrs-lambda`](/adapters/lambda) (`listen_lambda`) | API Gateway HTTP + REST |
-| `@nestjs/passport` | [`nestrs-passport`](/adapters/passport) | `JwtStrategy` / `LocalBasicStrategy` |
+| `@nestjs/passport` | [`nestrs-auth-strategy`](/adapters/auth-strategy) | `JwtStrategy` / `LocalBasicStrategy` |
 | nestjs-better-auth | [`nestrs-better-auth`](/adapters/better-auth) | Mount the better-auth.rs router + session-cookie guard |
 | `@nestjs/bullmq` | [`nestrs-bullmq`](/adapters/bullmq) | Redis key-layout producer; Node workers can consume |
 | `passport-saml` / `passport-ldap` | [`nestrs-saml`](/adapters/saml) / [`nestrs-ldap`](/adapters/ldap) | SP redirect + simple bind; assertion crypto stays in the app |

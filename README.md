@@ -75,7 +75,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs-lambda/` - AWS Lambda / API Gateway adapter
 - `nestrs-better-auth/` - Better Auth session-cookie guard + router nest
 - `nestrs-bullmq/` - BullMQ Redis key-layout producer
-- `nestrs-passport/` - Passport-style `AuthStrategy` adapters
+- `nestrs-auth-strategy/` - Passport-style `AuthStrategy` adapters
 - `nestrs-saml/` / `nestrs-ldap/` - SAML SP redirect and LDAP simple bind
 - `nestrs-sea-orm/` - SeaORM `for_root_async` (TypeORM/Sequelize analogue)
 - `website/` - landing page + docs hub (light/dark theme)

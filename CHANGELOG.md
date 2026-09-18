@@ -49,6 +49,10 @@ carved out.
 - **`rustls` ≥ 0.23.45** (`RUSTSEC-2026-0285`: TLS 1.3 handshake messages
   accepted across encryption-level boundaries). Direct pin in
   `nestrs-microservices`; lockfile refresh covers transitive copies.
+- **rustdoc** — `nestrs-passport` crate docs link `PassportGuard` instead of
+  the unaliased `AuthStrategyGuard` (`-D rustdoc::broken-intra-doc-links`).
+- **Fuzz CI** — install `cargo-fuzz` 0.13.2 with `--no-locked` so nightly
+  does not compile rustix 0.36.5's reserved `rustc_*` attributes.
 
 ## [1.2.0] - 2026-09-17
 

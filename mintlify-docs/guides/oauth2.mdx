@@ -13,14 +13,14 @@ There are two ways to opt in. The main-crate feature is the shortest path when y
 
 ```toml Main-crate feature
 [dependencies]
-nestrs = { version = "1.2.0", features = ["oauth2"] }
+nestrs = { version = "1.3.0", features = ["oauth2"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```toml Direct dependency
 [dependencies]
-nestrs = "1.2.0"
-nestrs-oauth2 = { version = "1.2.0", features = ["guard"] }
+nestrs = "1.3.0"
+nestrs-oauth2 = { version = "1.3.0", features = ["guard"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -339,10 +339,10 @@ One app with the full loop: `/auth/login` starts a PKCE authorization-code flow,
 
 ```toml
 [dependencies]
-nestrs = { version = "1.2.0", features = ["oauth2"] }
+nestrs = { version = "1.3.0", features = ["oauth2"] }
 # Direct dep: needed for the `nestrs_oauth2::` paths below (and later for
 # the `social` wrappers, which the main-crate feature does not enable).
-nestrs-oauth2 = { version = "1.2.0", features = ["guard"] }
+nestrs-oauth2 = { version = "1.3.0", features = ["guard"] }
 oauth2 = "5"          # to name PkceCodeVerifier in the pending-login map
 jsonwebtoken = "9"    # to name Algorithm in ValidationConfig
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

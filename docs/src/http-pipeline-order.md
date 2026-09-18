@@ -6,7 +6,7 @@ This page documents **deterministic** ordering for cross-cutting concerns. When 
 
 ## Request flow (conceptual)
 
-Incoming HTTP requests hit **global** `NestApplication::build_router` layers first (CORS, security headers, rate limits, request id, optional CSRF, and anything you add with `use_global_layer`), then the **per-route** stack below for the matched handler.
+Incoming HTTP requests hit **global** `NestApplication::build_router` layers first (`use_global_layer`, then `configure_middleware` / `MiddlewareConsumer`, then CORS, security headers, rate limits, request id, optional CSRF), then the **per-route** stack below for the matched handler.
 
 For **one route**, think of the pipeline as moving **inward** through filters → guards → interceptors → **handler**, then **outward** through interceptors and filters again (filters handle `HttpException` mapping on the error path):
 

@@ -1,0 +1,18 @@
+[package]
+name = "nestrs-lambda"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "AWS Lambda / API Gateway adapter for a nestrs Axum router (NestJS serverless analogue)."
+keywords = ["lambda", "aws", "nest", "axum", "serverless"]
+categories = ["web-programming", "network-programming"]
+
+[dependencies]
+axum.workspace = true
+lambda_http = { version = "0.13", default-features = false, features = ["apigw_http", "apigw_rest"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

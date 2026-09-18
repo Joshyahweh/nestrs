@@ -201,6 +201,10 @@ nestrs::masking::PolicyMaskingInterceptor
 nestrs::masking::json_response
 nestrs::masking::mask_response
 nestrs::masking::mask_value
+nestrs::middleware_consumer::MiddlewareConsumer
+nestrs::middleware_consumer::MiddlewareConsumer::apply_fn
+nestrs::middleware_consumer::MiddlewareConsumer::exclude
+nestrs::middleware_consumer::MiddlewareConsumer::for_routes
 nestrs::mvc::MvcModule
 nestrs::mvc::MvcModule::for_root
 nestrs::mvc::MvcService

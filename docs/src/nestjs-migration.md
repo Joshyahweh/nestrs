@@ -77,10 +77,9 @@ There is no single `ConfigService` token; use one `#[injectable]` “settings”
 
 Nest’s **`app.use`** / module middleware maps to:
 
+- **Path-scoped**: [`MiddlewareConsumer`](https://docs.rs/nestrs/latest/nestrs/struct.MiddlewareConsumer.html) + `NestApplication::configure_middleware` — `apply_fn` / `for_routes` / `exclude` on path prefixes (`starts_with`; no glob `ab*cd` DSL).  
 - **Global**: `NestApplication::use_global_layer` and the built-in helpers (`enable_cors`, `use_security_headers`, …) assembled in **`build_router`**.  
 - **Route-local**: guards, interceptors, and filters attached with attributes on **`#[routes]`**—ordering is fixed; see [HTTP pipeline order](http-pipeline-order.md).
-
-You do not get Nest’s “middleware for a route prefix only” DSL; model that with **route groups** (separate controllers) or **Axum `Router::nest`** patterns merged into the app.
 
 ## Exceptions and HTTP errors
 

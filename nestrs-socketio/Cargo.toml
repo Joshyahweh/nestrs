@@ -1,0 +1,18 @@
+[package]
+name = "nestrs-socketio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Socket.IO adapter for nestrs (NestJS @nestjs/platform-socket.io analogue) via socketioxide."
+keywords = ["socketio", "websocket", "nest", "axum", "adapter"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+axum = { workspace = true, features = ["ws"] }
+socketioxide = "0.15.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

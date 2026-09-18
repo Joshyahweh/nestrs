@@ -67,7 +67,8 @@
               "ecosystem/database",
               "ecosystem/caching",
               "ecosystem/scheduling",
-              "ecosystem/openapi"
+              "ecosystem/openapi",
+              "ecosystem/adapters"
             ]
           },
           {

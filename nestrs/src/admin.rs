@@ -5,7 +5,7 @@
 //! Enable with the `admin` Cargo feature:
 //!
 //! ```toml
-//! nestrs = { version = "1.2.0", features = ["admin"] }
+//! nestrs = { version = "1.3.0", features = ["admin"] }
 //! ```
 //!
 //! Then on the application:
@@ -22,6 +22,7 @@
 //!
 //! Endpoints (all under `/__nestrs/`):
 //!
+//! - `GET /__nestrs` and `/__nestrs/devtools` — Nest Devtools analogue (HTML)
 //! - `GET /__nestrs/health`     — liveness, uptime, version
 //! - `GET /__nestrs/providers`  — `Vec<{ type_name, scope }>`
 //! - `GET /__nestrs/routes`     — `Vec<RouteInfo>` (method, path, handler, openapi summary)
@@ -86,6 +87,8 @@ impl AdminHandle {
             snapshot_provider: provider,
         };
         let app: Router = Router::new()
+            .route("/__nestrs", get(get_devtools))
+            .route("/__nestrs/devtools", get(get_devtools))
             .route("/__nestrs/health", get(get_health))
             .route("/__nestrs/providers", get(get_providers))
             .route("/__nestrs/routes", get(get_routes))
@@ -162,6 +165,57 @@ async fn authed(
         return Err(AuthError::Unauthorized);
     }
     Ok(snapshot(&state))
+}
+
+async fn get_devtools(State(state): State<AdminState>, headers: axum::http::HeaderMap) -> Response {
+    match authed(State(state.clone()), headers).await {
+        Ok(snap) => {
+            let html = format!(
+                r#"<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>nestrs Devtools</title>
+<style>
+body{{font-family:ui-sans-serif,system-ui,sans-serif;margin:2rem;max-width:52rem;color:#111}}
+a{{color:#0b57d0}} table{{border-collapse:collapse;width:100%}}
+td,th{{border-bottom:1px solid #ddd;padding:.4rem .5rem;text-align:left;font-size:.9rem}}
+code{{background:#f4f4f5;padding:.1rem .3rem}}
+</style></head><body>
+<h1>nestrs Devtools</h1>
+<p>v{version} · uptime {uptime} ms · Nest Devtools analogue on the admin sidecar.</p>
+<p>
+<a href="/__nestrs/health">health</a> ·
+<a href="/__nestrs/providers">providers JSON</a> ·
+<a href="/__nestrs/routes">routes JSON</a> ·
+<a href="/__nestrs/openapi.json">openapi.json</a>
+</p>
+<h2>Routes ({n_routes})</h2>
+<table><thead><tr><th>Method</th><th>Path</th></tr></thead><tbody>
+{rows}
+</tbody></table>
+</body></html>"#,
+                version = snap.version,
+                uptime = snap.uptime_ms,
+                n_routes = snap.routes.len(),
+                rows = snap
+                    .routes
+                    .iter()
+                    .map(|r| format!(
+                        "<tr><td><code>{}</code></td><td><code>{}</code></td></tr>",
+                        html_escape(r.method),
+                        html_escape(r.path)
+                    ))
+                    .collect::<String>(),
+            );
+            axum::response::Html(html).into_response()
+        }
+        Err(e) => e.into(),
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 async fn get_health(State(state): State<AdminState>, headers: axum::http::HeaderMap) -> Response {

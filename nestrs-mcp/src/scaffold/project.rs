@@ -73,7 +73,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nestrs = {{ version = "1.2.0"{transport_features} }}
+nestrs = {{ version = "1.3.0"{transport_features} }}
 tokio = {{ version = "1", features = ["full"] }}
 "#
     )

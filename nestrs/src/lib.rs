@@ -118,6 +118,7 @@ mod masking;
 /// global `metrics` recorder slot and forwards to every installed backend
 /// (Prometheus recorder, and — with `otel` — the OTLP bridge).
 mod metrics_export;
+mod middleware_consumer;
 #[cfg(feature = "mongo")]
 mod mongo;
 mod multipart;
@@ -215,6 +216,7 @@ pub use masking::{
 /// [`NestApplication::enable_metrics`]), and — with the `otel`
 /// feature plus `OpenTelemetryConfig::metrics()` — the OTLP pipeline.
 pub use metrics;
+pub use middleware_consumer::MiddlewareConsumer;
 #[cfg(feature = "mongo")]
 pub use mongo::{MongoModule, MongoService};
 #[cfg(feature = "mvc")]
@@ -396,13 +398,13 @@ pub mod prelude {
         GatewayTimeoutException, GoneException, HealthIndicator, HealthStatus, HttpException,
         HttpExecutionContext, I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Interceptor,
         InternalServerErrorException, Locale, LoggingInterceptor, MethodNotAllowedException,
-        NestApiVersion, NestApplication, NestConfig, NestDto, NestFactory, NotAcceptableException,
-        NotFoundException, NotImplementedException, ParseIntPipe, PathNormalization,
-        PayloadTooLargeException, PaymentRequiredException, PipedBody1, PipedBody2, PipedBody3,
-        PipedBody4, PipedPath1, PipedPath2, PipedPath3, PipedPath4, PipedQuery1, PipedQuery2,
-        PipedQuery3, PipedQuery4, ProblemDetails, RateLimitOptions, RawBody, ReadinessContext,
-        RequestContext, RequestContextMissing, RequestScoped, RequestScopedMissing,
-        RequestTimeoutException, RequestTracingOptions, SecurityHeaders,
+        MiddlewareConsumer, NestApiVersion, NestApplication, NestConfig, NestDto, NestFactory,
+        NotAcceptableException, NotFoundException, NotImplementedException, ParseIntPipe,
+        PathNormalization, PayloadTooLargeException, PaymentRequiredException, PipedBody1,
+        PipedBody2, PipedBody3, PipedBody4, PipedPath1, PipedPath2, PipedPath3, PipedPath4,
+        PipedQuery1, PipedQuery2, PipedQuery3, PipedQuery4, ProblemDetails, RateLimitOptions,
+        RawBody, ReadinessContext, RequestContext, RequestContextMissing, RequestScoped,
+        RequestScopedMissing, RequestTimeoutException, RequestTracingOptions, SecurityHeaders,
         ServiceUnavailableException, TestClient, TestRequest, TestingModule, TestingModuleBuilder,
         TooManyRequestsException, TracingConfig, TracingFormat, TrimPipe, TypedConfigModule,
         UnauthorizedException, UnprocessableEntityException, UnsupportedMediaTypeException,
@@ -1051,6 +1053,8 @@ pub struct NestApplication {
     request_tracing: Option<RequestTracingOptions>,
     /// User-defined Tower layers applied **outermost** after all built-in middleware (see [`Self::use_global_layer`]).
     global_layers: Vec<GlobalLayerFn>,
+    /// NestJS `MiddlewareConsumer` rules (path-scoped middleware; see [`Self::configure_middleware`]).
+    middleware_consumer: crate::middleware_consumer::MiddlewareConsumer,
     /// Optional global [`ExceptionFilter`] (runs just above route services, before CORS and production sanitization).
     exception_filter: Option<std::sync::Arc<dyn ExceptionFilter>>,
     /// When true, install [`nestrs_default_not_found_handler`] as the router fallback (Nest-style JSON 404).
@@ -1122,6 +1126,7 @@ impl NestApplication {
             openapi: None,
             request_tracing: None,
             global_layers: Vec::new(),
+            middleware_consumer: crate::middleware_consumer::MiddlewareConsumer::new(),
             exception_filter: None,
             default_404_fallback: false,
             compression: false,
@@ -2017,6 +2022,29 @@ impl NestApplication {
         self
     }
 
+    /// NestJS `MiddlewareConsumer` analogue: apply a middleware function to selected
+    /// path prefixes (`for_routes`) with optional `exclude`.
+    ///
+    /// On the incoming request these layers sit **inside** [`Self::use_global_layer`]
+    /// (your global layers wrap them) and **outside** built-in layers such as CORS.
+    /// Non-matching paths skip the function and call `next` unchanged.
+    ///
+    /// ```ignore
+    /// NestFactory::create::<AppModule>().configure_middleware(
+    ///     MiddlewareConsumer::new()
+    ///         .apply_fn(|req, next| async move { next.run(req).await })
+    ///         .for_routes(["/admin"])
+    ///         .exclude(["/admin/health"]),
+    /// );
+    /// ```
+    pub fn configure_middleware(
+        mut self,
+        consumer: crate::middleware_consumer::MiddlewareConsumer,
+    ) -> Self {
+        self.middleware_consumer = consumer;
+        self
+    }
+
     /// Registers a global [`ExceptionFilter`] for responses produced from [`HttpException`] (handlers returning
     /// `Err(HttpException)`, guard failures, etc.).
     ///
@@ -2072,6 +2100,7 @@ impl NestApplication {
         let server_timing = self.server_timing;
         let request_tracing = self.request_tracing;
         let global_layers = self.global_layers;
+        let middleware_rules = self.middleware_consumer.into_rules();
         let default_404_fallback = self.default_404_fallback;
         let compression = self.compression;
         let request_decompression = self.request_decompression;
@@ -2456,6 +2485,13 @@ impl NestApplication {
                     router = router.layer(tower_cookies::CookieManagerLayer::new());
                 }
             }
+        }
+
+        for rule in middleware_rules {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                rule,
+                crate::middleware_consumer::route_middleware,
+            ));
         }
 
         for apply in global_layers {

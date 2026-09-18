@@ -1,0 +1,19 @@
+[package]
+name = "nestrs-sea-orm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "SeaORM adapter for nestrs (NestJS TypeORM / Sequelize analogue)."
+keywords = ["orm", "sea-orm", "sql", "nest", "adapter"]
+categories = ["database", "web-programming"]
+
+[dependencies]
+axum.workspace = true
+nestrs-core = { path = "../nestrs-core", version = "1.3.0" }
+sea-orm = { version = "1.1", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-sqlite"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

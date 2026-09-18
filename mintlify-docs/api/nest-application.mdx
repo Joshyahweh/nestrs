@@ -79,6 +79,25 @@ NestFactory::create::<AppModule>()
     .into_router();
 ```
 
+### `configure_middleware`
+
+NestJS `MiddlewareConsumer` analogue: apply a middleware function to selected path prefixes (`for_routes`) with optional `exclude`. Matching uses path-prefix `starts_with`, not Nest's glob `ab*cd` DSL. These layers sit **inside** `use_global_layer` (your global layers wrap them).
+
+```rust
+pub fn configure_middleware(self, consumer: MiddlewareConsumer) -> Self
+```
+
+```rust
+NestFactory::create::<AppModule>()
+    .configure_middleware(
+        MiddlewareConsumer::new()
+            .apply_fn(|req, next| async move { next.run(req).await })
+            .for_routes(["/admin"])
+            .exclude(["/admin/health"]),
+    )
+    .into_router();
+```
+
 ### `enable_media_type_versioning`
 
 Shorthand for `Accept: ...;version=N` style versioning.

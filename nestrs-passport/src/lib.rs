@@ -1,7 +1,7 @@
 //! Passport-style strategies for nestrs (`@nestjs/passport` analogue).
 //!
 //! Nest Passport wraps Node `passport` strategies. nestrs already has
-//! [`AuthStrategy`] + [`AuthStrategyGuard`]. This crate ships the two
+//! [`AuthStrategy`] + [`PassportGuard`]. This crate ships the two
 //! strategies apps reach for first: JWT bearer and HTTP Basic (local).
 
 #![doc(html_root_url = "https://docs.rs/nestrs-passport/1.3.0")]

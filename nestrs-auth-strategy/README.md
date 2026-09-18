@@ -1,14 +1,14 @@
-# nestrs-passport
+# nestrs-auth-strategy
 
 `@nestjs/passport` analogue: strategies on nestrs [`AuthStrategy`], not Node
 `passport`. Use with `AuthStrategyGuard` / `PassportGuard`.
 
 ```toml
-nestrs-passport = "1.3.0"
+nestrs-auth-strategy = "1.3.0"
 ```
 
 ```rust,ignore
-use nestrs_passport::{JwtStrategy, PassportGuard};
+use nestrs_auth_strategy::{JwtStrategy, PassportGuard};
 
 let strategy = JwtStrategy::new(|token| async move { Ok(token) });
 // register as a provider and `#[use_guards(PassportGuard::<JwtStrategy<_>>)]`

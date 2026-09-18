@@ -27,7 +27,8 @@ the rest. Additive minor on the 1.2 contract.
 - **`nestrs-lambda`** — AWS Lambda / API Gateway (`listen_lambda`).
 - **`nestrs-better-auth`** — nest better-auth.rs Axum router + `BetterAuthGuard`.
 - **`nestrs-bullmq`** — BullMQ Redis key-layout producer (Node workers can consume).
-- **`nestrs-passport`** — `JwtStrategy` / `LocalBasicStrategy` on `AuthStrategy`.
+- **`nestrs-auth-strategy`** — `JwtStrategy` / `LocalBasicStrategy` on `AuthStrategy`.
+  crates.io already has `nestrs-passport` (yanked `0.1.0`, different owner).
 - **`nestrs-saml`** — SP-initiated redirect + `SamlResponseValidator` trait.
 - **`nestrs-ldap`** — LDAP simple bind (`passport-ldap` analogue).
 - **`nestrs-sea-orm`** — SeaORM `for_root_async` (TypeORM/Sequelize analogue).
@@ -49,7 +50,7 @@ carved out.
 - **`rustls` ≥ 0.23.45** (`RUSTSEC-2026-0285`: TLS 1.3 handshake messages
   accepted across encryption-level boundaries). Direct pin in
   `nestrs-microservices`; lockfile refresh covers transitive copies.
-- **rustdoc** — `nestrs-passport` crate docs link `PassportGuard` instead of
+- **rustdoc** — `nestrs-auth-strategy` crate docs link `PassportGuard` instead of
   the unaliased `AuthStrategyGuard` (`-D rustdoc::broken-intra-doc-links`).
 - **Fuzz CI** — install `cargo-fuzz` 0.13.2 with `--no-locked` so nightly
   does not compile rustix 0.36.5's reserved `rustc_*` attributes.

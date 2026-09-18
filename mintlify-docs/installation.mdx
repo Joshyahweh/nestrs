@@ -17,7 +17,7 @@ nestrs depends on tokio for its async runtime. You must enable the `macros` and 
 
 ```toml Cargo.toml
 [dependencies]
-nestrs = "1.2.0"
+nestrs = "1.3.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -53,7 +53,7 @@ async fn main() {
 nestrs has a `default = []` feature set — nothing optional is enabled unless you ask for it. Enable features by adding them to the `features` list on the `nestrs` dependency:
 
 ```toml
-nestrs = { version = "1.2.0", features = ["openapi", "cache-redis"] }
+nestrs = { version = "1.3.0", features = ["openapi", "cache-redis"] }
 ```
 
 The table below lists every available feature flag and what it adds to your project.
@@ -136,13 +136,13 @@ The table below lists every available feature flag and what it adds to your proj
 
 ```toml Minimal API
 [dependencies]
-nestrs = "1.2.0"
+nestrs = "1.3.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```toml REST API with OpenAPI
 [dependencies]
-nestrs = { version = "1.2.0", features = ["openapi"] }
+nestrs = { version = "1.3.0", features = ["openapi"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 validator = { version = "0.20", features = ["derive"] }
@@ -150,7 +150,7 @@ validator = { version = "0.20", features = ["derive"] }
 
 ```toml Full-stack with auth
 [dependencies]
-nestrs = { version = "1.2.0", features = ["openapi", "session-redis", "csrf", "database-sqlx"] }
+nestrs = { version = "1.3.0", features = ["openapi", "session-redis", "csrf", "database-sqlx"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 validator = { version = "0.20", features = ["derive"] }
@@ -158,19 +158,19 @@ validator = { version = "0.20", features = ["derive"] }
 
 ```toml Microservices with NATS
 [dependencies]
-nestrs = { version = "1.2.0", features = ["microservices-nats"] }
+nestrs = { version = "1.3.0", features = ["microservices-nats"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```toml GraphQL with WebSockets
 [dependencies]
-nestrs = { version = "1.2.0", features = ["graphql", "ws"] }
+nestrs = { version = "1.3.0", features = ["graphql", "ws"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```toml Observability with OpenTelemetry
 [dependencies]
-nestrs = { version = "1.2.0", features = ["otel"] }
+nestrs = { version = "1.3.0", features = ["otel"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

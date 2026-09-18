@@ -7,6 +7,42 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-17
+
+Wave 9 NestJS gap close: rebuild what maps onto Axum, adapter crates for
+the rest. Additive minor on the 1.2 contract.
+
+### Added — rebuilds
+
+- **`MiddlewareConsumer`** — Nest `configure(consumer)` analogue.
+  `NestApplication::configure_middleware` applies an `apply_fn` to path
+  prefixes (`for_routes` / `exclude`). Non-matching paths skip the function.
+- **Admin Devtools HTML** — `GET /__nestrs` and `/__nestrs/devtools` on the
+  admin sidecar (route table + JSON links). Nest Devtools analogue, not a
+  full UI product.
+
+### Added — adapter crates
+
+- **`nestrs-socketio`** — Socket.IO via socketioxide (`@nestjs/platform-socket.io`).
+- **`nestrs-lambda`** — AWS Lambda / API Gateway (`listen_lambda`).
+- **`nestrs-better-auth`** — nest better-auth.rs Axum router + `BetterAuthGuard`.
+- **`nestrs-bullmq`** — BullMQ Redis key-layout producer (Node workers can consume).
+- **`nestrs-passport`** — `JwtStrategy` / `LocalBasicStrategy` on `AuthStrategy`.
+- **`nestrs-saml`** — SP-initiated redirect + `SamlResponseValidator` trait.
+- **`nestrs-ldap`** — LDAP simple bind (`passport-ldap` analogue).
+- **`nestrs-sea-orm`** — SeaORM `for_root_async` (TypeORM/Sequelize analogue).
+
+Header/media-type versioning already dispatches unversioned paths (1.2.0).
+Fastify remains out of scope (ADR-0001, Axum-only). `nestrs-drizzle` stays
+carved out.
+
+### Docs
+
+- rustdoc + mintlify synced to **1.3.0** (`html_root_url`, install snippets,
+  MCP scaffold template).
+- Migration / ecosystem pages cover `MiddlewareConsumer` and the eight
+  adapter crates (`mintlify-docs/ecosystem/adapters.mdx`).
+
 ### Fixed
 
 - **`cargo fmt --all`** so `ci / lint-and-docs` rustfmt check is clean.

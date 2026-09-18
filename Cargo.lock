@@ -52,6 +52,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "aliasable"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "250f629c0161ad8107cf89319e990051fae62832fd343083bea452d93e2205fd"
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -542,6 +548,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws_lambda_events"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7319a086b79c3ff026a33a61e80f04fd3885fbb73237981ea080d21944e1cb1c"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "http",
+ "http-body",
+ "http-serde",
+ "query_map",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "axum"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -574,7 +596,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-tungstenite",
- "tower",
+ "tower 0.5.3",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -600,7 +622,7 @@ dependencies = [
  "pin-project-lite",
  "serde_core",
  "sync_wrapper",
- "tower",
+ "tower 0.5.3",
  "tower-layer",
  "tower-service",
 ]
@@ -976,7 +998,7 @@ version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1110bd8a634a1ab8cb04345d8d878267d57c3cf1b38d91b71af6686408bbca6a"
 dependencies = [
- "heck",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -1773,6 +1795,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "engineioxide"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b48069eef4227bde0e5a8e0601ddabfbdef887c05b831cd314d2990726a461"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "pin-project-lite",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-tungstenite",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
 name = "envy"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2264,13 +2313,19 @@ dependencies = [
 
 [[package]]
 name = "heck"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
+
+[[package]]
+name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-app"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs",
@@ -2438,6 +2493,16 @@ name = "http-range-header"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
+
+[[package]]
+name = "http-serde"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f056c8559e3757392c8d091e796416e4649d8e49e88b8d76df6c002f05027fd"
+dependencies = [
+ "http",
+ "serde",
+]
 
 [[package]]
 name = "httparse"
@@ -2692,6 +2757,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "inherent"
+version = "1.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bee2c455ca60511a054699102d40ce7153621cb2429558f9eaa600e4499b5984"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
+]
+
+[[package]]
 name = "inotify"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2943,7 +3019,7 @@ dependencies = [
 
 [[package]]
 name = "lab"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-graphql",
  "async-trait",
@@ -2960,6 +3036,82 @@ dependencies = [
  "tokio-tungstenite",
  "tower-cookies",
  "validator",
+]
+
+[[package]]
+name = "lambda_http"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67fe279be7f89f5f72c97c3a96f45c43db8edab1007320ecc6a5741273b4d6db"
+dependencies = [
+ "aws_lambda_events",
+ "base64 0.22.1",
+ "bytes",
+ "encoding_rs",
+ "futures",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "lambda_runtime",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "tokio-stream",
+ "url",
+]
+
+[[package]]
+name = "lambda_runtime"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed49669d6430292aead991e19bf13153135a884f916e68f32997c951af637ebe"
+dependencies = [
+ "async-stream",
+ "base64 0.22.1",
+ "bytes",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "http-serde",
+ "hyper",
+ "hyper-util",
+ "lambda_runtime_api_client",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "tokio",
+ "tokio-stream",
+ "tower 0.4.13",
+ "tower-layer",
+ "tracing",
+]
+
+[[package]]
+name = "lambda_runtime_api_client"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c90a10f094475a34a04da2be11686c4dcfe214d93413162db9ffdff3d3af293a"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "tokio",
+ "tower 0.4.13",
+ "tower-service",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2987,6 +3139,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
  "spin 0.9.9",
+]
+
+[[package]]
+name = "lber"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2df7f9fd9f64cf8f59e1a4a0753fe7d575a5b38d3d7ac5758dcee9357d83ef0a"
+dependencies = [
+ "bytes",
+ "nom 7.1.3",
+]
+
+[[package]]
+name = "ldap3"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "166199a8207874a275144c8a94ff6eed5fcbf5c52303e4d9b4d53a0c7ac76554"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "futures-util",
+ "lazy_static",
+ "lber",
+ "log",
+ "nom 7.1.3",
+ "percent-encoding",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "url",
 ]
 
 [[package]]
@@ -3459,7 +3643,7 @@ checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "nestrs"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "argon2",
  "async-graphql",
@@ -3516,7 +3700,7 @@ dependencies = [
  "tokio-cron-scheduler",
  "tokio-util",
  "toml",
- "tower",
+ "tower 0.5.3",
  "tower-cookies",
  "tower-http",
  "tower-sessions",
@@ -3530,8 +3714,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-better-auth"
+version = "1.3.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "nestrs-core",
+ "tokio",
+]
+
+[[package]]
+name = "nestrs-bullmq"
+version = "1.3.0"
+dependencies = [
+ "redis",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "nestrs-core"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3545,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-cqrs"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3555,7 +3760,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-events"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "nestrs-core",
@@ -3565,7 +3770,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-graphql"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-graphql",
  "async-graphql-derive",
@@ -3578,7 +3783,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-health"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -3589,13 +3794,13 @@ dependencies = [
  "reqwest 0.12.28",
  "serde_json",
  "tokio",
- "tower",
+ "tower 0.5.3",
  "tracing",
 ]
 
 [[package]]
 name = "nestrs-http"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "nestrs-core",
@@ -3604,8 +3809,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-lambda"
+version = "1.3.0"
+dependencies = [
+ "axum 0.7.9",
+ "lambda_http",
+ "tokio",
+]
+
+[[package]]
+name = "nestrs-ldap"
+version = "1.3.0"
+dependencies = [
+ "ldap3",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "nestrs-macros"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -3617,7 +3840,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-mcp"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -3648,7 +3871,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-microservices"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -3681,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-mongodb"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "axum 0.7.9",
  "bson",
@@ -3695,7 +3918,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-oauth2"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -3720,7 +3943,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 1.0.69",
  "tokio",
- "tower",
+ "tower 0.5.3",
  "tracing",
  "url",
  "wiremock",
@@ -3728,7 +3951,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-oauth2-macros"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3737,7 +3960,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-openapi"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -3746,8 +3969,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-passport"
+version = "1.3.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "base64 0.22.1",
+ "nestrs-core",
+ "nestrs-security",
+ "tokio",
+]
+
+[[package]]
 name = "nestrs-prisma"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3758,13 +3993,21 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
- "tower",
+ "tower 0.5.3",
+ "uuid",
+]
+
+[[package]]
+name = "nestrs-saml"
+version = "1.3.0"
+dependencies = [
+ "url",
  "uuid",
 ]
 
 [[package]]
 name = "nestrs-scaffold"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "nestrs-mcp",
  "regex",
@@ -3775,8 +4018,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-sea-orm"
+version = "1.3.0"
+dependencies = [
+ "axum 0.7.9",
+ "nestrs-core",
+ "sea-orm",
+ "tokio",
+]
+
+[[package]]
 name = "nestrs-security"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3784,14 +4037,23 @@ dependencies = [
  "serde_json",
  "subtle",
  "tokio",
- "tower",
+ "tower 0.5.3",
  "tower-cookies",
  "tracing",
 ]
 
 [[package]]
+name = "nestrs-socketio"
+version = "1.3.0"
+dependencies = [
+ "axum 0.7.9",
+ "socketioxide",
+ "tokio",
+]
+
+[[package]]
 name = "nestrs-storage"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3809,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-throttle"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3823,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-ws"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -4203,6 +4465,39 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
+name = "ordered-float"
+version = "4.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bb71e1b3fa6ca1c61f383464aaf2bb0e2f8e772a1f01d486832464de363b951"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "ouroboros"
+version = "0.18.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e0f050db9c44b97a94723127e6be766ac5c340c48f2c4bb3ffa11713744be59"
+dependencies = [
+ "aliasable",
+ "ouroboros_macro",
+ "static_assertions",
+]
+
+[[package]]
+name = "ouroboros_macro"
+version = "0.18.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c7028bdd3d43083f6d8d4d5187680d0d3560d54df4cc9d752005268b41e64d0"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "proc-macro2-diagnostics",
+ "quote",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "p12-keystore"
@@ -4642,6 +4937,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro2-diagnostics"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+ "version_check",
+ "yansi",
+]
+
+[[package]]
 name = "prost"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4657,7 +4965,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
- "heck",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -4791,6 +5099,17 @@ dependencies = [
  "wasi",
  "web-sys",
  "winapi",
+]
+
+[[package]]
+name = "query_map"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eab6b8b1074ef3359a863758dae650c7c0c6027927a085b7af911c8e0bf3a15"
+dependencies = [
+ "form_urlencoded",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -5149,7 +5468,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
- "tower",
+ "tower 0.5.3",
  "tower-http",
  "tower-service",
  "url",
@@ -5188,7 +5507,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-util",
- "tower",
+ "tower 0.5.3",
  "tower-http",
  "tower-service",
  "url",
@@ -5591,6 +5910,75 @@ name = "sdd"
 version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca"
+
+[[package]]
+name = "sea-bae"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "260bbc7148a8d6818ac5032a1b9970da1a68bdd723d45b12d59f7c1bf3565e24"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "sea-orm"
+version = "1.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2dc312fedd460a47ea563911761d254a84e7b51d8cc73ec92c929e78f33fa957"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "derive_more",
+ "futures-util",
+ "log",
+ "ouroboros",
+ "sea-orm-macros",
+ "sea-query",
+ "sea-query-binder",
+ "serde",
+ "sqlx",
+ "strum 0.26.3",
+ "thiserror 2.0.18",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "sea-orm-macros"
+version = "1.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b9a3f90e336ec74803e8eb98c61bc98754c1adfba3b4f84d946237b752b1c88"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "sea-bae",
+ "syn 2.0.117",
+ "unicode-ident",
+]
+
+[[package]]
+name = "sea-query"
+version = "0.32.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a5d1c518eaf5eda38e5773f902b26ab6d5e9e9e2bb2349ca6c64cf96f80448c"
+dependencies = [
+ "inherent",
+ "ordered-float",
+]
+
+[[package]]
+name = "sea-query-binder"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0019f47430f7995af63deda77e238c17323359af241233ec768aba1faea7608"
+dependencies = [
+ "sea-query",
+ "sqlx",
+]
 
 [[package]]
 name = "sec1"
@@ -6009,6 +6397,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "socketioxide"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "929e1bc0629c6c8ceaa39473082aa2df35a2a5f0c300382912047bd5dccb9740"
+dependencies = [
+ "bytes",
+ "engineioxide",
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body",
+ "hyper",
+ "matchit 0.8.4",
+ "pin-project-lite",
+ "rustversion",
+ "serde",
+ "socketioxide-core",
+ "socketioxide-parser-common",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "socketioxide-core"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20fbe5455c862962f547bac834bcc6db8659a7033934b9c45c6e1cfb4f9dc178"
+dependencies = [
+ "bytes",
+ "engineioxide",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "socketioxide-parser-common"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "554757f11f7b0944334fc00765523443c39a05fcd7be69aaaffbda06fbc4cef7"
+dependencies = [
+ "bytes",
+ "itoa",
+ "serde",
+ "serde_json",
+ "socketioxide-core",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6105,7 +6543,7 @@ checksum = "19a9c1841124ac5a61741f96e1d9e2ec77424bf323962dd894bdb93f37d5219b"
 dependencies = [
  "dotenvy",
  "either",
- "heck",
+ "heck 0.5.0",
  "hex",
  "once_cell",
  "proc-macro2",
@@ -6251,6 +6689,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
 name = "static_assertions_next"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6297,7 +6741,7 @@ version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
 dependencies = [
- "heck",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "rustversion",
@@ -6310,7 +6754,7 @@ version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
 dependencies = [
- "heck",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6770,7 +7214,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-stream",
- "tower",
+ "tower 0.5.3",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -6824,6 +7268,21 @@ dependencies = [
  "prost",
  "prost-types",
  "tonic",
+]
+
+[[package]]
+name = "tower"
+version = "0.4.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "pin-project",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -6885,7 +7344,7 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
- "tower",
+ "tower 0.5.3",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -7778,7 +8237,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea61de684c3ea68cb082b7a88508a8b27fcc8b797d738bfc99a82facf1d752dc"
 dependencies = [
  "anyhow",
- "heck",
+ "heck 0.5.0",
  "wit-parser",
 ]
 
@@ -7789,7 +8248,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7c566e0f4b284dd6561c786d9cb0142da491f46a9fbed79ea69cdad5db17f21"
 dependencies = [
  "anyhow",
- "heck",
+ "heck 0.5.0",
  "indexmap",
  "prettyplease",
  "syn 2.0.117",
@@ -7892,6 +8351,12 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
 ]
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yoke"

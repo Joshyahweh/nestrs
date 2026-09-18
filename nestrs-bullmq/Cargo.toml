@@ -1,0 +1,20 @@
+[package]
+name = "nestrs-bullmq"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "BullMQ-compatible Redis producer for nestrs queues (NestJS @nestjs/bullmq analogue)."
+keywords = ["bullmq", "redis", "queue", "nest", "adapter"]
+categories = ["asynchronous", "database"]
+
+[dependencies]
+redis = { version = "0.29", features = ["tokio-comp"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

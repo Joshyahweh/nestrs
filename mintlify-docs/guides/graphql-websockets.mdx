@@ -13,7 +13,7 @@ Add the `graphql` feature to your `nestrs` dependency and add `async-graphql` an
 
 ```toml
 [dependencies]
-nestrs = { version = "1.2.0", features = ["graphql"] }
+nestrs = { version = "1.3.0", features = ["graphql"] }
 async-graphql = "7"
 ```
 
@@ -129,7 +129,7 @@ async-graphql 7 registers the federation entity field as **`entities`** (no unde
 
 ```toml
 [dependencies]
-nestrs = { version = "1.2.0", features = ["graphql-federation-gateway"] }
+nestrs = { version = "1.3.0", features = ["graphql-federation-gateway"] }
 ```
 
 The feature implies `graphql-authz`, and the gateway types are re-exported under `nestrs::graphql::federation`: `federation_router`, `federation_router_with_options`, `federation_router_with_hook`, `FederationConfig`, `SubgraphSpec`, `EntityResolver`, and `FederationError`.
@@ -263,7 +263,7 @@ Add the `ws` feature:
 
 ```toml
 [dependencies]
-nestrs = { version = "1.2.0", features = ["ws"] }
+nestrs = { version = "1.3.0", features = ["ws"] }
 ```
 
 `nestrs-ws` is re-exported as `nestrs::ws` when the feature is enabled.
@@ -500,3 +500,20 @@ async fn main() {
 
   </Accordion>
 </AccordionGroup>
+
+## Socket.IO
+
+`nestrs-ws` speaks RFC 6455 JSON events. For the NestJS `@nestjs/platform-socket.io` protocol, add the companion crate:
+
+```toml
+[dependencies]
+nestrs-socketio = "1.3.0"
+```
+
+```rust
+use nestrs_socketio::{merge_socketio, socketio_layer};
+
+let (layer, io) = socketio_layer();
+io.ns("/", |s| async move { /* socketioxide handlers */ });
+let router = merge_socketio(NestFactory::create::<AppModule>().into_router(), layer);
+```

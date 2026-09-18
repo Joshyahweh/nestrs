@@ -12,7 +12,7 @@ categories = ["network-programming", "web-programming", "asynchronous"]
 [dependencies]
 async-trait = "0.1"
 axum = { workspace = true, features = ["ws"] }
-nestrs-core = { version = "1.2.0", path = "../nestrs-core" }
+nestrs-core = { version = "1.3.0", path = "../nestrs-core" }
 tokio = { workspace = true, features = ["sync", "time"] }
 futures-util = { version = "0.3", features = ["sink"] }
 serde = { version = "1", features = ["derive"] }

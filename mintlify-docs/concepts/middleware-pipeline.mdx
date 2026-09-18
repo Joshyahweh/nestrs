@@ -26,6 +26,26 @@ On the response path, the layers unwind in reverse: the handler produces a respo
   NestJS teaches **guards → interceptors → pipes → handler**. nestrs respects a similar model but the exact nesting differs — exception filters are outermost. Refer to this page as the authoritative contract for nestrs, not a line-for-line NestJS clone.
 </Note>
 
+## Path-scoped middleware — `MiddlewareConsumer`
+
+Nest's `configure(consumer: MiddlewareConsumer)` analogue is `NestApplication::configure_middleware`. Use `apply_fn` then `for_routes` / `exclude` to scope an Axum middleware function to path prefixes (`starts_with`; no glob `ab*cd` DSL). Non-matching paths skip the function.
+
+```rust
+use nestrs::prelude::*;
+
+NestFactory::create::<AppModule>()
+    .configure_middleware(
+        MiddlewareConsumer::new()
+            .apply_fn(|req, next| async move { next.run(req).await })
+            .for_routes(["/admin"])
+            .exclude(["/admin/health"]),
+    )
+    .listen_graceful(3000)
+    .await;
+```
+
+These layers sit **inside** `use_global_layer` (your global layers wrap them). For process-wide Tower layers, keep using `use_global_layer`.
+
 ## Guards — `CanActivate`
 
 Guards run before the handler and decide whether the request is allowed to proceed. Implement the `CanActivate` trait:

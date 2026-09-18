@@ -31,6 +31,15 @@ Moving an HTTP API from NestJS to nestrs means trading TypeScript decorators for
 | `@InjectModel(User)` | `MongoService::model::<User>()` | After `MongoModule::for_feature`; also `MongoRepository::for_feature` |
 | `MongooseModule.forRootAsync(...)` | `MongoModule::for_root_async(factory).await?` | Must complete before `NestFactory::create` |
 | Redis session store | `.use_session_redis(url)` | Feature `session-redis`; Redis wins if memory is also set |
+| `MiddlewareConsumer` `apply` / `forRoutes` / `exclude` | `MiddlewareConsumer` + `.configure_middleware(...)` | Path prefixes only; no glob `ab*cd` DSL |
+| `@nestjs/platform-socket.io` | `nestrs-socketio` | socketioxide layer on the Axum router |
+| `@nestjs/platform-fastify` | — | Out of scope (ADR-0001, Axum-only) |
+| AWS Lambda / serverless | `nestrs-lambda` (`listen_lambda`) | API Gateway HTTP + REST |
+| `@nestjs/passport` | `nestrs-passport` | `JwtStrategy` / `LocalBasicStrategy` |
+| nestjs-better-auth | `nestrs-better-auth` | Mount the better-auth.rs router + session-cookie guard |
+| `@nestjs/bullmq` | `nestrs-bullmq` | Redis key-layout producer; Node workers can consume |
+| `passport-saml` / `passport-ldap` | `nestrs-saml` / `nestrs-ldap` | SP redirect + simple bind; assertion crypto stays in the app |
+| TypeORM / Sequelize | `nestrs-sea-orm` | `SeaOrmModule::for_root_async`; drizzle stays carved out |
 
 ## Side-by-side code: modules and controllers
 
@@ -322,7 +331,9 @@ The following NestJS features have no nestrs equivalent at this time:
 - **Interactive TypeScript playground** — nestrs is a compiled Rust crate; there is no in-browser REPL.
 - **TypeScript-first API teaching tools** — the CLI (`nestrs-scaffold`) handles code generation but does not produce TypeScript stubs.
 - **`reflect-metadata`-style decorator introspection** — all metadata in nestrs is compile-time; there is no runtime annotation system for arbitrary fields.
-- **GraphQL subscriptions over WebSockets** — nestrs-graphql and nestrs-ws ship separately; parity is partial.
+- **Express / Fastify HTTP engines** — Axum only (ADR-0001). Use `nestrs-lambda` for AWS Lambda.
+- **Nest CLI monorepo / plugin system** — Cargo workspaces.
+- **VS Code Nest generator extension** — tracked as [#39](https://github.com/Joshyahweh/nestrs/issues/39); MCP already covers Copilot.
 </Warning>
 
 ## What to read next

@@ -73,7 +73,7 @@ async fn main() -> std::io::Result<()> {
 ```toml
 # Cargo.toml — note the direct rmcp dependency; it is not re-exported
 [dependencies]
-nestrs-mcp = "1.2.0"
+nestrs-mcp = "1.3.0"
 rmcp = { version = "3.1", default-features = false, features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["full"] }
 ```

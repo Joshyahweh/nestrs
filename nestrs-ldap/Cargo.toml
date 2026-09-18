@@ -1,0 +1,19 @@
+[package]
+name = "nestrs-ldap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "LDAP bind authentication adapter for nestrs (NestJS passport-ldap analogue)."
+keywords = ["ldap", "auth", "nest", "adapter", "directory"]
+categories = ["authentication", "network-programming"]
+
+[dependencies]
+ldap3 = { version = "0.11", default-features = false }
+thiserror = "1"
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

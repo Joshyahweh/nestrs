@@ -35,7 +35,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `1.2.0` (from `VERSION` and workspace package settings) — a minor release on the 1.0 stable contract; the public API is covered by full semver (see `STABILITY.md`)
+- Current workspace version: `1.3.0` (from `VERSION` and workspace package settings) — a minor release on the 1.0 stable contract; the public API is covered by full semver (see `STABILITY.md`)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
@@ -71,6 +71,13 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs-throttle/` - per-route rate limits (`ThrottlerGuard`, in-memory or Redis)
 - `nestrs-health/` - readiness / liveness indicators
 - `nestrs-security/` - Bearer parsing, helmet headers, CSRF middleware
+- `nestrs-socketio/` - Socket.IO adapter (socketioxide)
+- `nestrs-lambda/` - AWS Lambda / API Gateway adapter
+- `nestrs-better-auth/` - Better Auth session-cookie guard + router nest
+- `nestrs-bullmq/` - BullMQ Redis key-layout producer
+- `nestrs-passport/` - Passport-style `AuthStrategy` adapters
+- `nestrs-saml/` / `nestrs-ldap/` - SAML SP redirect and LDAP simple bind
+- `nestrs-sea-orm/` - SeaORM `for_root_async` (TypeORM/Sequelize analogue)
 - `website/` - landing page + docs hub (light/dark theme)
 
 ## Quick Start

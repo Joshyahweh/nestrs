@@ -1,0 +1,17 @@
+[package]
+name = "nestrs-saml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "SAML 2.0 service-provider adapter for nestrs (NestJS passport-saml analogue)."
+keywords = ["saml", "sso", "nest", "auth", "adapter"]
+categories = ["authentication", "web-programming"]
+
+[dependencies]
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]

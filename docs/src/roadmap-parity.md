@@ -23,7 +23,7 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 | Guards | `#[use_guards]`, `CanActivate` | **Partial** | Semantics align; integration differs from Nest’s `ExecutionContext`—[HTTP pipeline order](http-pipeline-order.md). |
 | Interceptors | `#[use_interceptors]` | **Partial** | Tower-style wrapping; ordering is documented—[HTTP pipeline order](http-pipeline-order.md). |
 | Exception filters | `#[use_filters]`, global filter on `NestApplication` | **Partial** | `HttpException` mapping; see same ordering page. |
-| Middleware | `NestApplication` global layers + Axum | **Partial** | Axum/Tower ordering—no Nest `MiddlewareConsumer` clone. |
+| Middleware | `MiddlewareConsumer` + `configure_middleware` | **Full** | Path `for_routes` / `exclude`; no glob `ab*cd` DSL. |
 
 ## Cross-cutting concerns and operations
 
@@ -51,6 +51,12 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 | GraphQL (code-first / schema) | `nestrs-graphql` | **Partial** | async-graphql ecosystem; lightweight federation gateway in-tree (`graphql-federation-gateway` feature, batched `EntityResolver`); query planning / codegen external—[GraphQL, WebSockets & microservices DX](graphql-ws-micro-dx.md). |
 | WebSockets gateway | `nestrs-ws` | **Partial** | Guards/pipes/interceptors with DI resolution; origin allowlist via `WsSecurityConfig` (CSWSH); error path differs from HTTP filters—same chapter. |
 | Transport microservices | `nestrs-microservices` | **Partial** | Kafka, NATS, Redis, MQTT, RabbitMQ, gRPC—[Microservices](microservices.md). |
+| Socket.IO | **`nestrs-socketio`** | **Partial** | socketioxide layer on the Axum router; nestrs-ws stays RFC 6455. |
+| Serverless / Lambda | **`nestrs-lambda`** | **Partial** | `listen_lambda(router)` via `lambda_http`. No Fastify/Express adapter. |
+| Passport | **`nestrs-passport`** | **Partial** | `JwtStrategy` / `LocalBasicStrategy` on `AuthStrategy`. |
+| Better Auth | **`nestrs-better-auth`** | **Partial** | Nest better-auth.rs router + session-cookie guard. |
+| SAML / LDAP | **`nestrs-saml`**, **`nestrs-ldap`** | **Partial** | SP redirect + bind auth; assertion crypto stays in the app. |
+| TypeORM / Sequelize | **`nestrs-sea-orm`** | **Partial** | SeaORM `for_root_async`; drizzle still carved out. |
 | Shared JSON wire format | `nestrs_microservices::wire` | **Full** | Golden tests in crate; revision constant for docs. |
 
 ## Ecosystem modules (Nest “@nestjs/…”-style)
@@ -59,7 +65,7 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 |--------|--------|--------|--------|
 | Caching | `CacheModule` / `CacheService` | **Partial** | In-memory + optional Redis—[Ecosystem modules](ecosystem.md). |
 | Scheduling | `ScheduleModule`, `#[cron]`, `#[interval]` | **Partial** | Feature `schedule`—[Ecosystem modules](ecosystem.md). |
-| Queues | `QueuesModule` | **Ready** | In-process `queues`; multi-instance `queues-redis` (LPUSH/BRPOP, not BullMQ). |
+| Queues | `QueuesModule` + **`nestrs-bullmq`** | **Partial** | In-process `queues`; `queues-redis` LPUSH/BRPOP; BullMQ key-layout producer crate for Node workers. |
 | i18n | `I18nModule` | **Partial** | Catalogs + locale resolver—[Ecosystem modules](ecosystem.md). |
 
 ## CLI and developer experience
@@ -69,6 +75,7 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 | `nest new` | `nestrs-cli new` | **Partial** | Single-crate scaffold—[CLI](cli.md). |
 | `nest generate` | `nestrs-cli generate` (`nestrs-cli g`) | **Partial** | Resource, service, controller, DTO, guard, …—[CLI](cli.md). |
 | Monorepo / plugins | — | **Out of scope (today)** | Use Cargo workspaces and standard Rust tooling—[CLI](cli.md). |
+| Nest Devtools | Admin sidecar HTML | **Partial** | `GET /__nestrs` / `/__nestrs/devtools` (feature `admin`). |
 
 ## Testing and stability
 

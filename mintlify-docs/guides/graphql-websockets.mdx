@@ -503,17 +503,4 @@ async fn main() {
 
 ## Socket.IO
 
-`nestrs-ws` speaks RFC 6455 JSON events. For the NestJS `@nestjs/platform-socket.io` protocol, add the companion crate:
-
-```toml
-[dependencies]
-nestrs-socketio = "1.3.0"
-```
-
-```rust
-use nestrs_socketio::{merge_socketio, socketio_layer};
-
-let (layer, io) = socketio_layer();
-io.ns("/", |s| async move { /* socketioxide handlers */ });
-let router = merge_socketio(NestFactory::create::<AppModule>().into_router(), layer);
-```
+`nestrs-ws` speaks RFC 6455 JSON events. For the NestJS `@nestjs/platform-socket.io` protocol, see **[nestrs-socketio](/adapters/socketio)**.

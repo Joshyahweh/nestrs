@@ -1,0 +1,77 @@
+---
+title: "nestrs-saml"
+description: "SAML 2.0 service-provider redirect and assertion validator trait — NestJS passport-saml analogue."
+---
+
+`nestrs-saml` covers the **SP-initiated login redirect** (`AuthnRequest` via HTTP-Redirect). Assertion consumption (XML signature, crypto) stays in your app or a dedicated XML stack. Implement `SamlResponseValidator` at the ACS route.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = "1.3.0"
+nestrs-saml = "1.3.0"
+```
+
+## Redirect to the IdP
+
+```rust
+use nestrs::prelude::*;
+use nestrs_saml::SamlServiceProvider;
+
+fn sp() -> SamlServiceProvider {
+    SamlServiceProvider {
+        entity_id: "https://app.example/sp".into(),
+        acs_url: "https://app.example/acs".into(),
+        idp_sso_url: "https://idp.example/sso".into(),
+    }
+}
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/sso")]
+struct SsoController;
+
+#[routes(state = AppState)]
+impl SsoController {
+    #[get("/login")]
+    async fn login() -> axum::response::Redirect {
+        let url = sp().redirect_url("after-login").expect("idp url");
+        axum::response::Redirect::temporary(url.as_str())
+    }
+}
+
+#[module(controllers = [SsoController], providers = [AppState])]
+struct AppModule;
+```
+
+`redirect_url` appends `SAMLRequest`, `RelayState`, `spEntityId`, and `acs` on the IdP SSO URL. A full IdP integration typically deflates and base64-encodes a real `AuthnRequest` XML; this adapter sends a relay-friendly request id the ACS can correlate.
+
+## Validate at the ACS
+
+```rust
+use nestrs_saml::{SamlAssertion, SamlResponseValidator};
+
+struct MyValidator;
+
+impl SamlResponseValidator for MyValidator {
+    type Error = String;
+
+    fn validate(&self, saml_response: &str) -> Result<SamlAssertion, Self::Error> {
+        // Use samael, xmlsec, or a hosted IdP SDK here.
+        let _ = saml_response;
+        Ok(SamlAssertion {
+            name_id: "ada@example.com".into(),
+            relay_state: Some("after-login".into()),
+        })
+    }
+}
+```
+
+POST the `SAMLResponse` form field to `/acs`, call `validate`, then issue your own session.
+
+<Warning>
+This crate does not verify XML signatures. Do not accept a `SAMLResponse` in production without a real validator implementation.
+</Warning>

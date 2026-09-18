@@ -1,0 +1,105 @@
+---
+title: "nestrs-passport"
+description: "Passport-style JWT bearer and HTTP Basic strategies on nestrs AuthStrategy — NestJS @nestjs/passport analogue."
+---
+
+Nest `@nestjs/passport` wraps Node `passport` strategies. nestrs already has `AuthStrategy` and `AuthStrategyGuard`. `nestrs-passport` ships the two strategies apps reach for first: **JWT bearer** and **HTTP Basic** (a `passport-local` analogue when the password rides in `Authorization`, not a JSON body).
+
+`PassportGuard` is a re-export of `nestrs_security::AuthStrategyGuard`.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.3.0", features = ["authn"] }
+nestrs-passport = "1.3.0"
+```
+
+## JwtStrategy
+
+`JwtStrategy::new` receives the raw bearer token (not a parsed JWT). Verify it in the closure (jsonwebtoken, JWKS, opaque lookup).
+
+`PassportGuard<S>` requires `S: AuthStrategy + Default`. Wrap the closure strategy in a `Default` type you can put on `#[use_guards]`:
+
+```rust
+use nestrs::prelude::*;
+use nestrs_core::{AuthError, AuthStrategy};
+use nestrs_passport::{JwtStrategy, PassportGuard};
+use axum::http::request::Parts;
+
+struct BearerJwt;
+
+impl Default for BearerJwt {
+    fn default() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl AuthStrategy for BearerJwt {
+    type Payload = String;
+
+    async fn validate(&self, parts: &Parts) -> Result<Self::Payload, AuthError> {
+        JwtStrategy::new(|token: String| async move {
+            if token.is_empty() {
+                Err(AuthError::unauthorized("empty token"))
+            } else {
+                Ok(token)
+            }
+        })
+        .validate(parts)
+        .await
+    }
+}
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/me")]
+struct MeController;
+
+#[routes(state = AppState)]
+impl MeController {
+    #[get("/")]
+    #[use_guards(PassportGuard<BearerJwt>)]
+    async fn me() -> &'static str {
+        "ok"
+    }
+}
+
+#[module(controllers = [MeController], providers = [AppState])]
+struct AppModule;
+```
+
+Replace the `token.is_empty()` check with real JWT verification.
+
+## LocalBasicStrategy
+
+Parses `Authorization: Basic base64(user:pass)` and calls `validate(username, password)`:
+
+```rust
+use nestrs_passport::LocalBasicStrategy;
+
+let strategy = LocalBasicStrategy::new(|user: String, pass: String| async move {
+    if user == "ada" && pass == "s3cret" {
+        Ok(user)
+    } else {
+        Err(AuthError::unauthorized("invalid credentials"))
+    }
+});
+```
+
+Body-based local login still belongs in a handler. `AuthStrategy` only sees request parts.
+
+## Compared with OAuth2Guard
+
+| | `nestrs-passport` | `nestrs-oauth2` (`OAuth2Guard`) |
+|--|-------------------|----------------------------------|
+| Nest analogue | `@nestjs/passport` | resource-server JWT / JWKS |
+| Header | Bearer or Basic | Bearer |
+| Verification | Your closure | `JwtVerifier` / JWKS |
+
+Use OAuth2 when you already have an issuer and JWKS. Use Passport strategies for custom bearer checks or HTTP Basic.
+
+See the [security guide](/guides/security) for `AuthStrategyGuard` and the [OAuth2 guide](/guides/oauth2) for JWKS.

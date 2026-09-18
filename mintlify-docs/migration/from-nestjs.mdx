@@ -32,14 +32,14 @@ Moving an HTTP API from NestJS to nestrs means trading TypeScript decorators for
 | `MongooseModule.forRootAsync(...)` | `MongoModule::for_root_async(factory).await?` | Must complete before `NestFactory::create` |
 | Redis session store | `.use_session_redis(url)` | Feature `session-redis`; Redis wins if memory is also set |
 | `MiddlewareConsumer` `apply` / `forRoutes` / `exclude` | `MiddlewareConsumer` + `.configure_middleware(...)` | Path prefixes only; no glob `ab*cd` DSL |
-| `@nestjs/platform-socket.io` | `nestrs-socketio` | socketioxide layer on the Axum router |
+| `@nestjs/platform-socket.io` | [`nestrs-socketio`](/adapters/socketio) | socketioxide layer on the Axum router |
 | `@nestjs/platform-fastify` | — | Out of scope (ADR-0001, Axum-only) |
-| AWS Lambda / serverless | `nestrs-lambda` (`listen_lambda`) | API Gateway HTTP + REST |
-| `@nestjs/passport` | `nestrs-passport` | `JwtStrategy` / `LocalBasicStrategy` |
-| nestjs-better-auth | `nestrs-better-auth` | Mount the better-auth.rs router + session-cookie guard |
-| `@nestjs/bullmq` | `nestrs-bullmq` | Redis key-layout producer; Node workers can consume |
-| `passport-saml` / `passport-ldap` | `nestrs-saml` / `nestrs-ldap` | SP redirect + simple bind; assertion crypto stays in the app |
-| TypeORM / Sequelize | `nestrs-sea-orm` | `SeaOrmModule::for_root_async`; drizzle stays carved out |
+| AWS Lambda / serverless | [`nestrs-lambda`](/adapters/lambda) (`listen_lambda`) | API Gateway HTTP + REST |
+| `@nestjs/passport` | [`nestrs-passport`](/adapters/passport) | `JwtStrategy` / `LocalBasicStrategy` |
+| nestjs-better-auth | [`nestrs-better-auth`](/adapters/better-auth) | Mount the better-auth.rs router + session-cookie guard |
+| `@nestjs/bullmq` | [`nestrs-bullmq`](/adapters/bullmq) | Redis key-layout producer; Node workers can consume |
+| `passport-saml` / `passport-ldap` | [`nestrs-saml`](/adapters/saml) / [`nestrs-ldap`](/adapters/ldap) | SP redirect + simple bind; assertion crypto stays in the app |
+| TypeORM / Sequelize | [`nestrs-sea-orm`](/adapters/sea-orm) | `SeaOrmModule::for_root_async`; drizzle stays carved out |
 
 ## Side-by-side code: modules and controllers
 

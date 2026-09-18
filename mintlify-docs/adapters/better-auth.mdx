@@ -1,0 +1,81 @@
+---
+title: "nestrs-better-auth"
+description: "Nest the better-auth.rs Axum router into nestrs and guard routes with the Better Auth session cookie."
+---
+
+This crate does **not** reimplement Better Auth. You build the Axum router from [better-auth.rs](https://github.com/better-auth-rs/better-auth-rs) in your app, then nest it and protect nestrs handlers with `BetterAuthGuard`.
+
+The crate does not depend on a specific `better-auth` package so MSRV 1.88 stays intact.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = "1.3.0"
+nestrs-better-auth = "1.3.0"
+```
+
+## Nest the auth router
+
+`BetterAuthModule::for_root` returns a `DynamicModule` that mounts `auth_router` at `options.path` (default `/api/auth`). Merge it with `NestFactory::create_with_modules`:
+
+```rust
+use nestrs::prelude::*;
+use nestrs_better_auth::{BetterAuthGuard, BetterAuthModule, BetterAuthOptions};
+
+#[derive(Default)]
+#[injectable]
+struct AppState;
+
+#[controller(prefix = "/account")]
+struct AccountController;
+
+#[routes(state = AppState)]
+impl AccountController {
+    #[get("/")]
+    #[use_guards(BetterAuthGuard)]
+    async fn account() -> &'static str {
+        "signed-in"
+    }
+}
+
+#[module(controllers = [AccountController], providers = [AppState])]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    // Build this with better-auth.rs in your app:
+    let auth_router = axum::Router::new();
+
+    let auth = BetterAuthModule::for_root(
+        auth_router,
+        BetterAuthOptions::default(), // path `/api/auth`, cookie `better-auth.session_token`
+    );
+
+    NestFactory::create_with_modules::<AppModule, _>([auth])
+        .listen_graceful(3000)
+        .await;
+}
+```
+
+## Guard
+
+`BetterAuthGuard` implements `CanActivate`. It looks at the raw `Cookie` header (no extra cookie crate), so it works whether or not `NestApplication::use_cookies` is on.
+
+| Constructor | Cookie name |
+|-------------|-------------|
+| `BetterAuthGuard::new()` / `Default` | `better-auth.session_token` (`DEFAULT_SESSION_COOKIE`) |
+| `BetterAuthGuard::with_cookie_name("sid")` | `sid` |
+
+Missing or empty cookie → `401 unauthorized`.
+
+## Options
+
+```rust
+BetterAuthOptions {
+    path: "/api/auth".into(),
+    session_cookie: "better-auth.session_token".into(),
+}
+```
+
+`path` is normalized to an absolute prefix without a trailing slash (`"api/auth"` → `"/api/auth"`).

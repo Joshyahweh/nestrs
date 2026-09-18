@@ -1,0 +1,73 @@
+---
+title: "Adapter crates"
+description: "Companion crates for NestJS surfaces that do not fold into Axum: Socket.IO, Lambda, Passport, Better Auth, BullMQ, SAML, LDAP, and SeaORM."
+---
+
+These crates close NestJS gaps that nestrs cannot rebuild on Axum. They are **workspace members**, not feature flags on `nestrs`. Add only the crates you use. They depend on `nestrs-core` (or nothing) so they do not cycle with the façade crate.
+
+Fastify remains out of scope ([ADR-0001](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/adrs/0001-axum-only.md)). `nestrs-drizzle` stays carved out of workspace members.
+
+<Note>
+Pages on [docs.rs](https://docs.rs) appear after the crate is published to crates.io. Until then, this section is the canonical guide.
+</Note>
+
+## Crates in this section
+
+<CardGroup cols={2}>
+  <Card title="nestrs-socketio" icon="bolt" href="/adapters/socketio">
+    Socket.IO via socketioxide — Nest `@nestjs/platform-socket.io`.
+  </Card>
+  <Card title="nestrs-lambda" icon="cloud" href="/adapters/lambda">
+    AWS Lambda / API Gateway — `listen_lambda(router)`.
+  </Card>
+  <Card title="nestrs-passport" icon="passport" href="/adapters/passport">
+    `JwtStrategy` and `LocalBasicStrategy` on `AuthStrategy`.
+  </Card>
+  <Card title="nestrs-better-auth" icon="shield" href="/adapters/better-auth">
+    Nest the better-auth.rs router and guard session cookies.
+  </Card>
+  <Card title="nestrs-bullmq" icon="list" href="/adapters/bullmq">
+    BullMQ Redis key-layout producer for Node workers.
+  </Card>
+  <Card title="nestrs-saml" icon="key" href="/adapters/saml">
+    SAML 2.0 SP-initiated redirect + `SamlResponseValidator`.
+  </Card>
+  <Card title="nestrs-ldap" icon="address-book" href="/adapters/ldap">
+    LDAP simple bind — `passport-ldap` analogue.
+  </Card>
+  <Card title="nestrs-sea-orm" icon="database" href="/adapters/sea-orm">
+    SeaORM `for_root_async` — TypeORM / Sequelize analogue.
+  </Card>
+</CardGroup>
+
+## NestJS mapping
+
+| NestJS | Crate |
+|--------|--------|
+| `@nestjs/platform-socket.io` | [`nestrs-socketio`](/adapters/socketio) |
+| AWS Lambda / serverless Express adapter | [`nestrs-lambda`](/adapters/lambda) |
+| `@nestjs/passport` | [`nestrs-passport`](/adapters/passport) |
+| nestjs-better-auth | [`nestrs-better-auth`](/adapters/better-auth) |
+| `@nestjs/bullmq` | [`nestrs-bullmq`](/adapters/bullmq) |
+| `passport-saml` | [`nestrs-saml`](/adapters/saml) |
+| `passport-ldap` | [`nestrs-ldap`](/adapters/ldap) |
+| TypeORM / Sequelize | [`nestrs-sea-orm`](/adapters/sea-orm) |
+| `@nestjs/platform-fastify` | Out of scope (Axum only) |
+
+## How they attach
+
+Most adapters return an Axum `Router`, a Tower layer, or a `DynamicModule`. Merge them with `NestFactory::create_with_modules` or `into_router()` — they are not `nestrs = { features = [...] }` flags.
+
+```toml
+[dependencies]
+nestrs = "1.3.0"
+# pick the crates you need:
+nestrs-socketio = "1.3.0"
+nestrs-lambda = "1.3.0"
+nestrs-passport = "1.3.0"
+nestrs-better-auth = "1.3.0"
+nestrs-bullmq = "1.3.0"
+nestrs-saml = "1.3.0"
+nestrs-ldap = "1.3.0"
+nestrs-sea-orm = "1.3.0"
+```

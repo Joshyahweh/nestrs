@@ -3,7 +3,7 @@ title: "Database integration with nestrs"
 description: "nestrs supports SQL via SqlxDatabaseModule for direct AnyPool queries or nestrs-prisma for Prisma-style schema-driven access. MongoDB support is also available."
 ---
 
-nestrs gives you two SQL integration paths depending on how much structure you want. `SqlxDatabaseModule` (feature `database-sqlx`) wraps an SQLx `AnyPool` and is the right choice when you want direct control over SQL queries with minimal abstraction. `nestrs-prisma` adds a `PrismaModule`, a `PrismaService`, and the `prisma_model!` macro for a Prisma-style developer experience without requiring a separate codegen step. MongoDB lives under a third path via `MongoModule`. For a TypeORM/Sequelize-style Active Record layer, use the companion crate [`nestrs-sea-orm`](/ecosystem/adapters) (`SeaOrmModule::for_root_async`).
+nestrs gives you two SQL integration paths depending on how much structure you want. `SqlxDatabaseModule` (feature `database-sqlx`) wraps an SQLx `AnyPool` and is the right choice when you want direct control over SQL queries with minimal abstraction. `nestrs-prisma` adds a `PrismaModule`, a `PrismaService`, and the `prisma_model!` macro for a Prisma-style developer experience without requiring a separate codegen step. MongoDB lives under a third path via `MongoModule`. For a TypeORM/Sequelize-style Active Record layer, use the companion crate [`nestrs-sea-orm`](/adapters/sea-orm) (`SeaOrmModule::for_root_async`).
 
 ## Path 1: SqlxDatabaseModule (direct SQLx)
 

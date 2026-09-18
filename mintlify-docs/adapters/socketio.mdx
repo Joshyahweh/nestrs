@@ -1,0 +1,67 @@
+---
+title: "nestrs-socketio"
+description: "Mount Socket.IO on a nestrs Axum router with socketioxide — NestJS @nestjs/platform-socket.io analogue."
+---
+
+`nestrs-ws` speaks RFC 6455 JSON events (`{ "event", "data" }`). For the Socket.IO protocol that NestJS apps use via `@nestjs/platform-socket.io`, add `nestrs-socketio`. It builds a [socketioxide](https://docs.rs/socketioxide) Tower layer and merges it onto the router from `NestApplication::into_router`.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.3.0", features = ["ws"] }
+nestrs-socketio = "1.3.0"
+```
+
+You do not need the `ws` feature to compile this crate. Enable it only if the same process also serves `nestrs-ws` gateways.
+
+## Mount Socket.IO
+
+```rust
+use nestrs::prelude::*;
+use nestrs_socketio::{merge_socketio, socketio_layer};
+
+#[module]
+struct AppModule;
+
+#[tokio::main]
+async fn main() {
+    let (layer, io) = socketio_layer();
+    io.ns("/", |socket| async move {
+        // socketioxide `Socket` / `SocketRef` event handlers go here
+        let _ = socket;
+    });
+
+    let router = merge_socketio(
+        NestFactory::create::<AppModule>().into_router(),
+        layer,
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+        .await
+        .unwrap();
+    axum::serve(listener, router).await.unwrap();
+}
+```
+
+`socketio_layer` returns `(SocketIoLayer, SocketIo)`. Register namespaces on `io` **before** `merge_socketio`. `merge_socketio` is `router.layer(layer)`.
+
+## Compared with nestrs-ws
+
+| | `nestrs-ws` | `nestrs-socketio` |
+|--|-------------|-------------------|
+| Protocol | RFC 6455 | Socket.IO (engine.io + socket.io) |
+| Nest analogue | `@WebSocketGateway` JSON events | `@nestjs/platform-socket.io` |
+| Guards / pipes | `WsCanActivate`, `ws_route_with_guards` | socketioxide handlers on `SocketIo` |
+| Origin allowlist | `WsSecurityConfig` | configure in socketioxide / your proxy |
+
+Keep `nestrs-ws` for first-party JSON gateways. Use this crate when browsers or Nest clients speak Socket.IO.
+
+## API
+
+| Item | Role |
+|------|------|
+| `socketio_layer()` | `SocketIo::new_layer()` — layer + handle |
+| `merge_socketio(router, layer)` | `router.layer(layer)` |
+| `socketioxide` | Re-export of the engine |
+
+See the [socketioxide handbook](https://docs.rs/socketioxide) for rooms, acknowledgements, and binary events.

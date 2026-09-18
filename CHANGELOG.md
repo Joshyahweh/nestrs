@@ -40,8 +40,8 @@ carved out.
 
 - rustdoc + mintlify synced to **1.3.0** (`html_root_url`, install snippets,
   MCP scaffold template).
-- Migration / ecosystem pages cover `MiddlewareConsumer` and the eight
-  adapter crates (`mintlify-docs/ecosystem/adapters.mdx`).
+- Migration / ecosystem pages cover `MiddlewareConsumer`. Adapter crates
+  have their own Mintlify section (`mintlify-docs/adapters/`).
 
 ### Fixed
 

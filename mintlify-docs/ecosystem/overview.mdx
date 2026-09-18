@@ -50,7 +50,7 @@ nestrs keeps its core lean. Everything beyond the HTTP layer — caching, recurr
     Multi-cloud object storage behind one `Storage` trait — Local filesystem, S3, GCS, and
     Azure Blob backends — with presigned-URL helpers and the `#[upload_to]` decorator.
   </Card>
-  <Card title="Adapter crates" icon="plug" href="/ecosystem/adapters">
+  <Card title="Adapter crates" icon="plug" href="/adapters/overview">
     Socket.IO, Lambda, Passport, Better Auth, BullMQ, SAML, LDAP, and SeaORM — companion
     crates for NestJS surfaces that do not fold into Axum.
   </Card>
@@ -82,7 +82,7 @@ Add features to the `nestrs` dependency in your `Cargo.toml`. Features compose: 
 | `oauth2` | OAuth2 client, JWKS-backed resource server, `OAuth2Guard`, and `NestApplication::use_oauth2` via the `nestrs-oauth2` crate (see the [OAuth2 guide](/guides/oauth2)) |
 
 <Note>
-`nestrs-prisma`, `nestrs-storage`, and the [adapter crates](/ecosystem/adapters) (`nestrs-socketio`, `nestrs-lambda`, `nestrs-passport`, `nestrs-better-auth`, `nestrs-bullmq`, `nestrs-saml`, `nestrs-ldap`, `nestrs-sea-orm`) are separate crates, not feature flags on `nestrs`. Add `nestrs-prisma` with one of `sqlx-postgres`, `sqlx-mysql`, or `sqlx-sqlite`. Add `nestrs-storage` with one of `local`, `s3`, `gcs`, `azure`, or `all`.
+`nestrs-prisma`, `nestrs-storage`, and the [adapter crates](/adapters/overview) (`nestrs-socketio`, `nestrs-lambda`, `nestrs-passport`, `nestrs-better-auth`, `nestrs-bullmq`, `nestrs-saml`, `nestrs-ldap`, `nestrs-sea-orm`) are separate crates, not feature flags on `nestrs`. Add `nestrs-prisma` with one of `sqlx-postgres`, `sqlx-mysql`, or `sqlx-sqlite`. Add `nestrs-storage` with one of `local`, `s3`, `gcs`, `azure`, or `all`.
 </Note>
 
 ## How to enable a module

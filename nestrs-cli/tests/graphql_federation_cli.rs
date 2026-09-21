@@ -2,15 +2,16 @@
 //! tests. The `is_federation_v2_sdl` substring check is already covered
 //! by unit tests inside `graphql_federation.rs`. The CLI tests cover
 //! flag parsing, the v2 validation gate, the `--lenient` opt-out, and
-//! end-to-end against a Python mock server that returns a federation
-//! v2 SDL with the `@link` directive.
+//! end-to-end against an in-process mock HTTP server that returns a
+//! federation SDL on `{_service{sdl}}`.
 
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use nestrs_scaffold::graphql_federation;
 
@@ -96,9 +97,8 @@ fn run_rejects_non_federation_v2_sdl_by_default() {
 }
 
 // ---------------------------------------------------------------------------
-// End-to-end — Python mock server that returns a federation v2 SDL
-// (with `@link` directive) on `{_service{sdl}}`. The SDL payload is
-// passed via argv[2] so each test can swap between v1 / v2 shapes.
+// End-to-end — in-process mock that keeps the listener bound (no
+// bind-then-drop race under parallel `cargo test`).
 // ---------------------------------------------------------------------------
 
 const FEDERATION_V2_SDL: &str = "\
@@ -115,101 +115,84 @@ type User @key(fields: \"id\") {\n  id: ID!\n  name: String\n}\n\
 \n\
 type Query {\n  me: User\n}\n";
 
-fn start_mock_server(sdl: &str) -> Option<(u16, std::process::Child)> {
-    if !Command::new("python3")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-    {
-        return None;
-    }
+struct MockServer {
+    port: u16,
+    stop: Arc<AtomicBool>,
+}
 
+impl Drop for MockServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        // Unblock `accept` so the worker thread can observe `stop`.
+        let _ = TcpStream::connect(("127.0.0.1", self.port));
+    }
+}
+
+fn start_mock_server(sdl: &str) -> MockServer {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
-    drop(listener);
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_worker = Arc::clone(&stop);
+    let payload = serde_json::json!({
+        "data": { "_service": { "sdl": sdl } }
+    })
+    .to_string();
 
-    // Pass the SDL via a temp file because SDLs may contain quotes /
-    // braces that would break shell-string interpolation in argv.
-    let payload_path = std::env::temp_dir().join(format!(
-        "nestrs-cli-fed-mock-{}-{}.graphql",
-        port,
-        std::process::id()
-    ));
-    let mut f = fs::File::create(&payload_path).expect("create payload");
-    f.write_all(sdl.as_bytes()).expect("write payload");
-    drop(f);
-
-    let script = r#"
-import http.server, json, sys
-
-PORT = int(sys.argv[1])
-SDL = open(sys.argv[2]).read()
-
-class H(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        ln = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(ln).decode()
-        try:
-            req = json.loads(body)
-        except Exception:
-            req = {}
-        q = req.get("query", "")
-        if "_service" in q and "sdl" in q:
-            payload = {"data": {"_service": {"sdl": SDL}}}
-        else:
-            payload = {"errors": [{"message": "unsupported"}]}
-        out = json.dumps(payload).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(out)))
-        self.end_headers()
-        self.wfile.write(out)
-    def log_message(self, *args, **kwargs):
-        pass
-
-http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
-"#;
-
-    let mut child = Command::new("python3")
-        .arg("-c")
-        .arg(script)
-        .arg(port.to_string())
-        .arg(payload_path.display().to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn python3");
-
-    // Wait until the socket accepts connections (bind-check alone races).
-    for _ in 0..100 {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            let _ = fs::remove_file(&payload_path);
-            return Some((port, child));
+    std::thread::spawn(move || {
+        listener.set_nonblocking(false).ok();
+        while !stop_worker.load(Ordering::SeqCst) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                continue;
+            };
+            if stop_worker.load(Ordering::SeqCst) {
+                break;
+            }
+            if let Err(e) = serve_federation_post(&mut stream, payload.as_bytes()) {
+                eprintln!("mock server handler error: {e}");
+            }
         }
-        if let Ok(Some(status)) = child.try_wait() {
-            let _ = fs::remove_file(&payload_path);
-            panic!("mock server exited before accepting: {status}");
+    });
+
+    MockServer { port, stop }
+}
+
+fn serve_federation_post(stream: &mut TcpStream, payload: &[u8]) -> std::io::Result<()> {
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut content_length = 0usize;
+    loop {
+        let mut line = String::new();
+        let n = reader.read_line(&mut line)?;
+        if n == 0 {
+            return Ok(());
         }
-        std::thread::sleep(Duration::from_millis(50));
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        let lower = line.to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("content-length:") {
+            content_length = rest.trim().parse().unwrap_or(0);
+        }
     }
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = fs::remove_file(&payload_path);
-    panic!("mock server on port {port} did not become ready");
+    if content_length > 0 {
+        let mut body = vec![0u8; content_length];
+        reader.read_exact(&mut body)?;
+    }
+
+    let header = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        payload.len()
+    );
+    stream.write_all(header.as_bytes())?;
+    stream.write_all(payload)?;
+    Ok(())
 }
 
 #[test]
 fn run_writes_federation_v2_sdl_when_at_link_present() {
-    let Some((port, mut child)) = start_mock_server(FEDERATION_V2_SDL) else {
-        eprintln!("skipping: python3 not available");
-        return;
-    };
+    let server = start_mock_server(FEDERATION_V2_SDL);
     let dir = unique_tmp_dir("v2-accept");
     let out = dir.join("user.graphql");
-    let url = format!("http://127.0.0.1:{port}/graphql");
+    let url = format!("http://127.0.0.1:{}/graphql", server.port);
     let args: Vec<String> = vec![
         "--url".to_string(),
         url,
@@ -226,19 +209,14 @@ fn run_writes_federation_v2_sdl_when_at_link_present() {
         body.contains("type User"),
         "on-disk SDL must have type User"
     );
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 #[test]
 fn run_rejects_v1_sdl_in_strict_mode() {
-    let Some((port, mut child)) = start_mock_server(FEDERATION_V1_SDL) else {
-        eprintln!("skipping: python3 not available");
-        return;
-    };
+    let server = start_mock_server(FEDERATION_V1_SDL);
     let dir = unique_tmp_dir("v1-reject");
     let out = dir.join("user.graphql");
-    let url = format!("http://127.0.0.1:{port}/graphql");
+    let url = format!("http://127.0.0.1:{}/graphql", server.port);
     let args: Vec<String> = vec![
         "--url".to_string(),
         url,
@@ -256,19 +234,14 @@ fn run_rejects_v1_sdl_in_strict_mode() {
     );
     // No file should be written.
     assert!(!out.exists(), "out file should not be created on rejection");
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 #[test]
 fn run_accepts_v1_sdl_in_lenient_mode() {
-    let Some((port, mut child)) = start_mock_server(FEDERATION_V1_SDL) else {
-        eprintln!("skipping: python3 not available");
-        return;
-    };
+    let server = start_mock_server(FEDERATION_V1_SDL);
     let dir = unique_tmp_dir("v1-lenient");
     let out = dir.join("user.graphql");
-    let url = format!("http://127.0.0.1:{port}/graphql");
+    let url = format!("http://127.0.0.1:{}/graphql", server.port);
     let args: Vec<String> = vec![
         "--url".to_string(),
         url,
@@ -282,21 +255,16 @@ fn run_accepts_v1_sdl_in_lenient_mode() {
     // Confirm the SDL does NOT contain @link (proves we ran with the
     // v1 mock — `body` should match what the server returned).
     assert!(!body.contains("@link"));
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 #[test]
 fn run_with_bearer_token_succeeds() {
     // Bearer-token plumbing is shared with `graphql_sdl` — verifying
     // it gets passed through is enough here.
-    let Some((port, mut child)) = start_mock_server(FEDERATION_V2_SDL) else {
-        eprintln!("skipping: python3 not available");
-        return;
-    };
+    let server = start_mock_server(FEDERATION_V2_SDL);
     let dir = unique_tmp_dir("bearer");
     let out = dir.join("user.graphql");
-    let url = format!("http://127.0.0.1:{port}/graphql");
+    let url = format!("http://127.0.0.1:{}/graphql", server.port);
     let args: Vec<String> = vec![
         "--url".to_string(),
         url,
@@ -306,6 +274,4 @@ fn run_with_bearer_token_succeeds() {
         "test-token".to_string(),
     ];
     graphql_federation::run(&args).expect("run with bearer");
-    let _ = child.kill();
-    let _ = child.wait();
 }

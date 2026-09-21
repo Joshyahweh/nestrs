@@ -7,6 +7,38 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-21
+
+SeaORM deepen + route posture. Additive minor on the 1.3 contract.
+
+### Added — SeaORM (`nestrs-sea-orm`)
+
+- **`Repo<E>`** — typed SeaORM repository that prefers an ambient request
+  transaction when one is installed.
+- **`install_sea_orm_transactional_middleware`** / **`SeaOrmTransactionSlot`** —
+  NestJS-TypeORM-style ambient tx (commit on 2xx/3xx/4xx, rollback on 5xx).
+- **`RowAuthz`** — pluggable deny-closed authorization for
+  `find_*_authorized` / `insert_authorized` / `delete_by_id_authorized`.
+- **`SeaOrmModule::from_connection`** — register an already-open connection.
+- Umbrella features **`sea-orm`** / **`sea-orm-authz`** re-export the adapter;
+  **`AbilityAuthz`** / **`current_ability_authz`** bridge CASL `Ability` to
+  `RowAuthz`.
+
+### Added — route posture
+
+- **`#[public]`** — marks a handler as intentionally unguarded
+  (`nestrs.posture=public`). Conflicts with `#[use_guards]`.
+- Macros write **`nestrs.posture=guarded`** when a route has guards /
+  `controller_guards`.
+- **`NestApplication::require_route_posture`** — panics at router build if any
+  application route lacks posture (health / metrics / OpenAPI / `__nestrs`
+  excluded). **`assert_route_posture`** for tests / doctor tooling.
+
+### Docs
+
+- rustdoc + Mintlify `adapters/sea-orm` synced to **1.4.0**.
+- README / install snippets updated for the recommended SeaORM path.
+
 ## [1.3.0] - 2026-09-17
 
 Wave 9 NestJS gap close: rebuild what maps onto Axum, adapter crates for

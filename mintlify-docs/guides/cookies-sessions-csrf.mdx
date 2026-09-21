@@ -22,7 +22,7 @@ in production — see below).
 ```toml
 # Cargo.toml
 [dependencies]
-nestrs = { version = "1.3.0", features = ["cookies", "session", "csrf"] }
+nestrs = { version = "1.4.0", features = ["cookies", "session", "csrf"] }
 ```
 
 ```rust
@@ -134,7 +134,7 @@ uses Redis `SET`/`GET`/`DEL` with a `PX` TTL. The session cookie is
 configured, Redis wins and a warning is logged.
 
 ```toml
-nestrs = { version = "1.3.0", features = ["cookies", "session-redis", "csrf"] }
+nestrs = { version = "1.4.0", features = ["cookies", "session-redis", "csrf"] }
 ```
 
 ```rust

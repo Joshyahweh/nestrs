@@ -3,7 +3,7 @@
 //! Pass the router from [`NestApplication::into_router`](https://docs.rs/nestrs/latest/nestrs/struct.NestApplication.html#method.into_router)
 //! to [`listen_lambda`].
 
-#![doc(html_root_url = "https://docs.rs/nestrs-lambda/1.3.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-lambda/1.4.0")]
 
 use axum::Router;
 

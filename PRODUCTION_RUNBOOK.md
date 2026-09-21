@@ -9,6 +9,8 @@ This runbook captures deployment and operations guidance for nestrs applications
     detail leakage) — no builder call needed. Force it on with `enable_production_errors()`,
     opt out with `disable_production_errors()`. (`enable_production_errors_from_env()` is kept
     for backward compatibility.)
+- Prefer **`NestApplication::require_route_posture()`** in production binaries so routes without
+  `#[public]` / `#[use_guards]` fail at boot (see `SECURITY.md` and Mintlify authorization guide).
 - `RUST_LOG` (or `NESTRS_LOG`) controls tracing filter directives.
 - `PORT` controls bind port when your app reads env at startup.
 

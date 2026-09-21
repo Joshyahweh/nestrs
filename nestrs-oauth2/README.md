@@ -12,13 +12,13 @@ All features are **off by default** — opt in to the surface you need:
 
 ```toml
 [dependencies]
-nestrs-oauth2 = { version = "1.3.0", features = ["guard"] }
+nestrs-oauth2 = { version = "1.4.0", features = ["guard"] }
 ```
 
 From the umbrella crate (enables `client` + `resource-server` + `guard`, re-exports as `nestrs::oauth2`):
 
 ```toml
-nestrs = { version = "1.3.0", features = ["oauth2"] }
+nestrs = { version = "1.4.0", features = ["oauth2"] }
 ```
 
 ## Example: authorization code + PKCE (client)

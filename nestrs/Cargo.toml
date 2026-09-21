@@ -144,22 +144,28 @@ throttler = ["dep:nestrs-throttle"]
 ## `RedisThrottler`) on top of `throttler`. Same flag name as the crate-level
 ## `cache-redis` so feature surfaces stay symmetric.
 throttler-redis = ["throttler", "nestrs-throttle/cache-redis"]
+## SeaORM adapter (`nestrs-sea-orm`): `Repo`, ambient transactions, `RowAuthz`.
+## Pair with `authz` for `AbilityAuthz` / `current_ability_authz`.
+sea-orm = ["dep:nestrs-sea-orm"]
+## SeaORM + deny-closed ability bridge (`AbilityAuthz`).
+sea-orm-authz = ["sea-orm", "authz"]
 
 [dependencies]
 axum = { workspace = true, features = ["multipart", "macros"] }
 tokio.workspace = true
-nestrs-core = { version = "1.3.0", path = "../nestrs-core" }
-nestrs-macros = { version = "1.3.0", path = "../nestrs-macros" }
-nestrs-microservices = { version = "1.3.0", path = "../nestrs-microservices", optional = true }
-nestrs-events = { version = "1.3.0", path = "../nestrs-events", optional = true }
-nestrs-ws = { version = "1.3.0", path = "../nestrs-ws", optional = true }
-nestrs-graphql = { version = "1.3.0", path = "../nestrs-graphql", optional = true }
-nestrs-openapi = { version = "1.3.0", path = "../nestrs-openapi", optional = true }
-nestrs-security = { version = "1.3.0", path = "../nestrs-security", default-features = false }
-nestrs-throttle = { version = "1.3.0", path = "../nestrs-throttle", optional = true, default-features = false }
-nestrs-health = { version = "1.3.0", path = "../nestrs-health", default-features = false }
-nestrs-mongodb = { version = "1.3.0", path = "../nestrs-mongodb", optional = true, default-features = false }
-nestrs-http = { version = "1.3.0", path = "../nestrs-http", optional = true, default-features = false }
+nestrs-core = { version = "1.4.0", path = "../nestrs-core" }
+nestrs-macros = { version = "1.4.0", path = "../nestrs-macros" }
+nestrs-microservices = { version = "1.4.0", path = "../nestrs-microservices", optional = true }
+nestrs-events = { version = "1.4.0", path = "../nestrs-events", optional = true }
+nestrs-ws = { version = "1.4.0", path = "../nestrs-ws", optional = true }
+nestrs-graphql = { version = "1.4.0", path = "../nestrs-graphql", optional = true }
+nestrs-openapi = { version = "1.4.0", path = "../nestrs-openapi", optional = true }
+nestrs-security = { version = "1.4.0", path = "../nestrs-security", default-features = false }
+nestrs-throttle = { version = "1.4.0", path = "../nestrs-throttle", optional = true, default-features = false }
+nestrs-health = { version = "1.4.0", path = "../nestrs-health", default-features = false }
+nestrs-mongodb = { version = "1.4.0", path = "../nestrs-mongodb", optional = true, default-features = false }
+nestrs-http = { version = "1.4.0", path = "../nestrs-http", optional = true, default-features = false }
+nestrs-sea-orm = { version = "1.4.0", path = "../nestrs-sea-orm", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1"
@@ -218,7 +224,7 @@ tokio-util = { version = "0.7", features = ["io"], optional = true }
 jsonwebtoken = { workspace = true, optional = true }
 argon2 = { workspace = true, optional = true, features = ["rand"] }
 getrandom = { version = "0.2", optional = true }
-nestrs-oauth2 = { version = "1.3.0", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
+nestrs-oauth2 = { version = "1.4.0", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
 
 [dev-dependencies]
 async-graphql = "=7.0.17"

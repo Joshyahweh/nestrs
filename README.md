@@ -19,7 +19,9 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - DI + application context — request scopes, lifecycle hooks, `useValue`/`useFactory` providers with opt-in lifecycles
 - DTO validation pipeline, class-validator-style ergonomics, and extraction-time pipe chains (`#[use_pipes]` — `ValidationPipe`, `ParseIntPipe`, `TrimPipe`, custom pipes)
 - Cross-cutting pipeline: guards, pipes, interceptors, exception filters, strategies
+- **Route posture** — `#[public]` / `#[use_guards]` metadata + `NestApplication::require_route_posture` (unguarded routes fail at boot)
 - Row-level authorization (`authz-row-level`): deny-closed `CrudService`, module-qualified principals, masking subjects
+- **SeaORM** (`nestrs-sea-orm` / feature `sea-orm`): `Repo`, ambient transactions, `RowAuthz` / `AbilityAuthz`
 - `#[crud]` generated controllers with paginated list endpoints (limit/offset)
 - Microservice transports via `nestrs-microservices`: NATS, Redis, Kafka, RabbitMQ (AMQP 0.9), MQTT, TCP (length-prefixed, bounded frames), gRPC
 - GraphQL (async-graphql) incl. **federation gateway** (`EntityResolver`, `_service`/`_entities`), data loaders, WebSocket subscriptions
@@ -35,7 +37,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `1.3.0` (from `VERSION` and workspace package settings) — a minor release on the 1.0 stable contract; the public API is covered by full semver (see `STABILITY.md`)
+- Current workspace version: `1.4.0` (from `VERSION` and workspace package settings) — a minor release on the 1.0 stable contract; the public API is covered by full semver (see `STABILITY.md`)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
@@ -77,7 +79,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs-bullmq/` - BullMQ Redis key-layout producer
 - `nestrs-auth-strategy/` - Passport-style `AuthStrategy` adapters
 - `nestrs-saml/` / `nestrs-ldap/` - SAML SP redirect and LDAP simple bind
-- `nestrs-sea-orm/` - SeaORM `for_root_async` (TypeORM/Sequelize analogue)
+- `nestrs-sea-orm/` - SeaORM **`Repo`**, ambient transactions, `RowAuthz` (recommended ORM path; TypeORM/Sequelize analogue)
 - `website/` - landing page + docs hub (light/dark theme)
 
 ## Quick Start

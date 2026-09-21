@@ -1,9 +1,9 @@
 ---
 title: "nestrs-sea-orm"
-description: "Register a SeaORM connection in the nestrs DI graph — NestJS TypeORM / Sequelize analogue."
+description: "SeaORM Repo, ambient transactions, and pluggable row authz — NestJS TypeORM / Sequelize analogue."
 ---
 
-TypeORM and Sequelize are Node ORMs. The Rust equivalent this crate binds into the nestrs graph is [SeaORM](https://www.sea-ql.org/SeaORM/). `SeaOrmModule::for_root_async` connects and exports `DatabaseConnection` for injection.
+TypeORM and Sequelize are Node ORMs. This crate binds [SeaORM](https://www.sea-ql.org/SeaORM/) into the nestrs DI graph and adds the data-layer pieces Nest teams expect: a typed **`Repo`**, **ambient request transactions**, and **deny-closed row authz** via [`RowAuthz`](https://docs.rs/nestrs-sea-orm/latest/nestrs_sea_orm/trait.RowAuthz.html).
 
 Drizzle stays carved out of workspace members (upstream/MSRV). For Prisma-style access use [`nestrs-prisma`](/ecosystem/database); for raw SQL use `SqlxDatabaseModule`.
 
@@ -11,73 +11,94 @@ Drizzle stays carved out of workspace members (upstream/MSRV). For Prisma-style 
 
 ```toml
 [dependencies]
-nestrs = "1.3.0"
-nestrs-sea-orm = "1.3.0"
+nestrs = { version = "1.4.0", features = ["sea-orm", "authz"] }
+# or depend on the adapter directly:
+nestrs-sea-orm = "1.4.0"
 ```
 
 This crate enables SeaORM's `sqlx-sqlite` feature (`sqlite::memory:` and file URLs work out of the box). For Postgres or MySQL, add a direct `sea-orm` dependency with the matching driver feature (same 1.1 line) in your app.
 
 ## Connect and inject
 
-`for_root_async` must finish **before** `NestFactory::create` (same rule as `MongoModule::for_root_async`). Merge the `DynamicModule` with `create_with_modules` so `Arc<DatabaseConnection>` is exported:
+`for_root_async` must finish **before** `NestFactory::create`. Merge the `DynamicModule` with `create_with_modules` so `Arc<DatabaseConnection>` is exported:
 
 ```rust
 use nestrs::prelude::*;
-use nestrs_sea_orm::SeaOrmModule;
+use nestrs_sea_orm::{Repo, SeaOrmModule};
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 
 #[injectable]
-struct UserService {
+struct PostsService {
     db: Arc<DatabaseConnection>,
 }
 
-impl UserService {
-    async fn ping(&self) -> Result<(), sea_orm::DbErr> {
-        let _ = self.db;
-        Ok(())
+impl PostsService {
+    fn repo(&self) -> Repo<post::Entity> {
+        Repo::new(self.db.clone())
     }
-}
-
-#[derive(Default)]
-#[injectable]
-struct AppState;
-
-#[controller(prefix = "/db")]
-struct DbController;
-
-#[routes(state = AppState)]
-impl DbController {
-    #[get("/")]
-    async fn ok() -> &'static str {
-        "ok"
-    }
-}
-
-#[module(controllers = [DbController], providers = [AppState, UserService])]
-struct AppModule;
-
-#[tokio::main]
-async fn main() {
-    let sea = SeaOrmModule::for_root_async("sqlite::memory:")
-        .await
-        .expect("sqlite memory");
-
-    NestFactory::create_with_modules::<AppModule, _>([sea])
-        .listen_graceful(3000)
-        .await;
 }
 ```
 
 `DbConn` is a type alias for `DatabaseConnection`. Inject `Arc<DatabaseConnection>` (the registry stores `Arc`).
 
+## Ambient transactions
+
+Apply `install_sea_orm_transactional_middleware` with `from_fn_with_state(db, …)`. Inside the request, `Repo` methods prefer the ambient transaction. **2xx / 3xx / 4xx → commit**, **5xx → rollback** (same policy as the sqlx transactional middleware).
+
+```rust
+use axum::middleware::from_fn_with_state;
+use nestrs_sea_orm::install_sea_orm_transactional_middleware;
+
+let router = router.layer(from_fn_with_state(
+    db.clone(),
+    install_sea_orm_transactional_middleware,
+));
+```
+
+## Row-level authz
+
+Implement `RowAuthz`, or enable umbrella features `sea-orm` + `authz` and use `AbilityAuthz` / `current_ability_authz()`:
+
+```rust
+use nestrs::current_ability_authz;
+
+let authz = current_ability_authz().expect("policies middleware");
+let row = repo
+    .find_by_id_authorized(&authz, "Post", id)
+    .await?;
+```
+
+Authorized helpers are **deny-closed**: missing ability / failed predicate → `RepoError::Denied` (or `Ok(None)` for invisible reads).
+
+## Route posture (umbrella)
+
+Pair SeaORM authz with boot-time posture checks so an unguarded controller cannot ship:
+
+```rust
+#[get("/health")]
+#[public]
+async fn health() -> &'static str { "ok" }
+
+#[get("/posts")]
+#[use_guards(AuthnGuard, PoliciesGuard)]
+async fn list(...) { ... }
+
+NestFactory::create::<AppModule>()
+    .require_route_posture()
+    .listen_graceful(3000)
+    .await;
+```
+
+`#[public]` and `#[use_guards]` write `nestrs.posture` metadata. `require_route_posture` panics at router build if any application route lacks one (health / metrics / OpenAPI / `__nestrs` are excluded).
+
 ## Compared with other SQL paths
 
 | Path | When to use |
 |------|-------------|
-| `database-sqlx` / `SqlxDatabaseModule` | Raw SQL, `AnyPool` |
+| `database-sqlx` / `SqlxDatabaseModule` | Raw SQL, `AnyPool`, `CrudService` |
 | `nestrs-prisma` | Schema-driven repositories, `prisma_model!` |
-| `nestrs-sea-orm` | SeaORM entities / Active Record style |
-| `nestrs-drizzle` | Not a workspace member in 1.3.0 |
+| **`nestrs-sea-orm` (recommended ORM)** | SeaORM entities, `Repo`, ambient tx, `RowAuthz` |
+| `nestrs-drizzle` | Not a workspace member in 1.4.0 |
 
-Define SeaORM `Entity` types in your crate and use the injected connection as you would in a standalone SeaORM app.
+Define SeaORM `Entity` types in your crate and construct `Repo::<Entity>::new(db)`.

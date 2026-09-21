@@ -11,8 +11,8 @@ keywords = ["mongodb", "mongoose", "orm", "nest", "axum"]
 categories = ["database", "api-bindings", "web-programming"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.3.0" }
-nestrs-macros = { path = "../nestrs-macros", version = "1.3.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.4.0" }
+nestrs-macros = { path = "../nestrs-macros", version = "1.4.0" }
 mongodb = { version = "3", default-features = false, features = ["compat-3-0-0", "rustls-tls"] }
 bson = "2"
 serde = { version = "1", features = ["derive"] }

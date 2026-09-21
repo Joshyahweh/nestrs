@@ -9,9 +9,9 @@ pub use nestrs_macros::{
     all, als, check_policies, config, controller, cron, dataloader, delete, dto, event_pattern,
     event_routes, get, head, http_code, injectable, intersection_type, interval, liveness,
     message_pattern, micro_routes, module, omit_type, on_event, openapi, options, partial_type,
-    patch, pick_type, post, put, queue_processor, raw_body, readiness, redirect, response_header,
-    roles, routes, schedule_routes, serialize, set_metadata, skip_throttle, sse, startup,
-    subscribe_message, throttle, upload_to, use_filters, use_guards, use_interceptors,
+    patch, pick_type, post, public, put, queue_processor, raw_body, readiness, redirect,
+    response_header, roles, routes, schedule_routes, serialize, set_metadata, skip_throttle, sse,
+    startup, subscribe_message, throttle, upload_to, use_filters, use_guards, use_interceptors,
     use_micro_guards, use_micro_interceptors, use_micro_pipes, use_pipes, use_ws_guards,
     use_ws_interceptors, use_ws_pipes, ver, version, ws_gateway, ws_routes, NestConfig, NestDto,
 };
@@ -134,6 +134,7 @@ mod pipes;
 // module-qualified (the root name `nestrs::Principal` belongs to the authn
 // extractor newtype).
 pub mod policies;
+pub mod posture;
 #[cfg(feature = "authz-row-level")]
 pub mod predicates;
 pub mod problem;
@@ -146,6 +147,8 @@ mod request_context;
 mod request_scoped;
 #[cfg(feature = "schedule")]
 pub mod schedule;
+#[cfg(all(feature = "sea-orm", feature = "authz"))]
+mod sea_orm_bridge;
 mod security;
 mod serialization;
 mod server_timing;
@@ -242,6 +245,10 @@ pub use policies::{
     with_principal, Ability, AbilityBuilder, Action, Conditions, PoliciesGuard, PoliciesModule,
     PoliciesOptions, PolicyEntry, RowPredicate, Rule, Subject,
 };
+pub use posture::{
+    assert_route_posture, collect_unguarded_routes, PostureError, UnguardedRoute,
+    POSTURE_METADATA_KEY,
+};
 #[cfg(feature = "session-redis")]
 pub use session_store::RedisSessionStore;
 // NOTE: `policies::Principal` is deliberately NOT root-exported — the authn
@@ -252,6 +259,8 @@ pub use session_store::RedisSessionStore;
 /// that holds an `Arc<sqlx::AnyPool>`. See
 /// `nestrs::crud_macro::__CrudQueryAdapter` for the runtime side.
 pub use nestrs_macros::crud;
+#[cfg(feature = "sea-orm")]
+pub use nestrs_sea_orm as sea_orm;
 #[cfg(feature = "authz-row-level")]
 pub use predicates::{
     AuthorIsCurrentUser, BelongsToUser, HasRole, NotDeleted, OwnerOrAdmin, PublicOrOwner,
@@ -272,6 +281,8 @@ pub use request_context::{RequestContext, RequestContextMissing};
 pub use request_scoped::{RequestScoped, RequestScopedMissing};
 #[cfg(feature = "schedule")]
 pub use schedule::{ScheduleModule, ScheduleRuntime};
+#[cfg(all(feature = "sea-orm", feature = "authz"))]
+pub use sea_orm_bridge::{current_ability_authz, AbilityAuthz};
 #[allow(deprecated)]
 pub use security::XRoleMetadataGuard;
 #[cfg(feature = "csrf")]
@@ -385,7 +396,7 @@ pub mod prelude {
         all, als, async_trait, build_sources_overlay, controller, cron, crud, delete, dto,
         event_pattern, event_routes, get, head, http_code, impl_routes, injectable,
         intersection_type, interval, liveness, load_config, message_pattern, micro_routes, module,
-        nestrs_default_not_found_handler, on_event, openapi, options, patch, post, put,
+        nestrs_default_not_found_handler, on_event, openapi, options, patch, post, public, put,
         queue_processor, raw_body, readiness, redirect, response_header, roles, routes,
         runtime_is_production, schedule_routes, serialize, set_metadata, sse, startup,
         subscribe_message, try_init_tracing, use_filters, use_guards, use_interceptors,
@@ -1080,6 +1091,9 @@ pub struct NestApplication {
     /// Double-submit CSRF for unsafe methods (feature: **`csrf`**); pair with [`Self::use_cookies`].
     #[cfg(feature = "csrf")]
     csrf: Option<std::sync::Arc<crate::security::CsrfProtectionConfig>>,
+    /// When true, [`Self::listen`] / [`Self::into_router`] refuse to start if any
+    /// application route lacks `#[public]` or `#[use_guards]` posture metadata.
+    require_route_posture: bool,
 }
 
 type GlobalLayerFn = Box<dyn Fn(axum::Router) -> axum::Router + Send + Sync + 'static>;
@@ -1141,6 +1155,7 @@ impl NestApplication {
             session_redis_url: None,
             #[cfg(feature = "csrf")]
             csrf: None,
+            require_route_posture: false,
         }
     }
 }
@@ -1860,6 +1875,50 @@ impl NestApplication {
         self
     }
 
+    /// Refuse to build/listen when any application route lacks access posture.
+    ///
+    /// Every controller handler must be either `#[public]` or carry
+    /// `#[use_guards(...)]` / `controller_guards = ...` (macros write
+    /// `nestrs.posture` metadata). Health, metrics, and OpenAPI paths are
+    /// excluded automatically.
+    ///
+    /// Panics from [`Self::into_router`] / [`Self::listen`] with a message
+    /// listing unguarded routes — prefer fixing the routes over catching.
+    pub fn require_route_posture(mut self) -> Self {
+        self.require_route_posture = true;
+        self
+    }
+
+    /// Run the posture scan without building the router (tests / CLI doctor).
+    pub fn assert_route_posture(&self) -> Result<(), crate::PostureError> {
+        let excludes = self.posture_exclude_prefixes();
+        let refs: Vec<&str> = excludes.iter().map(String::as_str).collect();
+        crate::assert_route_posture(&refs)
+    }
+
+    fn posture_exclude_prefixes(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(p) = &self.liveness_path {
+            out.push(p.clone());
+        }
+        if let Some((p, _)) = &self.readiness {
+            out.push(p.clone());
+        }
+        if let Some(p) = &self.metrics_path {
+            out.push(p.clone());
+        }
+        #[cfg(feature = "openapi")]
+        if let Some(opts) = &self.openapi {
+            // Common OpenAPI mounts — keep in sync with openapi enable helpers.
+            let _ = opts;
+            out.push("/openapi.json".into());
+            out.push("/swagger-ui".into());
+            out.push("/api-json".into());
+        }
+        out.push("/__nestrs".into());
+        out
+    }
+
     /// **Readiness** probe at `path` (for example `"/ready"`), running all `indicators` on each request.
     ///
     /// Like [`Self::enable_health_check`], the route is mounted at the **server root** (not under URI
@@ -2080,6 +2139,11 @@ impl NestApplication {
 
     fn build_router(self) -> axum::Router {
         Self::log_security_footguns(&self);
+        if self.require_route_posture {
+            if let Err(e) = self.assert_route_posture() {
+                panic!("nestrs route posture check failed: {e}");
+            }
+        }
         let production_errors = self.production_errors;
         let request_context = self.request_context;
         let execution_context = self.execution_context;
@@ -2114,7 +2178,7 @@ impl NestApplication {
         let session_redis_url = self.session_redis_url.clone();
         #[cfg(feature = "csrf")]
         let csrf = self.csrf.clone();
-        let mut registry = self.registry;
+        let registry = self.registry;
         #[cfg(feature = "throttler")]
         let throttler_options = self.throttler_options;
         let uri_version = self.uri_version;

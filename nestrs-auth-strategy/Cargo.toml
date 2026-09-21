@@ -14,8 +14,8 @@ categories = ["authentication", "web-programming"]
 async-trait = "0.1"
 axum.workspace = true
 base64 = "0.22"
-nestrs-core = { path = "../nestrs-core", version = "1.3.0" }
-nestrs-security = { path = "../nestrs-security", version = "1.3.0", default-features = false }
+nestrs-core = { path = "../nestrs-core", version = "1.4.0" }
+nestrs-security = { path = "../nestrs-security", version = "1.4.0", default-features = false }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -8,6 +8,7 @@
 - [Fundamentals (DI, scopes, lifecycle)](fundamentals.md)
 - [CLI (nestrs-scaffold)](cli.md)
 - [Authorization (guards, policies, row-level)](authorization.md)
+- [SeaORM adapter (`Repo`, ambient tx, RowAuthz)](sea-orm.md)
 - [CRUD generation (`#[crud]`)](crud.md)
 - [OAuth2](oauth2.md)
 - [Model Context Protocol (MCP) server](mcp.md)

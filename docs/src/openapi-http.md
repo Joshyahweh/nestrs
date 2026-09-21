@@ -15,7 +15,7 @@ Use [`NestApplication::enable_openapi`](https://docs.rs/nestrs/latest/nestrs/str
 
 ```toml
 [dependencies]
-nestrs = { version = "1.3.0", features = ["openapi"] }
+nestrs = { version = "1.4.0", features = ["openapi"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

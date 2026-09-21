@@ -7,8 +7,8 @@ Nest-style **`PrismaModule`** / **`PrismaService`** for [nestrs](https://crates.
 ```toml
 [dependencies]
 async-trait = "0.1"
-nestrs-prisma = { version = "1.3.0", features = ["sqlx", "sqlx-sqlite"] }
-nestrs = "1.3.0"
+nestrs-prisma = { version = "1.4.0", features = ["sqlx", "sqlx-sqlite"] }
+nestrs = "1.4.0"
 ```
 
 When enabling `sqlx`, choose exactly one backend feature in your app: `sqlx-sqlite`, `sqlx-postgres`, or `sqlx-mysql`. If more than one is enabled (for example through workspace `--all-features`), the concrete driver is selected in priority order: Postgres, then MySQL, then SQLite.
@@ -44,7 +44,7 @@ From the `nestrs` workspace root:
 cargo run -p nestrs-prisma --example quickstart --features "sqlx,sqlx-sqlite"
 ```
 
-### B) From your own app (crate consumers on `nestrs-prisma = "1.3.0"`)
+### B) From your own app (crate consumers on `nestrs-prisma = "1.4.0"`)
 
 `cargo run -p nestrs-prisma ...` will not work in your app, because `-p` targets a package in your current workspace.
 Instead:
@@ -52,8 +52,8 @@ Instead:
 1. Add dependency:
 
 ```toml
-nestrs-prisma = { version = "1.3.0", features = ["sqlx", "sqlx-postgres"] }
-nestrs = "1.3.0"
+nestrs-prisma = { version = "1.4.0", features = ["sqlx", "sqlx-postgres"] }
+nestrs = "1.4.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -61,16 +61,16 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 ```bash
 mkdir -p examples
-curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v1.3.0/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
+curl -fsSL "https://raw.githubusercontent.com/Joshyahweh/nestrs/v1.4.0/nestrs-prisma/examples/quickstart.rs" -o examples/quickstart.rs
 ```
 
 Alternative (fetch from crates.io source):
 
 ```bash
 cargo install cargo-download
-cargo download nestrs-prisma==1.3.0 --extract
+cargo download nestrs-prisma==1.4.0 --extract
 mkdir -p examples
-cp nestrs-prisma-1.3.0/examples/quickstart.rs examples/quickstart.rs
+cp nestrs-prisma-1.4.0/examples/quickstart.rs examples/quickstart.rs
 ```
 
 3. Run from your app root:

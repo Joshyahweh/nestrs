@@ -7,7 +7,7 @@
 //! This crate does not depend on a specific `better-auth` crate version so
 //! MSRV 1.88 stays intact; you pass the already-built router in.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-better-auth/1.3.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-better-auth/1.4.0")]
 
 use async_trait::async_trait;
 use axum::http::request::Parts;

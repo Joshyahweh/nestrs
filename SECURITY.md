@@ -34,6 +34,8 @@ Please report security vulnerabilities privately.
 - **Environment-based secure errors**: `enable_production_errors_from_env()` uses `NESTRS_ENV`/`APP_ENV`/`RUST_ENV`.
 - **Authentication building blocks**: `CanActivate` guards, `AuthStrategy`, `#[roles(...)]` metadata, `XRoleMetadataGuard`, `AuthStrategyGuard`, and Axum extractors `BearerToken` / `OptionalBearerToken` (no bundled Passport/JWT — use your crates of choice).
 - **CSRF (opt-in)**: feature **`csrf`** + `NestApplication::use_csrf_protection` with **`use_cookies()`** — double-submit check on POST/PUT/PATCH/DELETE (`CsrfProtectionConfig`).
+- **Route posture (opt-in)**: `NestApplication::require_route_posture()` refuses to build the router if any application route lacks `#[public]` or `#[use_guards(...)]` metadata. Prefer this for multi-tenant APIs so an unguarded surface cannot ship.
+- **SeaORM row authz**: feature **`sea-orm-authz`** — `Repo::*_authorized` + `AbilityAuthz` (deny-closed). Pair with posture checks and policies middleware.
 
 ## Encryption and hashing
 

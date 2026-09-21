@@ -26,6 +26,7 @@ nestrs::NestApplication::into_router
 nestrs::NestApplication::listen
 nestrs::NestApplication::listen_graceful
 nestrs::NestApplication::listen_with_shutdown
+nestrs::NestApplication::require_route_posture
 nestrs::NestApplication::set_global_prefix
 nestrs::NestApplication::use_admin
 nestrs::NestApplication::use_body_limit
@@ -258,6 +259,12 @@ nestrs::policies::install_policies_middleware
 nestrs::policies::parse_policy_entries
 nestrs::policies::with_ability
 nestrs::policies::with_principal
+nestrs::posture
+nestrs::posture::POSTURE_METADATA_KEY
+nestrs::posture::PostureError
+nestrs::posture::UnguardedRoute
+nestrs::posture::assert_route_posture
+nestrs::posture::collect_unguarded_routes
 nestrs::predicates
 nestrs::predicates::AuthorIsCurrentUser
 nestrs::predicates::BelongsToUser
@@ -316,6 +323,8 @@ nestrs::schedule::ScheduleModule
 nestrs::schedule::ScheduleRegistration
 nestrs::schedule::ScheduleRuntime
 nestrs::schedule::wire_scheduled_tasks
+nestrs::sea_orm_bridge::AbilityAuthz
+nestrs::sea_orm_bridge::current_ability_authz
 nestrs::serialization::strip_null_json_value
 nestrs::server_timing::ServerTiming
 nestrs::server_timing::ServerTiming::start

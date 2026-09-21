@@ -2178,7 +2178,9 @@ impl NestApplication {
         let session_redis_url = self.session_redis_url.clone();
         #[cfg(feature = "csrf")]
         let csrf = self.csrf.clone();
-        let registry = self.registry;
+        // `mut` is required when the `throttler` feature registers into the Arc.
+        #[cfg_attr(not(feature = "throttler"), allow(unused_mut))]
+        let mut registry = self.registry;
         #[cfg(feature = "throttler")]
         let throttler_options = self.throttler_options;
         let uri_version = self.uri_version;

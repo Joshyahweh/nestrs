@@ -3717,8 +3717,8 @@ pub fn use_guards(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Mark a handler as intentionally unauthenticated / unguarded.
 ///
 /// Writes `nestrs.posture=public` metadata. Conflicts with `#[use_guards]`.
-/// When [`NestApplication::require_route_posture`](nestrs::NestApplication::require_route_posture)
-/// is enabled, every route must be either `#[public]` or guarded.
+/// When `NestApplication::require_route_posture` is enabled, every route must
+/// be either `#[public]` or guarded.
 #[proc_macro_attribute]
 pub fn public(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {

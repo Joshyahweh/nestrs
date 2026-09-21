@@ -30,7 +30,7 @@
 //!
 //! **Docs:** mdBook **Security** (`docs/src/security.md`).
 
-#![doc(html_root_url = "https://docs.rs/nestrs-security/1.3.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-security/1.4.0")]
 
 mod auth;
 mod helmet;

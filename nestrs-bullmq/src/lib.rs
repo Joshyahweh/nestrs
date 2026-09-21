@@ -9,7 +9,7 @@
 //! - `{prefix}:{queue}:{id}` — job hash (`name`, `data`, `opts`, `timestamp`)
 //! - `{prefix}:{queue}:wait` — LPUSH job id
 
-#![doc(html_root_url = "https://docs.rs/nestrs-bullmq/1.3.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-bullmq/1.4.0")]
 
 use redis::AsyncCommands;
 use serde_json::Value;

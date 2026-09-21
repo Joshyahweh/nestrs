@@ -6,7 +6,7 @@ workers (or other BullMQ consumers) must share the same Redis keys.
 nestrs `QueuesModule` + `queues-redis` stays the in-process / LPUSH-BRPOP path.
 
 ```toml
-nestrs-bullmq = "1.3.0"
+nestrs-bullmq = "1.4.0"
 ```
 
 ```rust,ignore

@@ -3,7 +3,7 @@
 //! nestrs-ws speaks RFC 6455 JSON events. This crate mounts a real Socket.IO
 //! stack ([`socketioxide`]) onto the same Axum router.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-socketio/1.3.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-socketio/1.4.0")]
 
 use axum::Router;
 use socketioxide::{layer::SocketIoLayer, SocketIo};

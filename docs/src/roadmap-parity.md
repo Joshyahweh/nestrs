@@ -56,7 +56,8 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 | Passport | **`nestrs-auth-strategy`** | **Partial** | `JwtStrategy` / `LocalBasicStrategy` on `AuthStrategy`. |
 | Better Auth | **`nestrs-better-auth`** | **Partial** | Nest better-auth.rs router + session-cookie guard. |
 | SAML / LDAP | **`nestrs-saml`**, **`nestrs-ldap`** | **Partial** | SP redirect + bind auth; assertion crypto stays in the app. |
-| TypeORM / Sequelize | **`nestrs-sea-orm`** | **Partial** | SeaORM `for_root_async`; drizzle still carved out. |
+| TypeORM / Sequelize | **`nestrs-sea-orm`** | **Full / Partial** | `Repo`, ambient tx, `RowAuthz` / `AbilityAuthz`; drizzle still carved out. |
+| Route posture (`#[Public]`-style) | `#[public]` + `require_route_posture` | **Full** | Boot fails if a route lacks `#[public]` or guards. |
 | Shared JSON wire format | `nestrs_microservices::wire` | **Full** | Golden tests in crate; revision constant for docs. |
 
 ## Ecosystem modules (Nest “@nestjs/…”-style)

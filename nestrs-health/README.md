@@ -13,7 +13,7 @@ public symbol at the same path, so existing code keeps compiling unchanged.
 
 ```toml
 [dependencies]
-nestrs-health = "1.3.0"
+nestrs-health = "1.4.0"
 ```
 
 ## Surface

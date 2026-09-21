@@ -6,5 +6,5 @@ Builds the IdP redirect; you validate `SAMLResponse` via
 `SamlResponseValidator` (samael, xmlsec, or your IdP SDK).
 
 ```toml
-nestrs-saml = "1.3.0"
+nestrs-saml = "1.4.0"
 ```

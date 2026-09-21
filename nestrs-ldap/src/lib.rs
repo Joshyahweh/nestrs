@@ -1,6 +1,6 @@
 //! LDAP bind adapter — NestJS `passport-ldap` analogue.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-ldap/1.3.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-ldap/1.4.0")]
 
 use ldap3::{LdapConnAsync, LdapError};
 

@@ -447,13 +447,20 @@ pub fn parse_policy_entries(csv: &str) -> Vec<PolicyEntry> {
 }
 
 fn parse_action(s: &str) -> Action {
-    match s {
-        "read" | "Read" | "READ" => Action::Read,
-        "create" | "Create" | "CREATE" => Action::Create,
-        "update" | "Update" | "UPDATE" => Action::Update,
-        "delete" | "Delete" | "DELETE" => Action::Delete,
-        "manage" | "Manage" | "MANAGE" => Action::Manage,
-        other => Action::Custom(other.to_string()),
+    Action::parse(s)
+}
+
+impl Action {
+    /// Parse a Nest/CASL-style action token (`read`, `create`, `update`, `delete`, `manage`).
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "read" | "Read" | "READ" => Action::Read,
+            "create" | "Create" | "CREATE" => Action::Create,
+            "update" | "Update" | "UPDATE" => Action::Update,
+            "delete" | "Delete" | "DELETE" => Action::Delete,
+            "manage" | "Manage" | "MANAGE" => Action::Manage,
+            other => Action::Custom(other.to_string()),
+        }
     }
 }
 

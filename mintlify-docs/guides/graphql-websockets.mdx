@@ -13,7 +13,7 @@ Add the `graphql` feature to your `nestrs` dependency and add `async-graphql` an
 
 ```toml
 [dependencies]
-nestrs = { version = "1.3.0", features = ["graphql"] }
+nestrs = { version = "1.4.0", features = ["graphql"] }
 async-graphql = "7"
 ```
 
@@ -129,7 +129,7 @@ async-graphql 7 registers the federation entity field as **`entities`** (no unde
 
 ```toml
 [dependencies]
-nestrs = { version = "1.3.0", features = ["graphql-federation-gateway"] }
+nestrs = { version = "1.4.0", features = ["graphql-federation-gateway"] }
 ```
 
 The feature implies `graphql-authz`, and the gateway types are re-exported under `nestrs::graphql::federation`: `federation_router`, `federation_router_with_options`, `federation_router_with_hook`, `FederationConfig`, `SubgraphSpec`, `EntityResolver`, and `FederationError`.
@@ -263,7 +263,7 @@ Add the `ws` feature:
 
 ```toml
 [dependencies]
-nestrs = { version = "1.3.0", features = ["ws"] }
+nestrs = { version = "1.4.0", features = ["ws"] }
 ```
 
 `nestrs-ws` is re-exported as `nestrs::ws` when the feature is enabled.

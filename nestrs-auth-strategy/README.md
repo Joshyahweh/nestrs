@@ -4,7 +4,7 @@
 `passport`. Use with `AuthStrategyGuard` / `PassportGuard`.
 
 ```toml
-nestrs-auth-strategy = "1.3.0"
+nestrs-auth-strategy = "1.4.0"
 ```
 
 ```rust,ignore

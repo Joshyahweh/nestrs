@@ -7,7 +7,7 @@ This crate does **not** vendor Better Auth plugins. Build `BetterAuth` upstream,
 call `auth.axum_router()`, then:
 
 ```toml
-nestrs-better-auth = "1.3.0"
+nestrs-better-auth = "1.4.0"
 ```
 
 ```rust,ignore

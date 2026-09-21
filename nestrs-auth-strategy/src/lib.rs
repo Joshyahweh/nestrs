@@ -4,7 +4,7 @@
 //! [`AuthStrategy`] + [`PassportGuard`]. This crate ships the two
 //! strategies apps reach for first: JWT bearer and HTTP Basic (local).
 
-#![doc(html_root_url = "https://docs.rs/nestrs-auth-strategy/1.3.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-auth-strategy/1.4.0")]
 
 use async_trait::async_trait;
 use axum::http::request::Parts;

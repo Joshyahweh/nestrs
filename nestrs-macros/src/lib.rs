@@ -1335,6 +1335,34 @@ fn parse_route_version(attrs: &[syn::Attribute]) -> Result<Option<LitStr>> {
     Ok(None)
 }
 
+fn parse_public(attrs: &[syn::Attribute]) -> Result<bool> {
+    let mut found = false;
+    for attr in attrs {
+        if !attr.path().is_ident("public") {
+            continue;
+        }
+        if found {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "#[public] can only appear once per handler",
+            ));
+        }
+        // `#[public]` or `#[public()]`
+        match &attr.meta {
+            Meta::Path(_) => {}
+            Meta::List(list) if list.tokens.is_empty() => {}
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    "#[public] takes no arguments",
+                ));
+            }
+        }
+        found = true;
+    }
+    Ok(found)
+}
+
 fn parse_use_guards(attrs: &[syn::Attribute]) -> Result<Vec<Type>> {
     for attr in attrs {
         if !attr.path().is_ident("use_guards") {
@@ -1995,6 +2023,19 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             Err(e) => return e.to_compile_error().into(),
         };
 
+        let is_public = match parse_public(&func.attrs) {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
+        if is_public && (!guards.is_empty() || args.controller_guards.is_some()) {
+            return syn::Error::new_spanned(
+                &func.sig.ident,
+                "#[public] conflicts with #[use_guards(...)] / controller_guards — pick one posture",
+            )
+            .to_compile_error()
+            .into();
+        }
+
         let pipes = match parse_use_pipes(&func.attrs) {
             Ok(v) => v,
             Err(e) => return e.to_compile_error().into(),
@@ -2122,6 +2163,19 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
         match parse_probe(&func.attrs) {
             Ok(v) => metadata.extend(v),
             Err(e) => return e.to_compile_error().into(),
+        }
+
+        // Access posture for NestApplication::require_route_posture.
+        if is_public {
+            metadata.push((
+                LitStr::new("nestrs.posture", proc_macro2::Span::call_site()),
+                LitStr::new("public", proc_macro2::Span::call_site()),
+            ));
+        } else if !guards.is_empty() || args.controller_guards.is_some() {
+            metadata.push((
+                LitStr::new("nestrs.posture", proc_macro2::Span::call_site()),
+                LitStr::new("guarded", proc_macro2::Span::call_site()),
+            ));
         }
 
         let openapi_line = match parse_openapi(&func.attrs) {
@@ -3658,6 +3712,24 @@ pub fn ver(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn use_guards(attr: TokenStream, item: TokenStream) -> TokenStream {
     passthrough(attr, item)
+}
+
+/// Mark a handler as intentionally unauthenticated / unguarded.
+///
+/// Writes `nestrs.posture=public` metadata. Conflicts with `#[use_guards]`.
+/// When [`NestApplication::require_route_posture`](nestrs::NestApplication::require_route_posture)
+/// is enabled, every route must be either `#[public]` or guarded.
+#[proc_macro_attribute]
+pub fn public(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[public] takes no arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    item
 }
 
 #[proc_macro_attribute]

@@ -20,16 +20,35 @@ Authorization is opt-in via Cargo features, scoped so you only pay for the layer
 |---|---|
 | `authz` | The core engine: `Ability` / `AbilityBuilder`, `PoliciesGuard`, `#[check_policies(...)]` route metadata, `PoliciesModule::register(PoliciesOptions)`. Pairs with `authn`, which supplies the verified caller identity. |
 | `authz-row-level` | Enables `authz` + `database-sqlx`. The pre-built predicates (`nestrs::predicates`), `Repository::find_many_authorized(FindManyParams)`, and mandatory application of the `Ability`'s row-level rules by every `CrudService` method (deny-closed when no `Ability` is in request scope). |
+| `sea-orm` / `sea-orm-authz` | SeaORM `Repo` + ambient transactions; `AbilityAuthz` bridges `Ability` to `nestrs_sea_orm::RowAuthz` (see [SeaORM adapter](/adapters/sea-orm)). |
 | `ws-authz` / `graphql-authz` | The same ability + principal slots for WebSocket and GraphQL transports (see [Beyond HTTP](#beyond-http)). |
 
 ```toml
 [dependencies]
-nestrs = { version = "1.3.0", features = ["authn", "authz", "authz-row-level"] }
+nestrs = { version = "1.4.0", features = ["authn", "authz", "authz-row-level"] }
+# Recommended ORM path:
+# nestrs = { version = "1.4.0", features = ["authn", "authz", "sea-orm"] }
 ```
 
 <Note>
 Custom predicate **closures** only need `authz` — the blanket `RowPredicate` impl lives in the core module. The `authz-row-level` flag gates the *enforcement seam*: the repository methods that push rules into `WHERE` clauses and the `CrudService` methods that apply them to every read and write.
 </Note>
+
+## Route posture (unguarded routes fail at boot)
+
+Mark every handler with either `#[public]` or `#[use_guards(...)]`. Enable
+`NestApplication::require_route_posture()` so a forgotten guard is a **boot
+error**, not a production incident:
+
+```rust
+NestFactory::create::<AppModule>()
+    .require_route_posture()
+    .listen_graceful(3000)
+    .await;
+```
+
+Macros write `nestrs.posture` metadata (`public` / `guarded`). Health, metrics,
+OpenAPI, and `__nestrs` paths are excluded automatically.
 
 ## The ability model
 

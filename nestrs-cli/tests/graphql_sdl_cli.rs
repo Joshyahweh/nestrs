@@ -4,7 +4,7 @@
 //! covered by a smoke test that uses a local Python HTTP server.
 
 use std::fs;
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -138,7 +138,7 @@ class H(http.server.BaseHTTPRequestHandler):
 http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
 "#;
 
-    let child = Command::new("python3")
+    let mut child = Command::new("python3")
         .arg("-c")
         .arg(script)
         .arg(port.to_string())
@@ -147,16 +147,19 @@ http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
         .spawn()
         .expect("spawn python3");
 
-    // Wait for the server to start.
-    for _ in 0..30 {
-        if TcpListener::bind(("127.0.0.1", port)).is_err() {
-            // bind failed = port in use = server is up
-            std::thread::sleep(Duration::from_millis(50));
+    // Wait until the socket accepts connections (bind-check alone races).
+    for _ in 0..100 {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
             return Some((port, child));
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            panic!("mock server exited before accepting: {status}");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    Some((port, child))
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!("mock server on port {port} did not become ready");
 }
 
 #[test]

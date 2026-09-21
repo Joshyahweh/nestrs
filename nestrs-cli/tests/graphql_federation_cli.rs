@@ -7,7 +7,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -173,7 +173,7 @@ class H(http.server.BaseHTTPRequestHandler):
 http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
 "#;
 
-    let child = Command::new("python3")
+    let mut child = Command::new("python3")
         .arg("-c")
         .arg(script)
         .arg(port.to_string())
@@ -183,15 +183,22 @@ http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
         .spawn()
         .expect("spawn python3");
 
-    for _ in 0..30 {
-        if TcpListener::bind(("127.0.0.1", port)).is_err() {
-            std::thread::sleep(Duration::from_millis(50));
+    // Wait until the socket accepts connections (bind-check alone races).
+    for _ in 0..100 {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            let _ = fs::remove_file(&payload_path);
             return Some((port, child));
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            let _ = fs::remove_file(&payload_path);
+            panic!("mock server exited before accepting: {status}");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     let _ = fs::remove_file(&payload_path);
-    Some((port, child))
+    panic!("mock server on port {port} did not become ready");
 }
 
 #[test]

@@ -20,7 +20,7 @@ serde = { version = "1", features = ["derive"] }
 # re-export the `nestrs_mcp::NestrsMcpServer` here so the CLI can serve
 # stdio/HTTP without spawning a subprocess. Stubbed (off by default) for
 # now so existing CLI builds are unaffected.
-nestrs-mcp = { path = "../nestrs-mcp", version = "1.4.0", optional = true }
+nestrs-mcp = { path = "../nestrs-mcp", version = "1.5.0", optional = true }
 # Optional DB migrations + seeding (`nestrs-cli db ...`). Pinned to
 # 0.8.6 to match the rest of the workspace; sqlx's `migrate` feature
 # is what unlocks `sqlx::migrate::Migrator`. `postgres` is on the

@@ -154,7 +154,7 @@ where
     }
 
     /// Deny-closed read via [`RowAuthz`].
-    pub async fn find_by_id_authorized<A: RowAuthz>(
+    pub async fn find_by_id_authorized<A: RowAuthz + ?Sized>(
         &self,
         authz: &A,
         subject_type: &str,
@@ -178,7 +178,7 @@ where
     }
 
     /// Deny-closed list via [`RowAuthz`] (post-load filter).
-    pub async fn find_all_authorized<A: RowAuthz>(
+    pub async fn find_all_authorized<A: RowAuthz + ?Sized>(
         &self,
         authz: &A,
         subject_type: &str,
@@ -202,7 +202,7 @@ where
 
     /// Deny-closed insert. `candidate` is the JSON shape judged by the row
     /// predicate **before** the write (same convention as sqlx `CrudService`).
-    pub async fn insert_authorized<A: RowAuthz>(
+    pub async fn insert_authorized<A: RowAuthz + ?Sized>(
         &self,
         authz: &A,
         subject_type: &str,
@@ -220,8 +220,38 @@ where
         self.insert(model).await
     }
 
+    /// Deny-closed update. Loads the row, checks `update` + row predicate,
+    /// then writes `model`.
+    pub async fn update_authorized<A: RowAuthz + ?Sized>(
+        &self,
+        authz: &A,
+        subject_type: &str,
+        id: <E::PrimaryKey as PrimaryKeyTrait>::ValueType,
+        model: E::ActiveModel,
+    ) -> Result<E::Model, RepoError>
+    where
+        <E::PrimaryKey as PrimaryKeyTrait>::ValueType: Clone + Send + Sync + 'static,
+        E::Model: Serialize,
+    {
+        if !authz.can("update", subject_type) {
+            return Err(RepoError::Denied(format!("update on {subject_type}")));
+        }
+        let Some(existing) = self.find_by_id(id).await? else {
+            return Err(RepoError::Denied(format!(
+                "update on {subject_type} (missing row)"
+            )));
+        };
+        let json = to_json(&existing, subject_type)?;
+        if !authz.allows_row("update", subject_type, &json) {
+            return Err(RepoError::Denied(format!(
+                "update on {subject_type} (row predicate)"
+            )));
+        }
+        self.update(model).await
+    }
+
     /// Deny-closed delete.
-    pub async fn delete_by_id_authorized<A: RowAuthz>(
+    pub async fn delete_by_id_authorized<A: RowAuthz + ?Sized>(
         &self,
         authz: &A,
         subject_type: &str,

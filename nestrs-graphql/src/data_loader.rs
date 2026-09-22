@@ -115,6 +115,14 @@ impl DataLoaderRegistry {
 /// memoization redundant; batching is what fixes N+1). This is what
 /// `#[dataloader]`'s generated `into_data_loader` returns, so resolvers
 /// can uniformly write `DataLoader<MyLoader>`.
+///
+/// ## SeaORM tip
+///
+/// Pair with `nestrs_sea_orm::Repo` inside `batch_load`: collect keys, one
+/// `find_with_filter` / `IN` query, then map to `HashMap`. Register the
+/// factory on `GqlDataContext::with_loaders` so each GraphQL request gets
+/// a fresh loader (and sees the ambient SeaORM transaction when
+/// `install_sea_orm_transactional_middleware` is on the HTTP stack).
 pub fn data_loader<L>(loader: L) -> DataLoader<L>
 where
     L: Send + Sync + 'static,

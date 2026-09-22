@@ -34,7 +34,7 @@
 //!   key check (e.g. health probes, internal IPs). Default: [`NeverSkip`].
 //! - [`ThrottlerRequest`] is the input to both traits.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-throttle/1.4.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-throttle/1.5.0")]
 
 mod backend;
 mod guard;

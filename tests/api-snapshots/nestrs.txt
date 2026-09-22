@@ -324,6 +324,7 @@ nestrs::schedule::ScheduleRegistration
 nestrs::schedule::ScheduleRuntime
 nestrs::schedule::wire_scheduled_tasks
 nestrs::sea_orm_bridge::AbilityAuthz
+nestrs::sea_orm_bridge::attach_row_authz_middleware
 nestrs::sea_orm_bridge::current_ability_authz
 nestrs::serialization::strip_null_json_value
 nestrs::server_timing::ServerTiming
@@ -357,4 +358,5 @@ nestrs::ws_authz::current_ws_ability
 nestrs::ws_authz::current_ws_principal
 nestrs::ws_authz::current_ws_transaction
 nestrs::ws_authz::emit_masked
+nestrs::ws_authz::emit_masked_current
 nestrs::ws_authz::run_in_ws_scope

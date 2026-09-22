@@ -1,23 +1,27 @@
-# SeaORM adapter
+# SeaORM adapter (`Repo`, Bind, ambient tx, RowAuthz)
 
-`nestrs-sea-orm` is the **recommended ORM path** for nestrs (NestJS TypeORM /
-Sequelize analogue).
+The **recommended** NestJS TypeORM / Sequelize analogue is [`nestrs-sea-orm`](https://docs.rs/nestrs-sea-orm).
 
-## Install
+## Features (1.5.0)
 
-```toml
-nestrs = { version = "1.4.0", features = ["sea-orm", "authz"] }
-# or
-nestrs-sea-orm = "1.4.0"
-```
-
-## Features
-
-- `SeaOrmModule::for_root_async` / `from_connection` — export `Arc<DatabaseConnection>`
+- `SeaOrmModule::for_root_async` / `from_connection` — DI export of `Arc<DatabaseConnection>`
 - `Repo<E>` — typed repository; prefers an ambient request transaction when present
 - `install_sea_orm_transactional_middleware` — commit on 2xx/3xx/4xx, rollback on 5xx
-- `RowAuthz` + umbrella `AbilityAuthz` — deny-closed authorized helpers
+- `RowAuthz` / `AbilityAuthz` — deny-closed authorized CRUD helpers
+- `bind_read` / `Bind` — NestRS-style authorized path to row (`BindError` as HTTP status)
+- `attach_row_authz_middleware` — put `BoundAuthz` on request extensions
+- `expose_schema` (feature `expose`) — one `JsonSchema` model to OpenAPI components
+- Pair with `NestApplication::require_route_posture` + `#[public]` / `#[use_guards]`
 
-See Mintlify [`adapters/sea-orm`](../../mintlify-docs/adapters/sea-orm.mdx) and
-crate rustdoc for full examples. Pair with
-`NestApplication::require_route_posture()` so unguarded routes fail at boot.
+## Quick example
+
+```rust
+use nestrs::current_ability_authz;
+use nestrs_sea_orm::{bind_read, Repo};
+
+let repo = Repo::<post::Entity>::new(db);
+let authz = current_ability_authz().expect("policies");
+let post = bind_read(&repo, &authz, "Post", id).await?;
+```
+
+See Mintlify adapters/sea-orm for Bind, expose, GraphQL DataLoader tips, and posture.

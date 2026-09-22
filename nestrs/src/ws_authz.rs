@@ -185,3 +185,21 @@ pub fn emit_masked<T: serde::Serialize>(
     crate::masking::mask_value(&mut value, ability);
     client.emit_json(event, value)
 }
+
+/// Deny-closed emit using [`current_ws_ability`].
+///
+/// Returns [`nestrs_ws::WsSendError::Serialize`] with a clear message when no
+/// ability is installed — prefer this over raw `emit` in gated gateways so
+/// accidental unmasked frames cannot ship.
+pub fn emit_masked_current<T: serde::Serialize>(
+    client: &nestrs_ws::WsClient,
+    event: &str,
+    data: T,
+) -> Result<(), nestrs_ws::WsSendError> {
+    let ability = current_ws_ability().ok_or_else(|| {
+        nestrs_ws::WsSendError::Serialize(
+            "emit_masked_current requires run_in_ws_scope with an Ability".into(),
+        )
+    })?;
+    emit_masked(client, event, data, ability.as_ref())
+}

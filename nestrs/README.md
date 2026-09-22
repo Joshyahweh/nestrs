@@ -8,7 +8,7 @@ NestJS-style **modules, controllers, dependency injection, and HTTP routes** on 
 
 ```toml
 [dependencies]
-nestrs = "1.4.0"
+nestrs = "1.5.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

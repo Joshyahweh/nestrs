@@ -18,8 +18,8 @@
 //! | `@ApiTags` / controller grouping | Inferred **`tags`** from path; optional document-level [`OpenApiOptions::document_tags`]. |
 //! | `@ApiOperation` summary | Auto **`summary`** from handler name; override with **`#[openapi(summary = \"...\")]`**. |
 //! | `@ApiResponse` / status codes | Default **200** only; per-route **`#[openapi(responses = ((404, \"...\"), ...))]`** or manual `components`. |
-//! | DTO / schema generation | **Via `schemars`** — `#[dto]` derives `JsonSchema`; pass [`schema_entry`] outputs to [`OpenApiOptions::with_schemas`] (or hand-author [`OpenApiOptions::components`].**schemas** / merge `utoipa` / `okapi`). |
-//! | `@ApiBearerAuth` / route security | Global [`OpenApiOptions::security`] + [`OpenApiOptions::components`].**securitySchemes**; optional **per-route** [`OpenApiOptions::infer_route_security_from_roles`] (uses [`nestrs_core::MetadataRegistry`] **`roles`** from `#[roles]`). |
+//! | DTO / schema generation | **Via `schemars`** — `#[dto]` / entity `Model` + `JsonSchema`; pass [`schema_entry`] / `nestrs_sea_orm::expose_schema` into [`OpenApiOptions::with_schemas`]. One shared type is the NestRS `#[expose]` analogue. |
+//! | `@ApiBearerAuth` / route security | Global [`OpenApiOptions::security`] + [`OpenApiOptions::components`].**securitySchemes**; optional **per-route** [`OpenApiOptions::infer_route_security_from_roles`] (`#[roles]`) or [`OpenApiOptions::infer_route_security_from_posture`] (`nestrs.posture=guarded`). |
 //! | Swagger UI | **Yes** — bundled HTML page at [`OpenApiOptions::docs_path`]. |
 //! | Plugins (CLI, extra decorators) | **No** — keep this crate small; compose with other OpenAPI tools if needed. |
 
@@ -59,7 +59,12 @@ pub struct OpenApiOptions {
     /// `bearerAuth`). This is a **heuristic** bridge to Swagger “lock” icons — it does not inspect
     /// guard types or `CanActivate` implementations.
     pub infer_route_security_from_roles: bool,
-    /// Scheme name used when [`Self::infer_route_security_from_roles`] is enabled (OpenAPI object key,
+    /// When **true**, routes with `nestrs.posture=guarded` metadata (written by `#[use_guards]`)
+    /// also get an operation-level **`security`** entry (same scheme as roles). `#[public]` routes
+    /// are left unlocked in Swagger.
+    pub infer_route_security_from_posture: bool,
+    /// Scheme name used when [`Self::infer_route_security_from_roles`] /
+    /// [`Self::infer_route_security_from_posture`] is enabled (OpenAPI object key,
     /// e.g. `"bearerAuth"` matching `components.securitySchemes.bearerAuth`).
     pub roles_security_scheme: String,
 }
@@ -78,6 +83,7 @@ impl Default for OpenApiOptions {
             schemas: BTreeMap::new(),
             security: None,
             infer_route_security_from_roles: false,
+            infer_route_security_from_posture: false,
             roles_security_scheme: "bearerAuth".to_string(),
         }
     }
@@ -107,6 +113,18 @@ impl OpenApiOptions {
                 .into_iter()
                 .map(|(name, schema)| (name.into(), schema)),
         );
+        self
+    }
+
+    /// Enable Swagger lock icons for routes with `nestrs.posture=guarded`.
+    pub fn with_posture_security(mut self, enabled: bool) -> Self {
+        self.infer_route_security_from_posture = enabled;
+        self
+    }
+
+    /// Enable Swagger lock icons for routes with `#[roles(...)]` metadata.
+    pub fn with_roles_security(mut self, enabled: bool) -> Self {
+        self.infer_route_security_from_roles = enabled;
         self
     }
 }
@@ -241,8 +259,13 @@ fn build_operation(
         op.insert("parameters".into(), json!(params));
     }
     op.insert("responses".into(), responses);
-    if options.infer_route_security_from_roles && MetadataRegistry::get(handler, "roles").is_some()
-    {
+    let guarded_posture = MetadataRegistry::get(handler, "nestrs.posture")
+        .map(|v| v == "guarded")
+        .unwrap_or(false);
+    let needs_security = (options.infer_route_security_from_roles
+        && MetadataRegistry::get(handler, "roles").is_some())
+        || (options.infer_route_security_from_posture && guarded_posture);
+    if needs_security {
         let mut req = Map::new();
         req.insert(
             options.roles_security_scheme.clone(),

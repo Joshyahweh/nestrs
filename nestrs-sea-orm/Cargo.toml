@@ -10,10 +10,16 @@ description = "SeaORM adapter for nestrs — Repo, ambient transactions, and plu
 keywords = ["orm", "sea-orm", "sql", "nest", "adapter"]
 categories = ["database", "web-programming"]
 
+[features]
+default = []
+## `expose_schema` helper (schemars) for OpenAPI components from entity/DTO types.
+expose = ["dep:schemars"]
+
 [dependencies]
 axum.workspace = true
-nestrs-core = { path = "../nestrs-core", version = "1.4.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.5.0" }
 sea-orm = { version = "1.1", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-sqlite", "with-json"] }
+schemars = { version = "0.8", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { workspace = true, features = ["sync"] }

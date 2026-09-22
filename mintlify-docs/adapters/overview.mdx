@@ -36,7 +36,7 @@ Pages on [docs.rs](https://docs.rs) appear after the crate is published to crate
     LDAP simple bind — `passport-ldap` analogue.
   </Card>
   <Card title="nestrs-sea-orm" icon="database" href="/adapters/sea-orm">
-    SeaORM `Repo`, ambient transactions, `RowAuthz` — recommended ORM path (TypeORM / Sequelize analogue).
+    SeaORM `Repo`, `Bind`, ambient tx, `expose_schema`, `RowAuthz` — recommended ORM path (TypeORM / NestRS analogue).
   </Card>
 </CardGroup>
 
@@ -54,20 +54,30 @@ Pages on [docs.rs](https://docs.rs) appear after the crate is published to crate
 | TypeORM / Sequelize | [`nestrs-sea-orm`](/adapters/sea-orm) |
 | `@nestjs/platform-fastify` | Out of scope (Axum only) |
 
+
+## Which adapters to deepen
+
+| Adapter | Posture | Notes |
+|---------|---------|-------|
+| **nestrs-sea-orm** | **Deepened (1.5.0)** | Golden path: Repo, Bind, tx, authz, expose |
+| **nestrs-graphql** / **nestrs-openapi** / **nestrs-ws** | **Deepened (authz/posture)** | DataLoader tip, posture security, `emit_masked_current` |
+| nestrs-prisma / mongodb | Keep | Alternate data stores; do not duplicate SeaORM Bind |
+| socketio / lambda / passport / better-auth / bullmq / saml / ldap | **Keep thin** | Compatibility shims — deepen only when a product needs it |
+
 ## How they attach
 
 Most adapters return an Axum `Router`, a Tower layer, or a `DynamicModule`. Merge them with `NestFactory::create_with_modules` or `into_router()` — they are not `nestrs = { features = [...] }` flags.
 
 ```toml
 [dependencies]
-nestrs = "1.4.0"
+nestrs = "1.5.0"
 # pick the crates you need:
-nestrs-socketio = "1.4.0"
-nestrs-lambda = "1.4.0"
-nestrs-auth-strategy = "1.4.0"
-nestrs-better-auth = "1.4.0"
-nestrs-bullmq = "1.4.0"
-nestrs-saml = "1.4.0"
-nestrs-ldap = "1.4.0"
-nestrs-sea-orm = "1.4.0"
+nestrs-socketio = "1.5.0"
+nestrs-lambda = "1.5.0"
+nestrs-auth-strategy = "1.5.0"
+nestrs-better-auth = "1.5.0"
+nestrs-bullmq = "1.5.0"
+nestrs-saml = "1.5.0"
+nestrs-ldap = "1.5.0"
+nestrs-sea-orm = "1.5.0"
 ```

@@ -4,7 +4,7 @@
 //! consumption (crypto, XML signature) stays in your app or a dedicated
 //! XML stack; plug [`SamlResponseValidator`] at the ACS route.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-saml/1.4.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-saml/1.5.0")]
 
 use url::Url;
 use uuid::Uuid;

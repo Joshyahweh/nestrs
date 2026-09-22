@@ -282,7 +282,7 @@ pub use request_scoped::{RequestScoped, RequestScopedMissing};
 #[cfg(feature = "schedule")]
 pub use schedule::{ScheduleModule, ScheduleRuntime};
 #[cfg(all(feature = "sea-orm", feature = "authz"))]
-pub use sea_orm_bridge::{current_ability_authz, AbilityAuthz};
+pub use sea_orm_bridge::{attach_row_authz_middleware, current_ability_authz, AbilityAuthz};
 #[allow(deprecated)]
 pub use security::XRoleMetadataGuard;
 #[cfg(feature = "csrf")]
@@ -314,7 +314,8 @@ pub use versioning::{
 };
 #[cfg(feature = "ws-authz")]
 pub use ws_authz::{
-    current_ws_ability, current_ws_principal, current_ws_transaction, emit_masked, run_in_ws_scope,
+    current_ws_ability, current_ws_principal, current_ws_transaction, emit_masked,
+    emit_masked_current, run_in_ws_scope,
     WsScope,
 };
 

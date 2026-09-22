@@ -53,7 +53,7 @@ async fn main() -> std::io::Result<()> {
 
 ```toml
 [dependencies]
-nestrs-mcp = "1.4.0"
+nestrs-mcp = "1.5.0"
 # rmcp is not re-exported — depend on it directly with the server +
 # transport features (transport-io = stdio; add transport-streamable-http-server for HTTP).
 rmcp = { version = "3.1", default-features = false, features = ["server", "transport-io"] }
@@ -92,7 +92,7 @@ cargo install nestrs-mcp --features "http,admin,authz,elicitation"
 The admin-port tools (`get_app_health`, `get_app_routes`, `get_app_providers`) and the `AdminClient` behind them are compiled in unconditionally — no feature needed on `nestrs-mcp`. The `admin` feature only re-exports `nestrs::admin::{AdminHandle, AdminOptions}` for embedders. The feature that matters for the runtime tools is `admin` on the **`nestrs` crate of the target app** (see [Live runtime](#live-runtime)).
 </Note>
 
-As a library dependency, the same features apply — `nestrs-mcp = { version = "1.4.0", features = ["admin"] }` etc. The full feature list (`stdio`, `http`, `admin`, `authz`, `authz-row-level`, `elicitation`) is on the [API reference](/api/crates/nestrs-mcp).
+As a library dependency, the same features apply — `nestrs-mcp = { version = "1.5.0", features = ["admin"] }` etc. The full feature list (`stdio`, `http`, `admin`, `authz`, `authz-row-level`, `elicitation`) is on the [API reference](/api/crates/nestrs-mcp).
 
 ## Setup wizard
 
@@ -492,7 +492,7 @@ let task = server.spawn_task(TaskOptions::default(), |ctx| {
 Behind the `authz` feature, the wrapper's `ServerHandler::call_tool` override runs every tool call inside the same task-local scopes the HTTP, WebSocket, and GraphQL transports use:
 
 ```toml
-nestrs-mcp = { version = "1.4.0", features = ["authz"] }
+nestrs-mcp = { version = "1.5.0", features = ["authz"] }
 ```
 
 ```rust

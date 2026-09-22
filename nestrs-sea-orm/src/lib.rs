@@ -7,19 +7,31 @@
 //! - [`install_sea_orm_transactional_middleware`] — request-scoped tx
 //!   (commit on 2xx/3xx/4xx, rollback on 5xx)
 //! - [`RowAuthz`] — pluggable deny-closed authorization for repo helpers
+//! - [`bind_read`] / [`Bind`] — NestRS-style authorized path→row loading
+//! - [`expose_schema`] (feature `expose`) — OpenAPI schema from one shared model type
 //!
 //! Pair with the umbrella crate feature `sea-orm` (+ `authz`) for
-//! `AbilityAuthz` and `NestApplication::require_route_posture`.
+//! `AbilityAuthz`, `attach_row_authz_layer`, and
+//! `NestApplication::require_route_posture`.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-sea-orm/1.4.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-sea-orm/1.5.0")]
 
 mod authz;
+mod bind;
 mod error;
+mod expose;
 mod repo;
 mod transaction;
 
 pub use authz::RowAuthz;
+pub use bind::{
+    bind_delete, bind_read, bind_update, Bind, BindError, BoundAuthz, EntitySubject,
+};
 pub use error::RepoError;
+#[cfg(feature = "expose")]
+pub use expose::expose_schema;
+#[cfg(not(feature = "expose"))]
+pub use expose::expose_schema_hint;
 pub use repo::{eq_condition, Repo};
 pub use transaction::{
     current_sea_orm_transaction, install_sea_orm_transactional_middleware, SeaOrmTransactionSlot,
@@ -219,5 +231,33 @@ mod tests {
 
         let count = Entity::find().all(db.as_ref()).await.unwrap().len();
         assert_eq!(count, 0, "5xx must roll back the ambient sea-orm tx");
+    }
+
+    #[tokio::test]
+    async fn bind_read_not_found_and_allow() {
+        let db = setup().await;
+        let repo = Repo::<Entity>::new(db.clone());
+        let err = bind_read(&repo, &AllowAll, "Post", 999)
+            .await
+            .expect_err("missing");
+        assert!(matches!(err, BindError::NotFound));
+
+        let row = repo
+            .insert(ActiveModel {
+                title: Set("bound".into()),
+                author_id: Set(3),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let bound = bind_read(&repo, &AllowAll, "Post", row.id)
+            .await
+            .expect("bind");
+        assert_eq!(bound.title, "bound");
+
+        let denied = bind_read(&repo, &DenyAll, "Post", row.id)
+            .await
+            .expect_err("deny");
+        assert!(matches!(denied, BindError::Denied(_)));
     }
 }

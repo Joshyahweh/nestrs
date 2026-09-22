@@ -9,8 +9,8 @@ nestrs `queues-redis` uses LPUSH/BRPOP envelopes. Node `@nestjs/bullmq` workers 
 
 ```toml
 [dependencies]
-nestrs = { version = "1.4.0", features = ["queues"] }
-nestrs-bullmq = "1.4.0"
+nestrs = { version = "1.5.0", features = ["queues"] }
+nestrs-bullmq = "1.5.0"
 ```
 
 The `queues` feature is optional. Use it for in-process nestrs processors; use this crate when the consumer is BullMQ (often Node).

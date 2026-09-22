@@ -1,19 +1,28 @@
 ---
 title: "nestrs-sea-orm"
-description: "SeaORM Repo, ambient transactions, and pluggable row authz — NestJS TypeORM / Sequelize analogue."
+description: "SeaORM Repo, Bind, ambient transactions, expose schemas, and deny-closed row authz — NestJS TypeORM / NestRS data-layer analogue."
 ---
 
-TypeORM and Sequelize are Node ORMs. This crate binds [SeaORM](https://www.sea-ql.org/SeaORM/) into the nestrs DI graph and adds the data-layer pieces Nest teams expect: a typed **`Repo`**, **ambient request transactions**, and **deny-closed row authz** via [`RowAuthz`](https://docs.rs/nestrs-sea-orm/latest/nestrs_sea_orm/trait.RowAuthz.html).
+TypeORM and Sequelize are Node ORMs. This crate binds [SeaORM](https://www.sea-ql.org/SeaORM/) into the nestrs DI graph and adds the data-layer pieces Nest / NestRS teams expect:
 
-Drizzle stays carved out of workspace members (upstream/MSRV). For Prisma-style access use [`nestrs-prisma`](/ecosystem/database); for raw SQL use `SqlxDatabaseModule`.
+| Capability | API |
+|------------|-----|
+| Connect + inject | `SeaOrmModule::for_root_async` / `from_connection` |
+| Typed repository | `Repo<E>` (ambient-tx aware) |
+| Request transactions | `install_sea_orm_transactional_middleware` |
+| Deny-closed authz | `RowAuthz`, `AbilityAuthz`, `*_authorized` |
+| Path → authorized row | `bind_read` / `Bind::read` (NestRS `Bind` analogue) |
+| One type → OpenAPI | `expose_schema` (feature `expose`) |
+
+Drizzle stays carved out of workspace members. For Prisma-style access use [`nestrs-prisma`](/ecosystem/database); for raw SQL use `SqlxDatabaseModule`.
 
 ## Install
 
 ```toml
 [dependencies]
-nestrs = { version = "1.4.0", features = ["sea-orm", "authz"] }
-# or depend on the adapter directly:
-nestrs-sea-orm = "1.4.0"
+nestrs = { version = "1.5.0", features = ["sea-orm-authz", "sea-orm-expose", "openapi"] }
+# or the adapter directly:
+nestrs-sea-orm = { version = "1.5.0", features = ["expose"] }
 ```
 
 This crate enables SeaORM's `sqlx-sqlite` feature (`sqlite::memory:` and file URLs work out of the box). For Postgres or MySQL, add a direct `sea-orm` dependency with the matching driver feature (same 1.1 line) in your app.
@@ -40,11 +49,9 @@ impl PostsService {
 }
 ```
 
-`DbConn` is a type alias for `DatabaseConnection`. Inject `Arc<DatabaseConnection>` (the registry stores `Arc`).
-
 ## Ambient transactions
 
-Apply `install_sea_orm_transactional_middleware` with `from_fn_with_state(db, …)`. Inside the request, `Repo` methods prefer the ambient transaction. **2xx / 3xx / 4xx → commit**, **5xx → rollback** (same policy as the sqlx transactional middleware).
+Apply `install_sea_orm_transactional_middleware` with `from_fn_with_state(db, …)`. Inside the request, `Repo` methods prefer the ambient transaction. **2xx / 3xx / 4xx → commit**, **5xx → rollback**.
 
 ```rust
 use axum::middleware::from_fn_with_state;
@@ -56,9 +63,61 @@ let router = router.layer(from_fn_with_state(
 ));
 ```
 
-## Row-level authz
+## Bind — authorized path → row
 
-Implement `RowAuthz`, or enable umbrella features `sea-orm` + `authz` and use `AbilityAuthz` / `current_ability_authz()`:
+NestRS hands you `Bind<Read, UsersService>` as a handler parameter. In nestrs, load once with deny-closed policy:
+
+```rust
+use axum::extract::{Path, State};
+use axum::Json;
+use nestrs::current_ability_authz;
+use nestrs_sea_orm::{bind_read, BindError, Repo};
+use sea_orm::DatabaseConnection;
+use std::sync::Arc;
+
+#[get("/posts/:id")]
+#[use_guards(AuthnGuard, PoliciesGuard)]
+async fn show(
+    State(db): State<Arc<DatabaseConnection>>,
+    Path(id): Path<i32>,
+) -> Result<Json<post::Model>, BindError> {
+    let repo = Repo::<post::Entity>::new(db);
+    let authz = current_ability_authz().ok_or(BindError::MissingAuthz)?;
+    let model = bind_read(&repo, &authz, "Post", id).await?;
+    Ok(Json(model))
+}
+```
+
+`BindError` maps to **401** (missing authz), **403** (denied), **404** (missing / invisible), **500** (db).
+
+Attach ability onto request extensions when you build custom extractors:
+
+```rust
+use axum::middleware::from_fn;
+use nestrs::attach_row_authz_middleware;
+
+// Last `.layer` is outermost — policies should wrap attach.
+router
+    .layer(from_fn(attach_row_authz_middleware))
+    .layer(policies_layer);
+```
+
+## Expose — one model type for OpenAPI
+
+Derive `schemars::JsonSchema` on the entity `Model` (or a view DTO) and register it once:
+
+```rust
+use nestrs_openapi::OpenApiOptions;
+use nestrs_sea_orm::expose_schema;
+
+let opts = OpenApiOptions::default()
+    .with_schemas([expose_schema::<post::Model>("Post")])
+    .with_posture_security(true); // lock icons for #[use_guards] routes
+```
+
+Reuse the same type in GraphQL `SimpleObject` / resolvers so OpenAPI and GraphQL cannot drift.
+
+## Row-level authz
 
 ```rust
 use nestrs::current_ability_authz;
@@ -73,16 +132,14 @@ Authorized helpers are **deny-closed**: missing ability / failed predicate → `
 
 ## Route posture (umbrella)
 
-Pair SeaORM authz with boot-time posture checks so an unguarded controller cannot ship:
-
 ```rust
 #[get("/health")]
 #[public]
 async fn health() -> &'static str { "ok" }
 
-#[get("/posts")]
+#[get("/posts/:id")]
 #[use_guards(AuthnGuard, PoliciesGuard)]
-async fn list(...) { ... }
+async fn show(...) { ... }
 
 NestFactory::create::<AppModule>()
     .require_route_posture()
@@ -90,7 +147,14 @@ NestFactory::create::<AppModule>()
     .await;
 ```
 
-`#[public]` and `#[use_guards]` write `nestrs.posture` metadata. `require_route_posture` panics at router build if any application route lacks one (health / metrics / OpenAPI / `__nestrs` are excluded).
+## GraphQL DataLoader + SeaORM
+
+Register a per-request loader that batches through `Repo` (sees the ambient tx when the HTTP middleware is installed):
+
+```rust
+use nestrs_graphql::data_loader;
+// inside batch_load: one SELECT ... WHERE id IN (...) via Repo / SeaORM QueryFilter
+```
 
 ## Compared with other SQL paths
 
@@ -98,7 +162,5 @@ NestFactory::create::<AppModule>()
 |------|-------------|
 | `database-sqlx` / `SqlxDatabaseModule` | Raw SQL, `AnyPool`, `CrudService` |
 | `nestrs-prisma` | Schema-driven repositories, `prisma_model!` |
-| **`nestrs-sea-orm` (recommended ORM)** | SeaORM entities, `Repo`, ambient tx, `RowAuthz` |
-| `nestrs-drizzle` | Not a workspace member in 1.4.0 |
-
-Define SeaORM `Entity` types in your crate and construct `Repo::<Entity>::new(db)`.
+| **`nestrs-sea-orm` (recommended ORM)** | SeaORM entities, `Repo`, `Bind`, ambient tx, expose |
+| `nestrs-drizzle` | Not a workspace member in 1.5.0 |

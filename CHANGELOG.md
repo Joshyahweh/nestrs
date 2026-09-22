@@ -7,6 +7,34 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-22
+
+Close the NestRS / NestJS data-layer gaps on the SeaORM golden path, deepen
+GraphQL / OpenAPI / WS authz posture, and ship as a stable minor.
+
+### Added — SeaORM Bind + expose
+
+- **`bind_read` / `bind_update` / `bind_delete`** and **`Bind<E>`** — NestRS-style
+  deny-closed path→row loading (`BindError` → 401/403/404).
+- **`BoundAuthz`** + **`attach_row_authz_middleware`** — copy ambient `Ability` onto
+  request extensions for custom extractors.
+- **`EntitySubject`** — declare the CASL subject name for an entity.
+- **`Repo::update_authorized`** — deny-closed update beside insert/delete/find.
+- **`expose_schema`** (feature `expose` / umbrella `sea-orm-expose`) — one shared
+  `JsonSchema` model type → OpenAPI `components.schemas` (NestRS `#[expose]` analogue).
+
+### Added — OpenAPI / WS / GraphQL deepen
+
+- **`OpenApiOptions::infer_route_security_from_posture`** — Swagger lock icons for
+  `nestrs.posture=guarded` routes.
+- **`emit_masked_current`** — deny-closed WS emit using `current_ws_ability`.
+- GraphQL `data_loader` docs: SeaORM `Repo` + ambient tx batching tip.
+
+### Docs
+
+- Mintlify / mdBook SeaORM pages expanded with Bind + expose + posture examples.
+- Roadmap parity updated for Bind / expose / posture security inference.
+
 ## [1.4.0] - 2026-09-21
 
 SeaORM deepen + route posture. Additive minor on the 1.3 contract.

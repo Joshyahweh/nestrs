@@ -5,7 +5,7 @@ nestrs-ws is RFC 6455 only. This crate plugs [socketioxide](https://crates.io/cr
 into the Axum router `NestApplication` already uses.
 
 ```toml
-nestrs-socketio = "1.4.0"
+nestrs-socketio = "1.5.0"
 ```
 
 ```rust,ignore

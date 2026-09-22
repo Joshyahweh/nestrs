@@ -21,8 +21,8 @@ name = "nestrs-mcp"
 path = "src/main.rs"
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.4.0" }
-nestrs = { path = "../nestrs", version = "1.4.0", optional = true }
+nestrs-core = { path = "../nestrs-core", version = "1.5.0" }
+nestrs = { path = "../nestrs", version = "1.5.0", optional = true }
 # Pulled in only for the `authz` feature so the `McpDataContext` and the
 # `call_tool` override can name `sqlx::AnyPool` directly. The main
 # `nestrs` crate re-uses the same `sqlx` dep under its `database-sqlx`
@@ -81,15 +81,15 @@ tokio = { version = "1", features = ["full", "process", "io-util", "macros", "rt
 # Live admin-port smoke test needs the `#[injectable]` / `#[module]`
 # proc-macro attributes. The test itself is `#[cfg(feature = "admin")]`
 # so the macro dep is unused when the feature is off — that's fine.
-nestrs-macros = { path = "../nestrs-macros", version = "1.4.0" }
+nestrs-macros = { path = "../nestrs-macros", version = "1.5.0" }
 # `RouteRegistry::clear_for_tests` and friends — only used by the
 # admin-port smoke test to make the route-registry state deterministic.
-nestrs-core = { path = "../nestrs-core", version = "1.4.0", features = ["test-hooks"] }
+nestrs-core = { path = "../nestrs-core", version = "1.5.0", features = ["test-hooks"] }
 # Multi-transport-scope integration tests build a `NestrsMcpServer` with
 # `McpDataContext` and need the typed `Ability` + `mask_value` + sqlx
 # helpers. Gated on the same `authz` feature the tests themselves
 # require; without it the dev-dep is unused and clippy complains.
-nestrs = { path = "../nestrs", version = "1.4.0", features = ["authz", "database-sqlx"] }
+nestrs = { path = "../nestrs", version = "1.5.0", features = ["authz", "database-sqlx"] }
 
 [features]
 default = ["stdio"]

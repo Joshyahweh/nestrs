@@ -11,7 +11,7 @@ keywords = ["health", "probe", "terminus", "liveness", "readiness"]
 categories = ["api-bindings", "web-programming"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.4.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.5.0" }
 axum.workspace = true
 tokio.workspace = true
 async-trait = "0.1"

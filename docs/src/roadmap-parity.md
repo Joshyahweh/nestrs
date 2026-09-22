@@ -56,7 +56,10 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 | Passport | **`nestrs-auth-strategy`** | **Partial** | `JwtStrategy` / `LocalBasicStrategy` on `AuthStrategy`. |
 | Better Auth | **`nestrs-better-auth`** | **Partial** | Nest better-auth.rs router + session-cookie guard. |
 | SAML / LDAP | **`nestrs-saml`**, **`nestrs-ldap`** | **Partial** | SP redirect + bind auth; assertion crypto stays in the app. |
-| TypeORM / Sequelize | **`nestrs-sea-orm`** | **Full / Partial** | `Repo`, ambient tx, `RowAuthz` / `AbilityAuthz`; drizzle still carved out. |
+| TypeORM / Sequelize | **`nestrs-sea-orm`** | **Full** | `Repo`, `Bind` / `bind_read`, ambient tx, `RowAuthz`, `expose_schema`; drizzle carved out. |
+| NestRS `Bind` / expose | `bind_read` + `expose_schema` | **Full / Partial** | Shared JsonSchema model for OpenAPI; GraphQL reuses the same type. |
+| OpenAPI security from posture | `infer_route_security_from_posture` | **Full** | Swagger lock icons for guarded routes. |
+| WS masked emit | `emit_masked` / `emit_masked_current` | **Full** | Deny-closed when ability missing. |
 | Route posture (`#[Public]`-style) | `#[public]` + `require_route_posture` | **Full** | Boot fails if a route lacks `#[public]` or guards. |
 | Shared JSON wire format | `nestrs_microservices::wire` | **Full** | Golden tests in crate; revision constant for docs. |
 

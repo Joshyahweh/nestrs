@@ -65,7 +65,11 @@ impl IntoResponse for BindError {
                 "row authz context is not installed".to_string(),
             ),
             Self::Denied(msg) => (StatusCode::FORBIDDEN, "denied", msg.clone()),
-            Self::NotFound => (StatusCode::NOT_FOUND, "not_found", "resource not found".into()),
+            Self::NotFound => (
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "resource not found".into(),
+            ),
             Self::Db(msg) => (StatusCode::INTERNAL_SERVER_ERROR, "db_error", msg.clone()),
         };
         (
@@ -148,10 +152,7 @@ where
     <E::PrimaryKey as PrimaryKeyTrait>::ValueType: Clone + Send + Sync + 'static,
     A: RowAuthz + ?Sized,
 {
-    match repo
-        .find_by_id_authorized(authz, subject_type, id)
-        .await?
-    {
+    match repo.find_by_id_authorized(authz, subject_type, id).await? {
         Some(model) => Ok(model),
         None => Err(BindError::NotFound),
     }

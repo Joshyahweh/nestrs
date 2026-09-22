@@ -24,9 +24,7 @@ mod repo;
 mod transaction;
 
 pub use authz::RowAuthz;
-pub use bind::{
-    bind_delete, bind_read, bind_update, Bind, BindError, BoundAuthz, EntitySubject,
-};
+pub use bind::{bind_delete, bind_read, bind_update, Bind, BindError, BoundAuthz, EntitySubject};
 pub use error::RepoError;
 #[cfg(feature = "expose")]
 pub use expose::expose_schema;

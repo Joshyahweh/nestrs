@@ -315,8 +315,7 @@ pub use versioning::{
 #[cfg(feature = "ws-authz")]
 pub use ws_authz::{
     current_ws_ability, current_ws_principal, current_ws_transaction, emit_masked,
-    emit_masked_current, run_in_ws_scope,
-    WsScope,
+    emit_masked_current, run_in_ws_scope, WsScope,
 };
 
 /// Axum middleware from an [`Interceptor`] type (uses `I::default()` per request).

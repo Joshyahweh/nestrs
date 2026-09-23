@@ -1,9 +1,10 @@
 //! Wire-schema helpers — NestRS `#[expose]` analogue for OpenAPI / JSON Schema.
 //!
-//! NestRS declares a field once on the SeaORM column and derives DTO + OpenAPI
-//! + GraphQL. In nestrs the Rust type system keeps those as **one shared type**:
-//! derive `Serialize` + `schemars::JsonSchema` on your entity `Model` (or a
-//! dedicated view DTO), then feed it to OpenAPI via [`expose_schema`] /
+//! NestRS declares a field once on the SeaORM column and derives DTO, OpenAPI,
+//! and GraphQL. In nestrs the Rust type system keeps those as **one shared
+//! type**: derive `Serialize` and `schemars::JsonSchema` on your entity
+//! `Model` (or a dedicated view DTO), then feed it to OpenAPI via
+//! [`expose_schema`] or
 //! [`nestrs_openapi::schema_entry`](https://docs.rs/nestrs-openapi) and reuse
 //! the same type in GraphQL `SimpleObject` / resolvers.
 //!

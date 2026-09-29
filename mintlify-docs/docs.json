@@ -23,7 +23,8 @@
             "pages": [
               "introduction",
               "quickstart",
-              "installation"
+              "installation",
+              "migration/from-nestjs"
             ]
           },
           {
@@ -39,20 +40,27 @@
             ]
           },
           {
-            "group": "Guides",
+            "group": "API Development",
             "pages": [
-              "guides/validation",
-              "guides/configuration",
-              "guides/authorization",
               "guides/crud",
+              "guides/validation",
+              "guides/api-versioning"
+            ]
+          },
+          {
+            "group": "Security & Auth",
+            "pages": [
+              "guides/security",
+              "guides/authorization",
+              "guides/cookies-sessions-csrf",
               "guides/oauth2",
               "oauth2/hashing",
-              "guides/security",
-              "guides/cookies-sessions-csrf",
-              "guides/throttling",
-              "guides/observability",
-              "guides/health",
-              "guides/api-versioning",
+              "guides/throttling"
+            ]
+          },
+          {
+            "group": "Transports & Protocols",
+            "pages": [
               "guides/microservices",
               "guides/graphql-websockets",
               "graphql/sdl-export",
@@ -61,7 +69,20 @@
             ]
           },
           {
-            "group": "Ecosystem",
+            "group": "Operations",
+            "pages": [
+              "guides/configuration",
+              "guides/health",
+              "guides/observability"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Ecosystem & Adapters",
+        "groups": [
+          {
+            "group": "Ecosystem Services",
             "pages": [
               "ecosystem/overview",
               "ecosystem/database",
@@ -71,32 +92,22 @@
             ]
           },
           {
-            "group": "Adapters",
+            "group": "Authentication Adapters",
+            "pages": [
+              "adapters/better-auth",
+              "adapters/auth-strategy",
+              "adapters/saml",
+              "adapters/ldap"
+            ]
+          },
+          {
+            "group": "Infrastructure & Queues",
             "pages": [
               "adapters/overview",
-              "adapters/socketio",
-              "adapters/lambda",
-              "adapters/auth-strategy",
-              "adapters/better-auth",
+              "adapters/sea-orm",
               "adapters/bullmq",
-              "adapters/saml",
-              "adapters/ldap",
-              "adapters/sea-orm"
-            ]
-          },
-          {
-            "group": "CLI",
-            "pages": [
-              "cli/overview",
-              "cli/scaffolder",
-              "cli/repl",
-              "cli/generate"
-            ]
-          },
-          {
-            "group": "Migration",
-            "pages": [
-              "migration/from-nestjs"
+              "adapters/socketio",
+              "adapters/lambda"
             ]
           }
         ]
@@ -153,6 +164,15 @@
               "api/crates/nestrs-microservices",
               "api/crates/nestrs-openapi",
               "api/crates/nestrs-mcp"
+            ]
+          },
+          {
+            "group": "CLI Tooling",
+            "pages": [
+              "cli/overview",
+              "cli/scaffolder",
+              "cli/repl",
+              "cli/generate"
             ]
           }
         ]

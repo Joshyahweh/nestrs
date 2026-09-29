@@ -15,6 +15,15 @@ MINTLIFY_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS_JSON = MINTLIFY_ROOT / "docs.json"
 
 
+def _collect_pages(items: list, out: list[str]) -> None:
+    for item in items:
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            if "pages" in item and isinstance(item["pages"], list):
+                _collect_pages(item["pages"], out)
+
+
 def _page_slugs(data: object) -> list[str]:
     out: list[str] = []
     nav = data if isinstance(data, dict) else {}
@@ -24,9 +33,9 @@ def _page_slugs(data: object) -> list[str]:
         for group in tab.get("groups", []):
             if not isinstance(group, dict):
                 continue
-            for page in group.get("pages", []):
-                if isinstance(page, str):
-                    out.append(page)
+            pages = group.get("pages", [])
+            if isinstance(pages, list):
+                _collect_pages(pages, out)
     return out
 
 

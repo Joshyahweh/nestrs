@@ -20,9 +20,9 @@ Drizzle stays carved out of workspace members. For Prisma-style access use [`nes
 
 ```toml
 [dependencies]
-nestrs = { version = "1.5.0", features = ["sea-orm-authz", "sea-orm-expose", "openapi"] }
+nestrs = { version = "1.6.0", features = ["sea-orm-authz", "sea-orm-expose", "openapi"] }
 # or the adapter directly:
-nestrs-sea-orm = { version = "1.5.0", features = ["expose"] }
+nestrs-sea-orm = { version = "1.6.0", features = ["expose"] }
 ```
 
 This crate enables SeaORM's `sqlx-sqlite` feature (`sqlite::memory:` and file URLs work out of the box). For Postgres or MySQL, add a direct `sea-orm` dependency with the matching driver feature (same 1.1 line) in your app.
@@ -163,4 +163,4 @@ use nestrs_graphql::data_loader;
 | `database-sqlx` / `SqlxDatabaseModule` | Raw SQL, `AnyPool`, `CrudService` |
 | `nestrs-prisma` | Schema-driven repositories, `prisma_model!` |
 | **`nestrs-sea-orm` (recommended ORM)** | SeaORM entities, `Repo`, `Bind`, ambient tx, expose |
-| `nestrs-drizzle` | Not a workspace member in 1.5.0 |
+| `nestrs-drizzle` | Not a workspace member in 1.6.0 |

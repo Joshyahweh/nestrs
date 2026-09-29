@@ -14,7 +14,7 @@
 //! `AbilityAuthz`, `attach_row_authz_layer`, and
 //! `NestApplication::require_route_posture`.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-sea-orm/1.5.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-sea-orm/1.6.0")]
 
 mod authz;
 mod bind;

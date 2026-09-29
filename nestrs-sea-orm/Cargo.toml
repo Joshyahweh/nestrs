@@ -17,7 +17,7 @@ expose = ["dep:schemars"]
 
 [dependencies]
 axum.workspace = true
-nestrs-core = { path = "../nestrs-core", version = "1.5.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.6.0" }
 sea-orm = { version = "1.1", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-sqlite", "with-json"] }
 schemars = { version = "0.8", optional = true }
 serde = { version = "1", features = ["derive"] }

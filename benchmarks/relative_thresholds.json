@@ -18,5 +18,20 @@
     "max_regression_percent": 5.0,
     "baseline_window": 3,
     "min_baseline_runs": 2
+  },
+  "axum_get_ping": {
+    "max_regression_percent": 5.0,
+    "baseline_window": 3,
+    "min_baseline_runs": 2
+  },
+  "nestrs_get_ping_stack_off": {
+    "max_regression_percent": 5.0,
+    "baseline_window": 3,
+    "min_baseline_runs": 2
+  },
+  "nestrs_get_ping_stack_on": {
+    "max_regression_percent": 5.0,
+    "baseline_window": 3,
+    "min_baseline_runs": 2
   }
 }

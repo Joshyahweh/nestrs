@@ -135,7 +135,7 @@ Suggested scenario progression:
 
 - CI workflow: `.github/workflows/performance.yml`
   - compiles benches
-  - runs stabilized criterion benches (`scripts/load/run_bench_ci.sh`), including **DI** and **JSON validation** micro-benches
+  - runs stabilized criterion benches (`scripts/load/run_bench_ci.sh`), including **DI**, **JSON validation**, and the **Axum overhead** comparison (`GET /ping`: bare Axum, nestrs default, nestrs common stack)
   - enforces benchmark regression thresholds
   - enforces relative regression checks using rolling baseline median from prior reports
   - exports benchmark report (`benchmarks/reports/latest.{json,md}`)

@@ -1978,6 +1978,76 @@ fn openapi_impl_line(body: &OpenApiAttrBody) -> proc_macro2::TokenStream {
     }
 }
 
+fn is_arc_type(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    if type_path.qself.is_some() {
+        return false;
+    }
+    let segments = &type_path.path.segments;
+    if segments.is_empty() {
+        return false;
+    }
+    let last = segments.last().unwrap();
+    if last.ident != "Arc" {
+        return false;
+    }
+    if !matches!(last.arguments, syn::PathArguments::AngleBracketed(_)) {
+        return false;
+    }
+    match segments.len() {
+        1 => true,
+        2 => segments[0].ident == "sync",
+        3 => {
+            (segments[0].ident == "std"
+                || segments[0].ident == "core"
+                || segments[0].ident == "alloc")
+                && segments[1].ident == "sync"
+        }
+        _ => false,
+    }
+}
+
+fn strip_arc_wrapper(ty: &syn::Type) -> syn::Type {
+    if let syn::Type::Path(type_path) = ty {
+        if type_path.qself.is_none() && !type_path.path.segments.is_empty() {
+            let last = type_path.path.segments.last().unwrap();
+            if last.ident == "Arc" {
+                let matches_arc = match type_path.path.segments.len() {
+                    1 => true,
+                    2 => type_path.path.segments[0].ident == "sync",
+                    3 => {
+                        (type_path.path.segments[0].ident == "std"
+                            || type_path.path.segments[0].ident == "core"
+                            || type_path.path.segments[0].ident == "alloc")
+                            && type_path.path.segments[1].ident == "sync"
+                    }
+                    _ => false,
+                };
+                if matches_arc {
+                    if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
+                        if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+                            return inner.clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ty.clone()
+}
+
+fn get_tuple_state_elements(ty: &syn::Type) -> Option<Vec<syn::Type>> {
+    match ty {
+        syn::Type::Tuple(tup) if !tup.elems.is_empty() => {
+            Some(tup.elems.iter().cloned().collect())
+        }
+        syn::Type::Paren(paren) => get_tuple_state_elements(&paren.elem),
+        _ => None,
+    }
+}
+
 #[proc_macro_attribute]
 pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as RoutesArgs);
@@ -2087,6 +2157,12 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .retain(|a| param_decorator_from_attr(a).is_none());
 
             let Some(decorator) = decorator else {
+                if matches!(&*pat_ty.pat, syn::Pat::Ident(_)) && is_arc_type(&*pat_ty.ty) {
+                    let inner_pat = (*pat_ty.pat).clone();
+                    let inner_ty = (*pat_ty.ty).clone();
+                    pat_ty.pat = syn::parse_quote!(nestrs::axum::extract::State(#inner_pat));
+                    pat_ty.ty = syn::parse_quote!(nestrs::axum::extract::State<#inner_ty>);
+                }
                 continue;
             };
 
@@ -2208,7 +2284,56 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             .into();
     }
 
-    let state_ty = args.state;
+    let (effective_state_ty, composite_struct) =
+        if let Some(raw_elems) = get_tuple_state_elements(&args.state) {
+            let elems: Vec<syn::Type> = raw_elems.iter().map(strip_arc_wrapper).collect();
+            let composite_state_ident = syn::Ident::new(
+                &format!("__nestrs_State_{}", controller_ident),
+                proc_macro2::Span::call_site(),
+            );
+            let field_idents: Vec<syn::Ident> = (0..elems.len())
+                .map(|i| syn::Ident::new(&format!("f_{}", i), proc_macro2::Span::call_site()))
+                .collect();
+
+            let mut seen = std::collections::HashSet::new();
+            let mut unique_from_ref_impls = Vec::new();
+            for (idx, elem) in elems.iter().enumerate() {
+                let key = quote!(#elem).to_string();
+                if seen.insert(key) {
+                    let field_ident = &field_idents[idx];
+                    unique_from_ref_impls.push(quote! {
+                        impl ::nestrs::axum::extract::FromRef<#composite_state_ident> for ::std::sync::Arc<#elem> {
+                            fn from_ref(state: &#composite_state_ident) -> Self {
+                                ::std::sync::Arc::clone(&state.#field_ident)
+                            }
+                        }
+                    });
+                }
+            }
+
+            let def = quote! {
+                #[derive(Clone)]
+                #[allow(non_camel_case_types)]
+                struct #composite_state_ident {
+                    #( #field_idents: ::std::sync::Arc<#elems>, )*
+                }
+
+                #(#unique_from_ref_impls)*
+
+                impl ::nestrs::RouteStateFromRegistry for #composite_state_ident {
+                    type State = Self;
+                    fn load(registry: &::nestrs::core::ProviderRegistry) -> Self {
+                        Self {
+                            #( #field_idents: registry.get::<#elems>(), )*
+                        }
+                    }
+                }
+            };
+            (syn::parse_quote!(#composite_state_ident), def)
+        } else {
+            let stripped = strip_arc_wrapper(&args.state);
+            (stripped, quote! {})
+        };
     let controller_guards = args.controller_guards;
 
     let route_entries = routes
@@ -2257,13 +2382,13 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let register = if let Some(ctrl_guard) = controller_guards {
         quote! {
-            nestrs::impl_routes!(#self_ty, state #state_ty, controller_guards ( #ctrl_guard ) => [
+            nestrs::impl_routes!(#self_ty, state #effective_state_ty, controller_guards ( #ctrl_guard ) => [
                 #(#route_entries)*
             ]);
         }
     } else {
         quote! {
-            nestrs::impl_routes!(#self_ty, state #state_ty => [
+            nestrs::impl_routes!(#self_ty, state #effective_state_ty => [
                 #(#route_entries)*
             ]);
         }
@@ -2271,6 +2396,7 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #item_impl
+        #composite_struct
         #register
     };
 

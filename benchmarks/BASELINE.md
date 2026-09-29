@@ -10,6 +10,7 @@ cargo bench -p nestrs --bench router_hot_path
 cargo bench -p nestrs --bench router_middleware_stack
 cargo bench -p nestrs --bench di_resolution
 cargo bench -p nestrs --bench json_validation_hot_path
+cargo bench -p nestrs --bench axum_overhead
 
 # End-to-end load profiles (requires running app)
 chmod +x scripts/load/run_profiles.sh

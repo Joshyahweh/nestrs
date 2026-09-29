@@ -26,5 +26,8 @@ run_bench di_resolution
 echo "[bench-ci] running json_validation_hot_path"
 run_bench json_validation_hot_path
 
+echo "[bench-ci] running axum_overhead"
+run_bench axum_overhead
+
 echo "[bench-ci] checking thresholds"
 python3 scripts/load/check_benchmark_thresholds.py

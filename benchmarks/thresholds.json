@@ -10,5 +10,14 @@
   },
   "router_post_v1_bench_signup_validated_json": {
     "max_point_estimate_ns": 1000000
+  },
+  "axum_get_ping": {
+    "max_point_estimate_ns": 150000
+  },
+  "nestrs_get_ping_stack_off": {
+    "max_point_estimate_ns": 200000
+  },
+  "nestrs_get_ping_stack_on": {
+    "max_point_estimate_ns": 300000
   }
 }

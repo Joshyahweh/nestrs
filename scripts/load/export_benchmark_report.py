@@ -24,6 +24,40 @@ def load_json(path: pathlib.Path):
         return json.load(f)
 
 
+OVERHEAD_ROWS = (
+    ("axum_get_ping", "Bare Axum"),
+    ("nestrs_get_ping_stack_off", "nestrs, default stack"),
+    ("nestrs_get_ping_stack_on", "nestrs, common stack"),
+)
+
+
+def axum_overhead_section(entries: list) -> list[str]:
+    """Delta of the same GET /ping handler. Omitted until all three estimates exist."""
+    by_name = {e["name"]: e.get("point_estimate_ns") for e in entries}
+    means = [by_name.get(name) for name, _ in OVERHEAD_ROWS]
+    if any(m is None for m in means):
+        return []
+    bare = means[0]
+    if not bare:
+        return []
+
+    lines = [
+        "",
+        "## Axum overhead",
+        "",
+        "Same `GET /ping` handler returning `ok`, in-process (`oneshot`, no socket).",
+        "The default nestrs router still includes the body-size limit, catch-panic layer,",
+        "and built-in health-probe routes. The common stack adds request id, request",
+        "context, request tracing, compression, and a concurrency limit of 128.",
+        "",
+        "| Setup | Mean (ns) | vs bare Axum |",
+        "|---|---:|---:|",
+    ]
+    for (name, label), mean in zip(OVERHEAD_ROWS, means):
+        lines.append(f"| {label} (`{name}`) | {mean:.0f} | {mean / bare:.2f}x |")
+    return lines
+
+
 def main() -> int:
     root = pathlib.Path(__file__).resolve().parents[2]
     thresholds_path = root / "benchmarks" / "thresholds.json"
@@ -104,6 +138,7 @@ def main() -> int:
         th = e.get("threshold_ns")
         th_s = "-" if th is None else str(th)
         md_lines.append(f"| `{e['name']}` | {pe_s} | {th_s} | {e['status']} |")
+    md_lines.extend(axum_overhead_section(entries))
     md_lines.append("")
 
     md_path = out_dir / "latest.md"

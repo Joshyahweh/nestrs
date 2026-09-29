@@ -269,6 +269,10 @@ harness = false
 name = "json_validation_hot_path"
 harness = false
 
+[[bench]]
+name = "axum_overhead"
+harness = false
+
 [[test]]
 name = "integration_matrix"
 path = "tests/integration_matrix.rs"

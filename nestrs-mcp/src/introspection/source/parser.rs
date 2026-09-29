@@ -227,9 +227,9 @@ impl syn::parse::Parse for RoutesArgsParser {
             if input.peek(syn::Token![=]) {
                 let _eq: syn::Token![=] = input.parse()?;
                 if key_str == "state" {
-                    // `state = T` where T is a type ident (e.g. `AppState`).
+                    // `state = T` or `state = (A, B)`.
                     let ty: syn::Type = input.parse()?;
-                    me.state = last_path_segment_from_type(&ty);
+                    me.state = routes_state_label(&ty);
                 } else if key_str == "controller_guards" {
                     let content;
                     syn::parenthesized!(content in input);
@@ -960,6 +960,25 @@ fn last_path_segment_from_type(ty: &Type) -> Option<String> {
     }
 }
 
+fn routes_state_label(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Tuple(tuple) => {
+            let names: Vec<String> = tuple
+                .elems
+                .iter()
+                .filter_map(last_path_segment_from_type)
+                .collect();
+            if names.is_empty() {
+                None
+            } else {
+                Some(names.join(", "))
+            }
+        }
+        Type::Paren(inner) => routes_state_label(&inner.elem),
+        other => last_path_segment_from_type(other),
+    }
+}
+
 fn type_to_string(ty: &Type) -> String {
     match ty {
         Type::Path(TypePath { path, .. }) => {
@@ -1014,6 +1033,22 @@ fn infer_module_path(file: &str) -> String {
 }
 
 // Public exports the ws_gateway/parser hints look for in v2.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routes_state_tuple_is_recorded() {
+        let item: syn::ItemImpl = syn::parse_quote! {
+            #[routes(state = (PostsService, UsersService))]
+            impl ComboController {}
+        };
+        let (state, guards) = parse_routes_args(&item);
+        assert_eq!(state.as_deref(), Some("PostsService, UsersService"));
+        assert!(guards.is_empty());
+    }
+}
+
 #[allow(dead_code)]
 pub(super) const WS_GATEWAY_ATTR: &str = NESTRS_ATTR_WS_GATEWAY;
 #[allow(dead_code)]

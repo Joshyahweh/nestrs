@@ -7,6 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-30
+
+Close controller ergonomics gaps with multi-state tuple DI and bare Arc injection,
+deliver zero-overhead Axum benchmarks, and align documentation navigation with Next.js IA.
+
+### Added — Multi-State Tuple and Bare Arc Injection
+- **Tuple state support**: `#[routes(state = (ServiceA, ServiceB))]` generates a composite state struct implementing `FromRef` for each `Arc<T>`.
+- **Bare `Arc<T>` parameter rewriting**: Controller methods can directly take `users: Arc<UsersService>` without manual `State(...)` extraction wrapping.
+- **`RouteStateFromRegistry` trait**: Enables type-safe resolution and assembly of composite route states directly from the NestRS dependency injection registry.
+
+### Added — Axum Overhead Benchmarks
+- **Criterion microbenchmark suite** (`nestrs/benches/axum_overhead.rs`): Quantifies sub-microsecond overhead of NestRS routing, DI extraction, `CanActivate` guards, and interceptors against raw Axum.
+- **Automated CI benchmark verification**: Added `benchmarks/run_axum_overhead.sh` and `scripts/ci_axum_overhead.sh`.
+
+### Changed — Next.js-Aligned Documentation Sidebar
+- Restructured documentation navigation in `mintlify-docs/docs.json` into four focused tabs: **Documentation**, **Ecosystem & Adapters**, **Recipes**, and **API Reference**.
+- Grouped guides into functional domains (*API Development*, *Security & Auth*, *Transports & Protocols*, *Operations*) and elevated *Migration from NestJS* into onboarding.
+
 ## [1.5.0] - 2026-09-22
 
 Close the NestRS / NestJS data-layer gaps on the SeaORM golden path, deepen

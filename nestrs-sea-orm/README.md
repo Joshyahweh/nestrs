@@ -8,9 +8,9 @@ transactions, [`RowAuthz`](https://docs.rs/nestrs-sea-orm),
 
 ```toml
 [dependencies]
-nestrs = { version = "1.5.0", features = ["sea-orm-authz", "sea-orm-expose"] }
+nestrs = { version = "1.6.0", features = ["sea-orm-authz", "sea-orm-expose"] }
 # or:
-nestrs-sea-orm = { version = "1.5.0", features = ["expose"] }
+nestrs-sea-orm = { version = "1.6.0", features = ["expose"] }
 ```
 
 ```rust

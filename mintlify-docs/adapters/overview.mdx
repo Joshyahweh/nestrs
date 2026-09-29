@@ -59,7 +59,7 @@ Pages on [docs.rs](https://docs.rs) appear after the crate is published to crate
 
 | Adapter | Posture | Notes |
 |---------|---------|-------|
-| **nestrs-sea-orm** | **Deepened (1.5.0)** | Golden path: Repo, Bind, tx, authz, expose |
+| **nestrs-sea-orm** | **Deepened (1.6.0)** | Golden path: Repo, Bind, tx, authz, expose |
 | **nestrs-graphql** / **nestrs-openapi** / **nestrs-ws** | **Deepened (authz/posture)** | DataLoader tip, posture security, `emit_masked_current` |
 | nestrs-prisma / mongodb | Keep | Alternate data stores; do not duplicate SeaORM Bind |
 | socketio / lambda / passport / better-auth / bullmq / saml / ldap | **Keep thin** | Compatibility shims — deepen only when a product needs it |
@@ -70,14 +70,14 @@ Most adapters return an Axum `Router`, a Tower layer, or a `DynamicModule`. Merg
 
 ```toml
 [dependencies]
-nestrs = "1.5.0"
+nestrs = "1.6.0"
 # pick the crates you need:
-nestrs-socketio = "1.5.0"
-nestrs-lambda = "1.5.0"
-nestrs-auth-strategy = "1.5.0"
-nestrs-better-auth = "1.5.0"
-nestrs-bullmq = "1.5.0"
-nestrs-saml = "1.5.0"
-nestrs-ldap = "1.5.0"
-nestrs-sea-orm = "1.5.0"
+nestrs-socketio = "1.6.0"
+nestrs-lambda = "1.6.0"
+nestrs-auth-strategy = "1.6.0"
+nestrs-better-auth = "1.6.0"
+nestrs-bullmq = "1.6.0"
+nestrs-saml = "1.6.0"
+nestrs-ldap = "1.6.0"
+nestrs-sea-orm = "1.6.0"
 ```

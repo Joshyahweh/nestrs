@@ -2,7 +2,7 @@
 
 The **recommended** NestJS TypeORM / Sequelize analogue is [`nestrs-sea-orm`](https://docs.rs/nestrs-sea-orm).
 
-## Features (1.5.0)
+## Features (1.6.0)
 
 - `SeaOrmModule::for_root_async` / `from_connection` — DI export of `Arc<DatabaseConnection>`
 - `Repo<E>` — typed repository; prefers an ambient request transaction when present

@@ -5,7 +5,7 @@ Express/Fastify on Lambda; nestrs is Axum-only (ADR-0001), so this crate is
 the serverless adapter.
 
 ```toml
-nestrs-lambda = "1.5.0"
+nestrs-lambda = "1.6.0"
 ```
 
 ```rust,ignore

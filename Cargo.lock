@@ -2345,7 +2345,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-app"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs",
@@ -3039,7 +3039,7 @@ dependencies = [
 
 [[package]]
 name = "lab"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-graphql",
  "async-trait",
@@ -3683,7 +3683,7 @@ checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "nestrs"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "argon2",
  "async-graphql",
@@ -3756,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-auth-strategy"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3768,7 +3768,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-better-auth"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3778,7 +3778,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-bullmq"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "redis",
  "serde",
@@ -3789,7 +3789,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-core"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3803,7 +3803,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-cqrs"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3813,7 +3813,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-events"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "nestrs-core",
@@ -3823,7 +3823,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-graphql"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-graphql",
  "async-graphql-derive",
@@ -3836,7 +3836,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-health"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -3853,7 +3853,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-http"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "nestrs-core",
@@ -3863,7 +3863,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-lambda"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "axum 0.7.9",
  "lambda_http",
@@ -3872,7 +3872,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-ldap"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "ldap3",
  "thiserror 1.0.69",
@@ -3881,7 +3881,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-macros"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -3893,7 +3893,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-mcp"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -3924,7 +3924,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-microservices"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -3957,7 +3957,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-mongodb"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "axum 0.7.9",
  "bson",
@@ -3971,7 +3971,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-oauth2"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -4004,7 +4004,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-oauth2-macros"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4013,7 +4013,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-openapi"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -4023,7 +4023,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-prisma"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -4040,7 +4040,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-saml"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "url",
  "uuid",
@@ -4048,7 +4048,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-scaffold"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "nestrs-mcp",
  "regex",
@@ -4060,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-sea-orm"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -4075,7 +4075,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-security"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -4090,7 +4090,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-socketio"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "axum 0.7.9",
  "socketioxide",
@@ -4099,7 +4099,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-storage"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4117,7 +4117,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-throttle"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -4131,7 +4131,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-ws"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",

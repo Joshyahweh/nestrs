@@ -6,8 +6,7 @@ pub use axum;
 use axum::body::{to_bytes, Body};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 pub use nestrs_macros::{
-    all, als, check_policies, config, controller, cron, dataloader,
-    delete, dto, event_pattern,
+    all, als, check_policies, config, controller, cron, dataloader, delete, dto, event_pattern,
     event_routes, get, head, http_code, injectable, intersection_type, interval, liveness,
     message_pattern, micro_routes, module, omit_type, on_event, openapi, options, partial_type,
     patch, pick_type, post, public, put, queue_processor, raw_body, readiness, redirect,

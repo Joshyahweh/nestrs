@@ -2040,9 +2040,7 @@ fn strip_arc_wrapper(ty: &syn::Type) -> syn::Type {
 
 fn get_tuple_state_elements(ty: &syn::Type) -> Option<Vec<syn::Type>> {
     match ty {
-        syn::Type::Tuple(tup) if !tup.elems.is_empty() => {
-            Some(tup.elems.iter().cloned().collect())
-        }
+        syn::Type::Tuple(tup) if !tup.elems.is_empty() => Some(tup.elems.iter().cloned().collect()),
         syn::Type::Paren(paren) => get_tuple_state_elements(&paren.elem),
         _ => None,
     }
@@ -2284,56 +2282,57 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             .into();
     }
 
-    let (effective_state_ty, composite_struct) =
-        if let Some(raw_elems) = get_tuple_state_elements(&args.state) {
-            let elems: Vec<syn::Type> = raw_elems.iter().map(strip_arc_wrapper).collect();
-            let composite_state_ident = syn::Ident::new(
-                &format!("__nestrs_State_{}", controller_ident),
-                proc_macro2::Span::call_site(),
-            );
-            let field_idents: Vec<syn::Ident> = (0..elems.len())
-                .map(|i| syn::Ident::new(&format!("f_{}", i), proc_macro2::Span::call_site()))
-                .collect();
+    let (effective_state_ty, composite_struct) = if let Some(raw_elems) =
+        get_tuple_state_elements(&args.state)
+    {
+        let elems: Vec<syn::Type> = raw_elems.iter().map(strip_arc_wrapper).collect();
+        let composite_state_ident = syn::Ident::new(
+            &format!("__nestrs_State_{}", controller_ident),
+            proc_macro2::Span::call_site(),
+        );
+        let field_idents: Vec<syn::Ident> = (0..elems.len())
+            .map(|i| syn::Ident::new(&format!("f_{}", i), proc_macro2::Span::call_site()))
+            .collect();
 
-            let mut seen = std::collections::HashSet::new();
-            let mut unique_from_ref_impls = Vec::new();
-            for (idx, elem) in elems.iter().enumerate() {
-                let key = quote!(#elem).to_string();
-                if seen.insert(key) {
-                    let field_ident = &field_idents[idx];
-                    unique_from_ref_impls.push(quote! {
+        let mut seen = std::collections::HashSet::new();
+        let mut unique_from_ref_impls = Vec::new();
+        for (idx, elem) in elems.iter().enumerate() {
+            let key = quote!(#elem).to_string();
+            if seen.insert(key) {
+                let field_ident = &field_idents[idx];
+                unique_from_ref_impls.push(quote! {
                         impl ::nestrs::axum::extract::FromRef<#composite_state_ident> for ::std::sync::Arc<#elem> {
                             fn from_ref(state: &#composite_state_ident) -> Self {
                                 ::std::sync::Arc::clone(&state.#field_ident)
                             }
                         }
                     });
-                }
+            }
+        }
+
+        let def = quote! {
+            #[derive(Clone)]
+            #[allow(non_camel_case_types)]
+            struct #composite_state_ident {
+                #( #field_idents: ::std::sync::Arc<#elems>, )*
             }
 
-            let def = quote! {
-                #[derive(Clone)]
-                #[allow(non_camel_case_types)]
-                struct #composite_state_ident {
-                    #( #field_idents: ::std::sync::Arc<#elems>, )*
-                }
+            #(#unique_from_ref_impls)*
 
-                #(#unique_from_ref_impls)*
-
-                impl ::nestrs::RouteStateFromRegistry for #composite_state_ident {
-                    type State = Self;
-                    fn load(registry: &::nestrs::core::ProviderRegistry) -> Self {
-                        Self {
-                            #( #field_idents: registry.get::<#elems>(), )*
-                        }
+            impl ::nestrs::RouteStateFromRegistry for #composite_state_ident {
+                type State = Self;
+                fn load(registry: &::nestrs::core::ProviderRegistry) -> Self {
+                    Self {
+                        #( #field_idents: registry.get::<#elems>(), )*
                     }
                 }
-            };
-            (syn::parse_quote!(#composite_state_ident), def)
-        } else {
-            let stripped = strip_arc_wrapper(&args.state);
-            (stripped, quote! {})
+            }
         };
+        (syn::parse_quote!(#composite_state_ident), def)
+    } else {
+        let stripped = strip_arc_wrapper(&args.state);
+        (stripped, quote! {})
+    };
     let controller_guards = args.controller_guards;
 
     let route_entries = routes

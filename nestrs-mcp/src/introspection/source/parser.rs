@@ -1033,6 +1033,13 @@ fn infer_module_path(file: &str) -> String {
 }
 
 // Public exports the ws_gateway/parser hints look for in v2.
+#[allow(dead_code)]
+pub(super) const WS_GATEWAY_ATTR: &str = NESTRS_ATTR_WS_GATEWAY;
+#[allow(dead_code)]
+pub(super) const WS_ROUTES_ATTR: &str = NESTRS_ATTR_WS_ROUTES;
+#[allow(dead_code)]
+pub(super) const MICRO_ROUTES_ATTR: &str = NESTRS_ATTR_MICRO_ROUTES;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1048,10 +1055,3 @@ mod tests {
         assert!(guards.is_empty());
     }
 }
-
-#[allow(dead_code)]
-pub(super) const WS_GATEWAY_ATTR: &str = NESTRS_ATTR_WS_GATEWAY;
-#[allow(dead_code)]
-pub(super) const WS_ROUTES_ATTR: &str = NESTRS_ATTR_WS_ROUTES;
-#[allow(dead_code)]
-pub(super) const MICRO_ROUTES_ATTR: &str = NESTRS_ATTR_MICRO_ROUTES;

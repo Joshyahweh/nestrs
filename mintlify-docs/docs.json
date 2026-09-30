@@ -73,7 +73,8 @@
             "pages": [
               "guides/configuration",
               "guides/health",
-              "guides/observability"
+              "guides/observability",
+              "guides/benchmarks"
             ]
           }
         ]

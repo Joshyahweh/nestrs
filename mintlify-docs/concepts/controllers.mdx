@@ -40,15 +40,45 @@ The `#[routes]` macro annotates an `impl` block and takes a `state` argument tha
 #[routes(state = AppService)]
 impl AppController {
     #[get("/")]
-    pub async fn root(State(service): State<Arc<AppService>>) -> &'static str {
+    pub async fn root(service: Arc<AppService>) -> &'static str {
         service.get_hello()
     }
 }
 ```
 
 <Note>
-  `state` must be a type registered in the same module's `providers` list. nestrs resolves it from the `ProviderRegistry` and injects it as Axum `State`.
+  `state` must be a type registered in the module's `providers` list. nestrs resolves it from the `ProviderRegistry` and injects it as Axum `State`.
 </Note>
+
+### Direct service parameter injection
+
+Handlers do not need to manually wrap services in `State(service): State<Arc<AppService>>`. If a handler parameter is an `Arc<T>` matching the state type, `#[routes]` automatically transforms it into an Axum `State` extractor during macro expansion.
+
+Explicit extractor syntax (`State(service): State<Arc<AppService>>`) remains fully supported for backward compatibility or when using custom state wrappers.
+
+### Multi-service controllers (tuple state)
+
+Controllers that depend on multiple services do not require manual composite state structs. You can provide a tuple of provider types directly to `state`:
+
+```rust
+#[routes(state = (PostsService, UsersService))]
+impl ComboController {
+    #[get("/")]
+    pub async fn combo(
+        posts: Arc<PostsService>,
+        users: Arc<UsersService>,
+    ) -> String {
+        format!("{}-{}", posts.label(), users.label())
+    }
+
+    #[get("/posts")]
+    pub async fn posts_only(posts: Arc<PostsService>) -> &'static str {
+        posts.label()
+    }
+}
+```
+
+nestrs automatically stitches together the composite tuple state from the module's `ProviderRegistry` via `RouteStateFromRegistry`. Handlers only extract the specific services they declare in their parameters.
 
 ## HTTP method macros
 

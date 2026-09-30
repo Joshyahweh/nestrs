@@ -80,24 +80,43 @@ pub struct AppModule;
 
 ## Injecting providers into controllers
 
-Controllers access their providers via Axum's `State` extractor. The `#[routes(state = T)]` macro wires the service type into the router:
+Controllers access their providers via Axum's `State` extractor. The `#[routes(state = T)]` macro wires the service type into the router, and handler functions can take `service: Arc<T>` directly:
 
 ```rust
 #[routes(state = AppService)]
 impl AppController {
     #[get("/")]
-    pub async fn root(State(service): State<Arc<AppService>>) -> &'static str {
+    pub async fn root(service: Arc<AppService>) -> &'static str {
         service.get_hello()
     }
 
     #[get("/db-health")]
     pub async fn db_health(
-        State(service): State<Arc<AppService>>,
+        service: Arc<AppService>,
     ) -> Json<DbHealthResponse> {
         Json(service.db_health().await)
     }
 }
 ```
+
+### Multiple providers per controller (tuple state)
+
+If a controller needs multiple services, specify a tuple in `state`:
+
+```rust
+#[routes(state = (AppService, UserService))]
+impl AppController {
+    #[get("/profile")]
+    pub async fn profile(
+        app: Arc<AppService>,
+        users: Arc<UserService>,
+    ) -> Json<UserProfile> {
+        Json(users.get_profile(app.default_tenant()).await)
+    }
+}
+```
+
+nestrs stitches the composite state from the `ProviderRegistry` via `RouteStateFromRegistry`. Handlers only receive the services they declare. Explicit `State(service): State<Arc<T>>` remains supported as well.
 
 ## Injecting providers into other providers
 

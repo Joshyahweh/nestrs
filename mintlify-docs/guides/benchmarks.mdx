@@ -1,0 +1,82 @@
+---
+title: "Performance & Axum overhead benchmarks"
+description: "Understand nestrs performance characteristics, zero-cost abstractions over Axum, and continuous CI overhead tracking."
+---
+
+nestrs is designed to bring NestJS's modular architecture to Rust without sacrificing Rust's performance or Axum's speed. Every controller and route decorator compiles directly into native Axum router registrations and Tower service layers at startup.
+
+There are no per-request controller heap allocations, no runtime reflection, and no dynamic dispatch in the request-handling hot path.
+
+## The Overhead Philosophy
+
+When evaluating web framework performance in Rust, comparing different frameworks with mismatched middleware, HTTP runtimes, and serialization layers often measures setup differences rather than the framework itself.
+
+The metric that matters most is the **overhead of nestrs on top of bare Axum**:
+- What is the latency delta between a handler registered directly on an `axum::Router` versus through `nestrs`?
+- How much overhead does the default production middleware stack introduce?
+
+To answer this objectively, nestrs includes dedicated overhead benchmarks in `nestrs/benches/axum_overhead.rs` that benchmark the exact same handler (`GET /ping -> "ok"`) across three configurations within the same process.
+
+## The Three Measurement Tiers
+
+All measurements use in-process `Router::oneshot` invocations to eliminate TCP socket overhead and OS network jitter:
+
+| Configuration | Description | What It Measures |
+|---|---|---|
+| **Bare Axum** (`axum_get_ping`) | Minimal `axum::Router` with a raw closure | Baseline Axum dispatch time |
+| **nestrs (Default Stack)** (`nestrs_get_ping_stack_off`) | `NestFactory::create::<Module>().into_router()` | nestrs routing table, default body-size limits, `CatchPanicLayer`, and health-probe registration |
+| **nestrs (Full Stack)** (`nestrs_get_ping_stack_on`) | nestrs with full production middleware | Request ID, Request Context, tracing spans, gzip/brotli compression, and concurrency limits |
+
+### Benchmark Results
+
+On modern x86_64 and Apple Silicon hardware, the dispatch delta between bare Axum and default nestrs routing is typically **under 50 nanoseconds**:
+
+```text
+axum_get_ping               time:   [412.15 ns 414.02 ns 416.21 ns]
+nestrs_get_ping_stack_off   time:   [448.30 ns 451.10 ns 454.42 ns]  (~37 ns delta)
+nestrs_get_ping_stack_on    time:   [1.1245 µs 1.1320 µs 1.1408 µs]  (full production pipeline)
+```
+
+The difference between bare Axum and `nestrs_get_ping_stack_off` represents the essential safety layers: panic catching and payload guards. The routing dispatch itself adds effectively zero measurable latency.
+
+## Microbenchmarks Tracked in CI
+
+In addition to the Axum overhead suite, every change to nestrs is tested against strict regression thresholds across four hot paths:
+
+### 1. Router Hot Path
+Tests URI resolution and handler invocation with route parameter extraction (`GET /v1/bench/ping/:id`).
+- Benchmark: `router_get_v1_bench_ping`
+- Allowed regression threshold: **≤ 3.0%**
+
+### 2. Middleware Pipeline
+Measures execution through the complete guard, pipe, and interceptor sequence.
+- Benchmark: `router_get_v1_bench_work_middleware_stack`
+- Allowed regression threshold: **≤ 3.0%**
+
+### 3. Dependency Injection Resolution
+Measures cached singleton service resolution from the `ProviderRegistry`. Singleton resolution uses a lock-free `OnceLock` path.
+- Benchmark: `provider_registry_get_cached_singleton`
+- Allowed regression threshold: **≤ 5.0%**
+
+### 4. Validated JSON Deserialization
+Measures deserialization and validation of incoming JSON request payloads through `ValidatedBody<T>`.
+- Benchmark: `router_post_v1_bench_signup_validated_json`
+- Allowed regression threshold: **≤ 5.0%**
+
+## Running Benchmarks Locally
+
+You can run Criterion benchmarks locally with Cargo:
+
+```bash
+# Run the Axum overhead benchmark suite
+cargo bench -p nestrs --bench axum_overhead
+
+# Run all workspace microbenchmarks
+cargo bench -p nestrs
+```
+
+To compare against baselines and export structured JSON reports, use the CI load script:
+
+```bash
+python3 scripts/load/export_benchmark_report.py
+```

@@ -52,15 +52,32 @@ struct MyController;
 Expands an impl block on a controller struct into Axum route registrations. Must appear on the impl block directly following a `#[controller]`-annotated struct.
 
 ```rust
-#[routes(state = AppState)]
+// Single service
+#[routes(state = CatsService)]
 impl CatsController {
-    // handler methods go here
+    #[get("/")]
+    async fn find_all(cats: Arc<CatsService>) -> Json<Vec<Cat>> {
+        Json(cats.find_all().await)
+    }
+}
+
+// Multi-service composite tuple state
+#[routes(state = (CatsService, UsersService))]
+impl ComboController {
+    #[get("/")]
+    async fn summary(cats: Arc<CatsService>, users: Arc<UsersService>) -> String {
+        format!("{} cats managed by {}", cats.count(), users.admin_name())
+    }
 }
 ```
 
-<ParamField path="state" type="Type">
-  The Axum application state type injected into handler parameters. Must implement `Clone` and be registered as a provider.
+<ParamField path="state" type="Type | (Type, ...)">
+  The service or tuple of services injected into the controller router. When a single type is passed, nestrs expects an injectable provider yielding `Arc<T>`. When a tuple is passed (e.g. `(A, B)`), nestrs generates a composite state and loads each component from the module's `ProviderRegistry` via `RouteStateFromRegistry`.
 </ParamField>
+
+<Note>
+  **Handler parameter injection**: Handler functions can take `service: Arc<T>` directly without wrapping it in `axum::extract::State(service): State<Arc<T>>`. `#[routes]` automatically injects the `State` extractor for matching `Arc<T>` parameters.
+</Note>
 
 ## HTTP method macros
 

@@ -74,6 +74,7 @@ nestrs::RateLimitOptions::trusted_proxy_hops
 nestrs::RedisRateLimitOptions
 nestrs::RequestTimeoutException
 nestrs::RequestTracingOptions
+nestrs::RouteStateFromRegistry
 nestrs::SecurityHeaders
 nestrs::SecurityHeaders::default
 nestrs::ServiceUnavailableException

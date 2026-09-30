@@ -2155,7 +2155,7 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .retain(|a| param_decorator_from_attr(a).is_none());
 
             let Some(decorator) = decorator else {
-                if matches!(&*pat_ty.pat, syn::Pat::Ident(_)) && is_arc_type(&*pat_ty.ty) {
+                if matches!(&*pat_ty.pat, syn::Pat::Ident(_)) && is_arc_type(&pat_ty.ty) {
                     let inner_pat = (*pat_ty.pat).clone();
                     let inner_ty = (*pat_ty.ty).clone();
                     pat_ty.pat = syn::parse_quote!(nestrs::axum::extract::State(#inner_pat));

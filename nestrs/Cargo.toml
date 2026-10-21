@@ -229,7 +229,7 @@ getrandom = { version = "0.2", optional = true }
 nestrs-oauth2 = { version = "1.6.0", path = "../nestrs-oauth2", optional = true, default-features = false, features = ["client", "resource-server", "guard"] }
 
 [dev-dependencies]
-async-graphql = "=7.0.17"
+async-graphql = "=7.0.18"
 flate2 = "1"
 tower = { version = "0.5", features = ["util"] }
 serial_test = "3"

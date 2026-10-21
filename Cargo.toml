@@ -40,7 +40,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 version = "1.6.0"
-rust-version = "1.88"
+rust-version = "1.89"
 repository = "https://github.com/Joshyahweh/nestrs"
 # `homepage`, `documentation`, `readme`, and `description` are deliberately
 # not set at workspace level: `homepage` would be redundant with `repository`,

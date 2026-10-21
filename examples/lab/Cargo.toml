@@ -12,7 +12,7 @@ mongodb = { version = "3", default-features = false, features = ["compat-3-0-0"]
 nestrs-cqrs = { path = "../../nestrs-cqrs" }
 async-trait = "0.1"
 linkme = "0.3"
-async-graphql = "=7.0.17"
+async-graphql = "=7.0.18"
 tower-cookies = "0.10"
 futures-util = "0.3"
 tokio-tungstenite = "0.24"

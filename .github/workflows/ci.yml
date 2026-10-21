@@ -8,7 +8,7 @@ on:
       - master
 
 env:
-  MSRV: "1.88.0"
+  MSRV: "1.89.0"
 
 jobs:
   manifest-invariants:
@@ -55,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["1.88.0", stable, beta]
+        toolchain: ["1.89.0", stable, beta]
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -115,7 +115,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # rustdoc --output-format json is a nightly-only feature, so the
-      # snapshot gate runs on the nightly toolchain. The 1.88.0 / stable
+      # snapshot gate runs on the nightly toolchain. The 1.89.0 / stable
       # / beta rows in test-matrix continue to enforce the build/test
       # matrix; the snapshot gate is additive.
       - name: Install nightly Rust toolchain

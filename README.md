@@ -80,7 +80,6 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs-auth-strategy/` - Passport-style `AuthStrategy` adapters
 - `nestrs-saml/` / `nestrs-ldap/` - SAML SP redirect and LDAP simple bind
 - `nestrs-sea-orm/` - SeaORM **`Repo`**, ambient transactions, `RowAuthz` (recommended ORM path; TypeORM/Sequelize analogue)
-- `website/` - landing page + docs hub (light/dark theme)
 
 ## Quick Start
 
@@ -103,7 +102,7 @@ If the example package name differs in your local setup, run:
 cargo run --manifest-path examples/hello-app/Cargo.toml
 ```
 
-### 3) Preview website/docs locally
+### 3) Preview docs locally
 
 ```bash
 python3 -m http.server 4173
@@ -111,15 +110,14 @@ python3 -m http.server 4173
 
 Then open:
 
-- `http://localhost:4173/website/` (landing page)
-- `http://localhost:4173/website/docs.html` (documentation hub)
+- `http://localhost:4173/docs.html` (documentation hub)
 
 ## Documentation Index
 
 ### Core docs
 
-- `website/docs.html` - docs portal entrypoint
-- **NestJS → nestrs** — mdBook: [`docs/src/nestjs-migration.md`](docs/src/nestjs-migration.md); website hub: [`website/docs/migration/nestjs-to-nestrs.md`](website/docs/migration/nestjs-to-nestrs.md)
+- **NestJS → nestrs** — mdBook: [`docs/src/nestjs-migration.md`](docs/src/nestjs-migration.md)
+- **Security defaults & ordering** — mdBook: [`docs/src/secure-defaults.md`](docs/src/secure-defaults.md), [`docs/src/http-pipeline-order.md`](docs/src/http-pipeline-order.md)
 - **Security defaults & ordering** — mdBook: [`docs/src/secure-defaults.md`](docs/src/secure-defaults.md), [`docs/src/http-pipeline-order.md`](docs/src/http-pipeline-order.md)
 - **MCP / AI editor integration** — mdBook: [`docs/src/mcp.md`](docs/src/mcp.md); Mintlify: [`mintlify-docs/guides/mcp.mdx`](mintlify-docs/guides/mcp.mdx)
 - `CHANGELOG.md` - release history

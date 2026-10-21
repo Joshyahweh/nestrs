@@ -270,6 +270,7 @@ impl NestrsMcpServer {
 
 #[tool_handler]
 impl ServerHandler for NestrsMcpServer {
+    #[allow(deprecated)]
     fn get_info(&self) -> ServerInfo {
         let mut caps = ServerCapabilities::default();
         // Only advertise `resources.subscribe` if the user

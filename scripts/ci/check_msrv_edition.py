@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_MANIFEST = ROOT / "Cargo.toml"
-EXPECTED_MSRV = "1.88"
+EXPECTED_MSRV = "1.89"
 EXPECTED_EDITION = "2021"
 
 

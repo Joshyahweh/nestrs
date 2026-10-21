@@ -262,7 +262,7 @@ async fn dispatch_bundled_tool(
     ))
 }
 
-#[tool_router]
+#[tool_router(allow_empty)]
 impl NestrsMcpServer {
     // No tools declared on the wrapper. `list_tools` / `get_tool` /
     // `call_tool` below dispatch to the four area handlers.

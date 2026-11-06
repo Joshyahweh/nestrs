@@ -1,0 +1,84 @@
+---
+title: "Idempotency — `nestrs-idempotency`"
+description: "Idempotency-Key request deduplication with in-memory or Redis stores — NestJS @nestjs/idempotency analogue."
+---
+
+`nestrs-idempotency` deduplicates mutating requests by `Idempotency-Key` (configurable header). First writer executes the handler and stores status + body; replays return the cached response with `idempotency-replayed: true`. In-flight collisions return **409**.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = ["idempotency"] }
+# Redis store:
+nestrs-idempotency = { version = "1.7.0", features = ["cache-redis"] }
+```
+
+## Options
+
+```rust
+use nestrs::idempotency::IdempotencyOptions;
+use std::time::Duration;
+
+let opts = IdempotencyOptions {
+    // InMemoryIdempotencyStore with 24h TTL by default
+    scope: Some("user:42".into()), // ALWAYS scope by principal in multi-tenant APIs
+    required: false,               // true → 400 when header missing
+    header_name: "idempotency-key".into(),
+    ..IdempotencyOptions::in_memory(Duration::from_secs(24 * 3600))
+};
+```
+
+| Field | Meaning |
+|-------|---------|
+| `store` | `Arc<dyn IdempotencyStore>` — memory or Redis |
+| `header_name` | Looked up case-insensitively; also accepts `Idempotency-Key` |
+| `required` | Reject requests without a key |
+| `scope` | Prefixed to the key (`{scope}:{key}`) |
+
+## Middleware
+
+```rust
+use axum::middleware::from_fn_with_state;
+use nestrs::idempotency::{idempotency_middleware, IdempotencyOptions};
+use std::sync::Arc;
+
+let opts = Arc::new(IdempotencyOptions::default());
+let router = router.layer(from_fn_with_state(opts, idempotency_middleware));
+```
+
+Or via `MiddlewareConsumer` with a thin wrapper that holds the `Arc<IdempotencyOptions>`.
+
+### Behavior
+
+1. **No key** → pass through (or 400 if `required`)
+2. **Completed key** → replay body/status + `idempotency-replayed: true`
+3. **In flight** → **409** `{ "errorCode": "IDEMPOTENCY_IN_FLIGHT" }`
+4. **First writer** → run handler, then `complete` with status/body/content-type
+
+## Store trait
+
+```rust
+#[async_trait]
+pub trait IdempotencyStore: Send + Sync {
+    async fn begin_or_get(
+        &self,
+        scope_key: &str,
+    ) -> Result<Option<IdempotencyRecord>, IdempotencyBusy>;
+
+    async fn complete(&self, scope_key: &str, record: IdempotencyRecord);
+}
+```
+
+Exactly one concurrent `begin_or_get` wins (`Ok(None)`); others get `IdempotencyBusy`.
+
+## Security
+
+- Scope by authenticated user/tenant — never share a global key namespace.
+- Prefer Redis TTL in multi-instance deploys.
+- Details: [security notes](/guides/nestjs12-security#idempotency-nestrs-idempotency).
+
+## See also
+
+- [NestJS 12 hub](/guides/nestjs12)
+- [API reference](/api/crates/nestrs-idempotency)

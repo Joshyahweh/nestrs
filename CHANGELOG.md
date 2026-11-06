@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-06
+
+NestJS 12 full parity program (Waves 0–5): eight new packages, foundation DX,
+Partial→Full deepen, and security/perf gates. Workspace version, path-dep pins,
+crate READMEs, mintlify/mdBook, and `html_root_url` all read `1.7.0`.
+
+### Added — NestJS 12 full parity program (Waves 0–5)
+
+- **Nest 12 foundation**: `HttpException::with_error_code` (`errorCode` JSON), `SchemaValidationPipe` / `NestrsSchema`, `RouteConflictPolicy`, richer `ExecutionContext` (`get_class` / `get_handler`), controller-level `controller_pipes`, OpenAPI request/response `$ref` auto-link fields, OTel span attrs `nestrs.controller` / `nestrs.handler`.
+- **Packages**: `nestrs-resilience`, `nestrs-idempotency`, `nestrs-outbox`, `nestrs-locks`, `nestrs-mail`, `nestrs-webhooks`, `nestrs-workflows`, `nestrs-ai` (+ umbrella features).
+- **Deepen**: `CacheInterceptor`, i18n cookie resolver, `ClientProxy::{status,unwrap_transport,on}`, `nestrs-cli new workspace`.
+- **Security / perf**: webhook sign/verify property tests, resilience Criterion bench, [nestjs12-security.md](docs/src/nestjs12-security.md); roadmap matrix flipped to **Full** for in-scope Nest 12 surfaces (Observe SaaS / Mau / Express / drizzle remain explicit exceptions).
+- **Lab smoke**: `cargo run -p lab --bin lab9_nestjs12` exercises the Nest 12 surface in-process.
+
+### Fixed
+
+- Nest 12 `*Module::register` now **exports** service `TypeId`s so importers can inject them (empty exports previously dropped providers on absorb).
+- OpenAPI response `$ref` auto-link: clarify `Map::entry` key type for serde_json 1.0.154.
+
 ## [1.6.0] - 2026-09-30
 
 Close controller ergonomics gaps with multi-state tuple DI and bare Arc injection,

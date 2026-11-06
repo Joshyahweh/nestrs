@@ -1,0 +1,63 @@
+---
+title: "nestrs-resilience API"
+description: "Reference for ResilienceModule, ResilienceService, PolicyBundle, RetryPolicy, TimeoutPolicy, circuit breaker, and ResilienceError."
+---
+
+Crate: [`nestrs-resilience`](https://docs.rs/nestrs-resilience/1.7.0) · Feature: `resilience` · Guide: [Resilience](/ecosystem/resilience)
+
+```toml
+nestrs-resilience = "1.7.0"
+# or nestrs = { version = "1.7.0", features = ["resilience"] }
+```
+
+## `ResilienceModule::register`
+
+```rust
+pub fn register(options: ResilienceOptions) -> DynamicModule
+```
+
+Exports `TypeId::of::<ResilienceService>()`.
+
+## `ResilienceOptions`
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `defaults.retry` | 3 attempts, 1s delay, factor 2, jitter **on** | Used when `PolicyBundle.retry` is `None` |
+| `defaults.timeout` | 60s | Per-attempt timeout |
+| `defaults.bulkhead` | 64 concurrent | Module semaphore size |
+| `circuit_failure_threshold` | 5 | Failures before open |
+| `circuit_open_for` | 30s | Open duration |
+
+## `ResilienceService`
+
+```rust
+pub fn from_options(options: ResilienceOptions) -> Self
+pub fn subscribe(&self) -> broadcast::Receiver<ResilienceEvent>
+pub async fn execute<T, F, Fut>(
+    &self,
+    label: impl Into<String>,
+    policy: PolicyBundle,
+    op: F,
+) -> Result<T, ResilienceError>
+```
+
+`op` must return `Result<T, ResilienceError>` and be re-entrant across retries.
+
+## `PolicyBundle`
+
+```rust
+pub struct PolicyBundle {
+    pub retry: Option<RetryPolicy>,
+    pub timeout: Option<TimeoutPolicy>,
+    pub bulkhead: Option<BulkheadPolicy>,
+    pub circuit_name: Option<String>,
+}
+```
+
+## `ResilienceError`
+
+`Timeout` · `CircuitOpen { retry_after_secs }` · `BulkheadRejected` · `ExhaustedRetries { attempts, message }` · `Fallback { message }` · `Other(String)`
+
+## `ResilienceEvent`
+
+`Retry` · `Timeout` · `CircuitOpen` · `CircuitHalfOpen` · `CircuitClosed` · `CircuitRejected` · `BulkheadRejected` · `Fallback` — each carries a `label`.

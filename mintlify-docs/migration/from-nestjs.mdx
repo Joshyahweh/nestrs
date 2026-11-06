@@ -40,6 +40,33 @@ Moving an HTTP API from NestJS to nestrs means trading TypeScript decorators for
 | `@nestjs/bullmq` | [`nestrs-bullmq`](/adapters/bullmq) | Redis key-layout producer; Node workers can consume |
 | `passport-saml` / `passport-ldap` | [`nestrs-saml`](/adapters/saml) / [`nestrs-ldap`](/adapters/ldap) | SP redirect + simple bind; assertion crypto stays in the app |
 | TypeORM / Sequelize | [`nestrs-sea-orm`](/adapters/sea-orm) | `SeaOrmModule::for_root_async`; drizzle stays carved out |
+| `@nestjs/resilience` | [`nestrs-resilience`](/ecosystem/resilience) | Feature `resilience`; jittered retry / circuit / bulkhead |
+| `@nestjs/idempotency` | [`nestrs-idempotency`](/ecosystem/idempotency) | Feature `idempotency`; scope keys by principal |
+| `@nestjs/outbox` | [`nestrs-outbox`](/ecosystem/outbox) | Feature `outbox`; relay + DLQ |
+| `@nestjs/locks` | [`nestrs-locks`](/ecosystem/locks) | Feature `locks`; schedule single-runner |
+| `@nestjs/mail` | [`nestrs-mail`](/ecosystem/mail) | Feature `mail`; escaped templates |
+| `@nestjs/webhooks` | [`nestrs-webhooks`](/ecosystem/webhooks) | Feature `webhooks`; Standard Webhooks |
+| `@nestjs/workflows` | [`nestrs-workflows`](/ecosystem/workflows) | Feature `workflows`; durable steps |
+| `@nestjs/ai` | [`nestrs-ai`](/ecosystem/ai) | Feature `ai`; `FakeModel` + fail-closed objects |
+| Nest Observe / Mau | OTel + instrument hooks | **Not cloned** — see [Observability](/guides/observability) |
+
+## NestJS 12 delta
+
+NestRS **1.7** ships the Nest 12 reliability / agents surface. Start at the [NestJS 12 hub](/guides/nestjs12), then the per-package ecosystem guides and [security notes](/guides/nestjs12-security).
+
+Foundation APIs in core (no extra crate):
+
+- `HttpException::with_error_code` → JSON `errorCode`
+- `NestrsSchema` + `SchemaValidationPipe`
+- `RouteConflictPolicy`
+- Richer `ExecutionContext` (`get_class` / `get_handler`)
+
+```toml
+nestrs = { version = "1.7.0", features = [
+  "resilience", "idempotency", "outbox", "locks",
+  "mail", "webhooks", "workflows", "ai",
+] }
+```
 
 ## Side-by-side code: modules and controllers
 

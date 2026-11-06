@@ -1,0 +1,39 @@
+---
+title: "nestrs-outbox API"
+description: "Reference for OutboxModule, OutboxRelay, OutboxOptions, PublishFn, and store statuses."
+---
+
+Crate: [`nestrs-outbox`](https://docs.rs/nestrs-outbox/1.7.0) · Feature: `outbox` · Guide: [Outbox](/ecosystem/outbox)
+
+```toml
+nestrs-outbox = "1.7.0"
+```
+
+## `OutboxModule::register`
+
+Exports `OutboxRelay` and `OutboxOptions`.
+
+## `OutboxRelay`
+
+```rust
+pub fn from_options(opts: &OutboxOptions) -> Self
+pub fn store(&self) -> SharedOutboxStore
+pub async fn add(&self, topic: &str, payload: Value) -> OutboxMessage
+pub async fn tick(&self, publish: &PublishFn)
+```
+
+`PublishFn` = `Arc<dyn Fn(String, Value) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync>`.
+
+## `OutboxOptions`
+
+| Field | Default |
+|-------|---------|
+| `store` | `InMemoryOutboxStore` |
+| `max_attempts` | 10 |
+| `poll_interval` | 1s |
+| `batch_size` | 32 |
+| `allow_in_memory` | true |
+
+## Statuses
+
+`OutboxStatus`: pending → published | retry → dead letter after max attempts.

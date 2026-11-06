@@ -1,0 +1,37 @@
+---
+title: "nestrs-webhooks API"
+description: "Reference for WebhooksModule, WebhooksService, Standard Webhooks sign/verify, and outbox dispatch."
+---
+
+Crate: [`nestrs-webhooks`](https://docs.rs/nestrs-webhooks/1.7.0) · Feature: `webhooks` · Guide: [Webhooks](/ecosystem/webhooks)
+
+```toml
+nestrs-webhooks = "1.7.0"
+```
+
+## `WebhooksModule::register`
+
+```rust
+WebhooksModule::register(WebhooksOptions::new("whsec_…"))
+```
+
+Exports `WebhooksService`. Optional `WebhooksOptions.outbox: Option<Arc<OutboxRelay>>`.
+
+## `WebhooksService`
+
+```rust
+pub fn new(secret: impl Into<String>, outbox: Option<Arc<OutboxRelay>>) -> Self
+pub fn sign(&self, msg_id: &str, timestamp: i64, body: &[u8]) -> SignedWebhook
+pub fn verify(&self, msg_id: &str, timestamp: &str, signature: &str, body: &[u8])
+    -> Result<(), WebhookVerifyError>
+pub async fn dispatch(&self, topic: &str, url: &str, body: Value) -> Result<(), String>
+```
+
+## Free functions
+
+```rust
+pub fn sign_standard_webhook(secret: &str, msg_id: &str, timestamp: i64, body: &[u8]) -> SignedWebhook
+pub fn verify_standard_webhook(...) -> Result<(), WebhookVerifyError>
+```
+
+`WebhookVerifyError`: `BadTimestamp` · `BadSignature`.

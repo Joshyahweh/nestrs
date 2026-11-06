@@ -1,0 +1,130 @@
+---
+title: "AI — `nestrs-ai`"
+description: "Named language models, generate_text / generate_object, agent tools, FakeModel, and resilience — NestJS @nestjs/ai analogue."
+---
+
+`nestrs-ai` is the NestJS [`@nestjs/ai`](https://docs.nestjs.com/ai/overview) analogue for NestRS: register named `LanguageModel` implementations, call `generate_text` / `generate_object`, and optionally run an agent loop with tools. Model calls go through `nestrs-resilience` (timeout + jittered retry).
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = ["ai"] } # implies resilience
+```
+
+## FakeModel for tests
+
+```rust
+use nestrs::ai::{
+    AiModule, AiOptions, AiService, FakeModel, GenerateTextRequest, LanguageModel,
+};
+use serde_json::json;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+fn ai_module() -> nestrs::core::DynamicModule {
+    let fake = FakeModel::new(vec![Ok(json!({ "text": "hello" }))]);
+    let mut models = HashMap::new();
+    models.insert("default".into(), Arc::new(fake) as Arc<dyn LanguageModel>);
+    AiModule::register(AiOptions {
+        models,
+        defaults_timeout_ms: 5_000,
+        max_steps: 5,
+    })
+}
+```
+
+<Warning>
+`FakeModel` is for tests and labs only — never ship it as the production default model.
+</Warning>
+
+## generate_text
+
+```rust
+let out = ai
+    .generate_text(GenerateTextRequest {
+        model: None, // "default"
+        label: "support".into(),
+        prompt: "Summarize the ticket".into(),
+        instructions: Some("Be concise".into()),
+        tools: vec![],
+    })
+    .await?;
+println!("{}", out.text);
+```
+
+## generate_object (fail-closed)
+
+```rust
+use nestrs::ai::GenerateObjectRequest;
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+struct TicketSummary {
+    title: String,
+    priority: u8,
+}
+
+let schema = schemars::schema_for!(TicketSummary);
+let result = ai
+    .generate_object(GenerateObjectRequest {
+        model: None,
+        label: "summary".into(),
+        prompt: "Extract fields".into(),
+        instructions: None,
+        schema_name: "TicketSummary".into(),
+        schema,
+    })
+    .await;
+
+// Invalid JSON or missing required fields → AiError::Output (fail closed)
+```
+
+Validation checks JSON parse, `type`, `required`, and optional `additionalProperties: false`.
+
+## Agent tools
+
+```rust
+use nestrs::ai::{AgentFunction, AgentToolRegistry};
+use serde_json::Value;
+use std::sync::Arc;
+
+let tools = AgentToolRegistry::new();
+tools.register(AgentFunction {
+    name: "lookup_order".into(),
+    description: "Fetch an order by id".into(),
+    handler: Arc::new(|args: Value| {
+        Box::pin(async move {
+            // Enforce caller authz here (Ability / guards) — never trust the model alone
+            Ok(args)
+        })
+    }),
+});
+
+let ai = AiService::new(options).with_tools(tools);
+```
+
+When the model returns `tool_calls`, `generate_text` invokes registered tools and continues until a final text response or `max_steps`.
+
+## Custom LanguageModel
+
+```rust
+#[async_trait::async_trait]
+impl LanguageModel for MyOpenAiCompat {
+    async fn call(&self, request: ModelCall) -> Result<ModelResponse, AiError> {
+        // HTTP to OpenAI-compatible endpoint (feature `http` helpers optional)
+        todo!()
+    }
+}
+```
+
+## Security
+
+- Tool handlers must enforce the **caller's** principal / Ability.
+- Fail closed on structured output.
+- Details: [security notes](/guides/nestjs12-security#ai-tools-nestrs-ai).
+
+## See also
+
+- [Resilience](/ecosystem/resilience) (underlying timeout/retry)
+- [API reference](/api/crates/nestrs-ai)
+- Lab: `POST /lab/n12/ai`

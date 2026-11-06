@@ -9,6 +9,7 @@ are implemented; others are intentionally staged for later phases.
 - **ScheduleModule**: implemented (feature `schedule`)
 - **QueuesModule**: implemented (feature `queues`, in-process baseline)
 - **I18nModule**: implemented (catalogs + locale resolver; enable via `NestApplication::use_i18n()`)
+- **NestJS 12 packages**: `nestrs-resilience`, `nestrs-idempotency`, `nestrs-outbox`, `nestrs-locks`, `nestrs-mail`, `nestrs-webhooks`, `nestrs-workflows`, `nestrs-ai` (umbrella features on `nestrs`)
 
 ## CacheModule
 
@@ -126,8 +127,18 @@ struct AppModule;
 
 The `Locale` / `I18n` extractors resolve locale from `?lang=...` (default) or `Accept-Language`, then translate via catalogs registered in `I18nService` / `I18nModule::register(I18nOptions { ... })`.
 
-- **ScheduleModule**: likely backed by `tokio-cron-scheduler`, providing `#[cron]` and `#[interval]`
-  decorators and a provider that runs jobs on application bootstrap.
-- **QueuesModule**: likely backed by Redis and a worker runtime (jobs + retries + DLQ).
-- **I18nModule**: locale detection (header/query/cookie), message bundles, and interpolation.
+## NestJS 12 reliability / agents
+
+| Crate | Umbrella feature | Role |
+|-------|------------------|------|
+| `nestrs-resilience` | `resilience` | Retry / timeout / circuit breaker / bulkhead / fallback |
+| `nestrs-idempotency` | `idempotency` | `Idempotency-Key` store + middleware |
+| `nestrs-outbox` | `outbox` | Transactional outbox / inbox / DLQ |
+| `nestrs-locks` | `locks` | Distributed leases; schedule single-runner |
+| `nestrs-mail` | `mail` | Templates + SMTP/HTTP + in-memory test transport |
+| `nestrs-webhooks` | `webhooks` | Standard Webhooks sign/verify + outbox outbound |
+| `nestrs-workflows` | `workflows` | Durable steps, resume, human approval |
+| `nestrs-ai` | `ai` | Named models, `generate_text` / `generate_object`, agent tools, `FakeModel` |
+
+Threat-model notes: [nestjs12-security.md](docs/src/nestjs12-security.md). Parity matrix: [roadmap-parity.md](docs/src/roadmap-parity.md).
 

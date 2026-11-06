@@ -1,0 +1,68 @@
+---
+title: "Mail — `nestrs-mail`"
+description: "Templated email with HTML escaping, SMTP/HTTP providers, and in-memory test transport — NestJS @nestjs/mail analogue."
+---
+
+`nestrs-mail` sends templated email through a pluggable `MailTransport`. The built-in renderer escapes `{{placeholders}}` (XSS-safe for HTML bodies). Tests use `InMemoryMailTransport`; production can use SMTP or HTTP providers (SES/Resend-style) behind the `http` feature.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = ["mail"] }
+```
+
+## Register and send
+
+```rust
+use nestrs::mail::{
+    render_template, InMemoryMailTransport, MailMessage, MailModule, MailOptions, MailService,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+let inbox = InMemoryMailTransport::new();
+let dm = MailModule::register(MailOptions {
+    transport: inbox.clone(),
+});
+
+// after DI:
+async fn welcome(mail: Arc<MailService>) {
+    let mut data = HashMap::new();
+    data.insert("name".into(), "<script>alert(1)</script>".into());
+    let html = render_template("<p>Hello {{name}}</p>", &data);
+    // html contains &lt;script&gt;… — not raw tags
+
+    mail.send(MailMessage {
+        to: "user@example.com".into(),
+        subject: "Welcome".into(),
+        html,
+        idempotency_key: Some("welcome:user@example.com".into()),
+    })
+    .await
+    .unwrap();
+}
+```
+
+### `MailMessage`
+
+| Field | Role |
+|-------|------|
+| `to` | Recipient |
+| `subject` | Subject line |
+| `html` | Already-rendered HTML (escape via `render_template`) |
+| `idempotency_key` | Optional; HTTP transports may forward as `Idempotency-Key` |
+
+## Transports
+
+- **`InMemoryMailTransport`** — `inbox()` / `clear()` for tests and the lab
+- **`HttpMailTransport`** (feature `http`) — POST JSON to an HTTP API with bearer auth
+
+## Security
+
+Never concatenate untrusted input into HTML without `render_template`. Pin HTTP destinations (SSRF). See [security notes](/guides/nestjs12-security#mail-nestrs-mail).
+
+## See also
+
+- [Idempotency](/ecosystem/idempotency) for request-level keys
+- [API reference](/api/crates/nestrs-mail)

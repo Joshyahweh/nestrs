@@ -1,0 +1,43 @@
+---
+title: "nestrs-mail API"
+description: "Reference for MailModule, MailService, MailMessage, render_template, and transports."
+---
+
+Crate: [`nestrs-mail`](https://docs.rs/nestrs-mail/1.7.0) · Feature: `mail` · Guide: [Mail](/ecosystem/mail)
+
+```toml
+nestrs-mail = "1.7.0"
+```
+
+## `MailModule::register`
+
+Exports `MailService`.
+
+## `MailService`
+
+```rust
+pub fn from_options(opts: &MailOptions) -> Self
+pub async fn send(&self, message: MailMessage) -> Result<(), MailError>
+pub fn transport(&self) -> SharedMailTransport
+```
+
+## `render_template`
+
+```rust
+pub fn render_template(template: &str, data: &HashMap<String, String>) -> String
+```
+
+Replaces `{{key}}` with HTML-escaped values.
+
+## `MailMessage`
+
+`to`, `subject`, `html`, `idempotency_key: Option<String>`.
+
+## `MailError`
+
+`Transport(String)` (retryable) · `Permanent(String)` (`permanent() == true`).
+
+## Transports
+
+- `InMemoryMailTransport::new()` → `inbox()` / `clear()`
+- `HttpMailTransport` behind feature `http`

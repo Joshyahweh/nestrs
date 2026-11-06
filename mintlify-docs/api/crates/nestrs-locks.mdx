@@ -1,0 +1,33 @@
+---
+title: "nestrs-locks API"
+description: "Reference for LocksModule, LocksService, LockGuard, and lock stores."
+---
+
+Crate: [`nestrs-locks`](https://docs.rs/nestrs-locks/1.7.0) · Feature: `locks` · Guide: [Locks](/ecosystem/locks)
+
+```toml
+nestrs-locks = "1.7.0"
+```
+
+## `LocksModule::register`
+
+Exports `LocksService` and `LocksOptions`.
+
+## `LocksService`
+
+```rust
+pub fn from_options(opts: &LocksOptions) -> Self
+pub async fn try_acquire(&self, name: &str) -> Option<LockGuard>
+pub async fn with_lock<F, Fut, T>(&self, name: &str, f: F) -> Option<T>
+```
+
+`LockGuard::release().await` frees the lease early; drop may also release depending on store.
+
+## `LocksOptions`
+
+| Field | Default |
+|-------|---------|
+| `store` | in-memory |
+| `default_ttl` | 30s |
+
+Optional Redis: feature `cache-redis` → `RedisLockStore`.

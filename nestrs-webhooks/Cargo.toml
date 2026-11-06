@@ -1,0 +1,30 @@
+[package]
+name = "nestrs-webhooks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Signed webhooks for nestrs — NestJS @nestjs/webhooks / Standard Webhooks parity."
+keywords = ["webhooks", "signing", "nest"]
+categories = ["web-programming", "cryptography"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "1.7.0" }
+nestrs-outbox = { path = "../nestrs-outbox", version = "1.7.0" }
+axum.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+subtle = "2.6"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

@@ -51,6 +51,38 @@ impl PipeTransform<String> for TrimPipe {
 
 impl HttpPipeTransform<String> for TrimPipe {}
 
+/// NestJS 12 Standard Schema analogue: types that validate **and** expose JSON Schema
+/// for OpenAPI auto-link (`schemars::JsonSchema` + `validator::Validate`).
+pub trait NestrsSchema: Validate + schemars::JsonSchema {}
+
+impl<T> NestrsSchema for T where T: Validate + schemars::JsonSchema {}
+
+/// NestJS `StandardSchemaValidationPipe` analogue — validates via [`NestrsSchema`].
+///
+/// Prefer this when the same type feeds OpenAPI `components.schemas` via
+/// `nestrs_openapi::schema_entry`. Behavior for validation errors matches
+/// [`ValidationPipe`] (422 + field constraint details).
+#[derive(Default)]
+pub struct SchemaValidationPipe;
+
+#[async_trait]
+impl<T> PipeTransform<T> for SchemaValidationPipe
+where
+    T: NestrsSchema + Send + Sync + 'static,
+{
+    type Output = T;
+    type Error = HttpException;
+
+    async fn transform(&self, value: T) -> Result<Self::Output, Self::Error> {
+        <ValidationPipe as PipeTransform<T>>::transform(&ValidationPipe, value).await
+    }
+}
+
+impl<T> HttpPipeTransform<T> for SchemaValidationPipe where
+    T: NestrsSchema + Send + Sync + 'static
+{
+}
+
 /// Validates a value using [`validator::Validate`] (NestJS `ValidationPipe` analogue).
 ///
 /// Most users will enable this via `#[use_pipes(ValidationPipe)]` together with `#[param::body]`,

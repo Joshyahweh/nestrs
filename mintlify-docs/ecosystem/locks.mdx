@@ -1,0 +1,69 @@
+---
+title: "Locks — `nestrs-locks`"
+description: "Distributed lease locks for single-runner cron and critical sections — NestJS @nestjs/locks analogue."
+---
+
+`nestrs-locks` provides lease-based exclusivity (in-memory or Redis). Use it for schedule single-runner jobs, leader election light, and critical sections that must not overlap across processes.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = ["locks"] }
+# Redis:
+nestrs-locks = { version = "1.7.0", features = ["cache-redis"] }
+```
+
+## Usage
+
+```rust
+use nestrs::locks::{LocksModule, LocksOptions, LocksService};
+use std::sync::Arc;
+
+#[module(imports = [LocksModule::register(LocksOptions::default())], providers = [Jobs])]
+struct AppModule;
+
+#[injectable]
+struct Jobs {
+    locks: Arc<LocksService>,
+}
+
+impl Jobs {
+    async fn run_nightly(&self) {
+        let Some(guard) = self.locks.try_acquire("cron:nightly").await else {
+            return; // another instance holds the lease
+        };
+        // … work …
+        guard.release().await;
+    }
+
+    async fn with_helper(&self) {
+        let _ = self
+            .locks
+            .with_lock("invoice:42", || async {
+                // exclusive work
+            })
+            .await;
+    }
+}
+```
+
+### Options
+
+| Field | Default | Role |
+|-------|---------|------|
+| `store` | in-memory | `SharedLockStore` |
+| `default_ttl` | 30s | Lease lifetime; must cover worst-case work or extend |
+
+<Warning>
+Pick TTL shorter than the duplicate work you can tolerate after a crash, but long enough that healthy work does not lose the lease mid-flight. Extend on long steps.
+</Warning>
+
+## Schedule single-runner
+
+Combine with `ScheduleModule` (`schedule` feature): acquire a named lock at the start of `#[cron]` / `#[interval]` handlers so only one replica runs the job.
+
+## See also
+
+- [Workflows](/ecosystem/workflows) (often paired with locks)
+- [API reference](/api/crates/nestrs-locks)

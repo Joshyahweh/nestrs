@@ -179,9 +179,9 @@ fn paths_shadow(earlier: &str, later: &str) -> bool {
             if !lb_param && *ea != *lb {
                 later_is_more_specific = true;
             }
-        } else if !lb_param && *ea != *lb {
-            return false;
-        } else if lb_param && !ea_param {
+        } else if lb_param || *ea != *lb {
+            // `else` means `!ea_param`, so a later param segment or a
+            // mismatched literal cannot be shadowed by this earlier route.
             return false;
         }
     }

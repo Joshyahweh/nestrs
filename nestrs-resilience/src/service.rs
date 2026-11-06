@@ -251,9 +251,11 @@ mod tests {
 
     #[tokio::test]
     async fn circuit_opens_after_failures() {
-        let mut opts = ResilienceOptions::default();
-        opts.circuit_failure_threshold = 2;
-        opts.circuit_open_for = Duration::from_secs(60);
+        let opts = ResilienceOptions {
+            circuit_failure_threshold: 2,
+            circuit_open_for: Duration::from_secs(60),
+            ..Default::default()
+        };
         let svc = ResilienceService::from_options(opts);
         let policy = PolicyBundle {
             retry: Some(RetryPolicy {

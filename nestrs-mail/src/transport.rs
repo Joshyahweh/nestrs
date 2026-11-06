@@ -47,6 +47,17 @@ pub struct HttpMailTransport {
 }
 
 #[cfg(feature = "http")]
+impl HttpMailTransport {
+    pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> Arc<Self> {
+        Arc::new(Self {
+            endpoint: endpoint.into(),
+            api_key: api_key.into(),
+            client: reqwest::Client::new(),
+        })
+    }
+}
+
+#[cfg(feature = "http")]
 #[async_trait]
 impl MailTransport for HttpMailTransport {
     async fn send(&self, message: MailMessage) -> Result<(), MailError> {

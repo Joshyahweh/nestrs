@@ -97,61 +97,6 @@ impl IdempotencyStore for InMemoryIdempotencyStore {
 
 pub type SharedIdempotencyStore = Arc<dyn IdempotencyStore>;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-
-    #[tokio::test]
-    async fn second_inflight_caller_is_busy() {
-        let store = InMemoryIdempotencyStore::new(Duration::from_secs(60));
-        assert!(store.begin_or_get("a:k1").await.unwrap().is_none());
-        assert!(store.begin_or_get("a:k1").await.is_err());
-    }
-
-    #[tokio::test]
-    async fn completed_key_replays_record() {
-        let store = InMemoryIdempotencyStore::new(Duration::from_secs(60));
-        assert!(store.begin_or_get("a:k1").await.unwrap().is_none());
-        store
-            .complete(
-                "a:k1",
-                IdempotencyRecord {
-                    status: 201,
-                    body: b"{\"ok\":true}".to_vec(),
-                    content_type: "application/json".into(),
-                },
-            )
-            .await;
-        let replay = store.begin_or_get("a:k1").await.unwrap().expect("replay");
-        assert_eq!(replay.status, 201);
-        assert_eq!(replay.body, b"{\"ok\":true}");
-    }
-
-    #[tokio::test]
-    async fn concurrent_begin_only_one_winner() {
-        let store = Arc::new(InMemoryIdempotencyStore::new(Duration::from_secs(60)));
-        let mut handles = Vec::new();
-        for _ in 0..32 {
-            let s = Arc::clone(&store);
-            handles.push(tokio::spawn(
-                async move { s.begin_or_get("race:key").await },
-            ));
-        }
-        let mut winners = 0usize;
-        let mut busy = 0usize;
-        for h in handles {
-            match h.await.expect("join") {
-                Ok(None) => winners += 1,
-                Ok(Some(_)) => panic!("unexpected completed record before complete()"),
-                Err(_) => busy += 1,
-            }
-        }
-        assert_eq!(winners, 1, "exactly one first-writer");
-        assert_eq!(busy, 31);
-    }
-}
-
 #[cfg(feature = "cache-redis")]
 pub struct RedisIdempotencyStore {
     client: redis::Client,
@@ -216,5 +161,60 @@ impl IdempotencyStore for RedisIdempotencyStore {
             }
             let _: Result<(), _> = conn.del(lock_key).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn second_inflight_caller_is_busy() {
+        let store = InMemoryIdempotencyStore::new(Duration::from_secs(60));
+        assert!(store.begin_or_get("a:k1").await.unwrap().is_none());
+        assert!(store.begin_or_get("a:k1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn completed_key_replays_record() {
+        let store = InMemoryIdempotencyStore::new(Duration::from_secs(60));
+        assert!(store.begin_or_get("a:k1").await.unwrap().is_none());
+        store
+            .complete(
+                "a:k1",
+                IdempotencyRecord {
+                    status: 201,
+                    body: b"{\"ok\":true}".to_vec(),
+                    content_type: "application/json".into(),
+                },
+            )
+            .await;
+        let replay = store.begin_or_get("a:k1").await.unwrap().expect("replay");
+        assert_eq!(replay.status, 201);
+        assert_eq!(replay.body, b"{\"ok\":true}");
+    }
+
+    #[tokio::test]
+    async fn concurrent_begin_only_one_winner() {
+        let store = Arc::new(InMemoryIdempotencyStore::new(Duration::from_secs(60)));
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let s = Arc::clone(&store);
+            handles.push(tokio::spawn(
+                async move { s.begin_or_get("race:key").await },
+            ));
+        }
+        let mut winners = 0usize;
+        let mut busy = 0usize;
+        for h in handles {
+            match h.await.expect("join") {
+                Ok(None) => winners += 1,
+                Ok(Some(_)) => panic!("unexpected completed record before complete()"),
+                Err(_) => busy += 1,
+            }
+        }
+        assert_eq!(winners, 1, "exactly one first-writer");
+        assert_eq!(busy, 31);
     }
 }

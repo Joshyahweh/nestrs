@@ -33,7 +33,10 @@ mod tests {
     async fn fake_model_generate_text() {
         let fake = FakeModel::new(vec![Ok(json!({"text": "hello"}))]);
         let mut models = std::collections::HashMap::new();
-        models.insert("default".to_string(), Arc::new(fake) as Arc<dyn LanguageModel>);
+        models.insert(
+            "default".to_string(),
+            Arc::new(fake) as Arc<dyn LanguageModel>,
+        );
         let svc = AiService::new(AiOptions {
             models,
             defaults_timeout_ms: 5_000,
@@ -62,14 +65,15 @@ mod tests {
             Ok(json!({"text": "done"})),
         ]);
         let mut models = std::collections::HashMap::new();
-        models.insert("default".to_string(), Arc::new(fake) as Arc<dyn LanguageModel>);
+        models.insert(
+            "default".to_string(),
+            Arc::new(fake) as Arc<dyn LanguageModel>,
+        );
         let tools = AgentToolRegistry::new();
         tools.register(AgentFunction {
             name: "echo".into(),
             description: "echo".into(),
-            handler: Arc::new(|args| {
-                Box::pin(async move { Ok(args) })
-            }),
+            handler: Arc::new(|args| Box::pin(async move { Ok(args) })),
         });
         let svc = AiService::new(AiOptions {
             models,
@@ -95,7 +99,10 @@ mod tests {
     async fn generate_object_fails_closed_on_invalid_json() {
         let fake = FakeModel::new(vec![Ok(json!({"text": "not-json"}))]);
         let mut models = std::collections::HashMap::new();
-        models.insert("default".to_string(), Arc::new(fake) as Arc<dyn LanguageModel>);
+        models.insert(
+            "default".to_string(),
+            Arc::new(fake) as Arc<dyn LanguageModel>,
+        );
         let svc = AiService::new(AiOptions {
             models,
             defaults_timeout_ms: 5_000,
@@ -127,7 +134,10 @@ mod tests {
 
         let fake = FakeModel::new(vec![Ok(json!({"text": "{}"}))]);
         let mut models = std::collections::HashMap::new();
-        models.insert("default".to_string(), Arc::new(fake) as Arc<dyn LanguageModel>);
+        models.insert(
+            "default".to_string(),
+            Arc::new(fake) as Arc<dyn LanguageModel>,
+        );
         let svc = AiService::new(AiOptions {
             models,
             defaults_timeout_ms: 5_000,

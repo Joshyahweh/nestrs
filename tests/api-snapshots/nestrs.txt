@@ -74,6 +74,11 @@ nestrs::RateLimitOptions::trusted_proxy_hops
 nestrs::RedisRateLimitOptions
 nestrs::RequestTimeoutException
 nestrs::RequestTracingOptions
+nestrs::RouteConflictAction
+nestrs::RouteConflictAction::Error
+nestrs::RouteConflictAction::Ignore
+nestrs::RouteConflictAction::Warn
+nestrs::RouteConflictPolicy
 nestrs::RouteStateFromRegistry
 nestrs::SecurityHeaders
 nestrs::SecurityHeaders::default
@@ -108,6 +113,7 @@ nestrs::authn::PrincipalIdentity
 nestrs::authn::build_jwt_service
 nestrs::authn::install_authn_middleware
 nestrs::cache::CacheError
+nestrs::cache::CacheInterceptor
 nestrs::cache::CacheModule
 nestrs::cache::CacheModule::register
 nestrs::cache::CacheOptions
@@ -225,7 +231,9 @@ nestrs::otel::install_otlp_tracer
 nestrs::otel::shutdown_logger_provider
 nestrs::otel::shutdown_meter_provider
 nestrs::otel::shutdown_tracer_provider
+nestrs::pipes::NestrsSchema
 nestrs::pipes::ParseIntPipe
+nestrs::pipes::SchemaValidationPipe
 nestrs::pipes::TrimPipe
 nestrs::pipes::ValidationPipe
 nestrs::policies

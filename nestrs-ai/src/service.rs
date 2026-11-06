@@ -3,8 +3,7 @@ use crate::tools::AgentToolRegistry;
 use async_trait::async_trait;
 use nestrs_core::Injectable;
 use nestrs_resilience::{
-    PolicyBundle, ResilienceError, ResilienceOptions, ResilienceService, RetryPolicy,
-    TimeoutPolicy,
+    PolicyBundle, ResilienceError, ResilienceOptions, ResilienceService, RetryPolicy, TimeoutPolicy,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -130,10 +129,7 @@ impl AiService {
             })
     }
 
-    pub async fn generate_text(
-        &self,
-        req: GenerateTextRequest,
-    ) -> Result<GenerateResult, AiError> {
+    pub async fn generate_text(&self, req: GenerateTextRequest) -> Result<GenerateResult, AiError> {
         let model = self.model(req.model.as_deref())?;
         let mut steps = Vec::new();
         let mut tool_results = Vec::new();

@@ -274,9 +274,9 @@ fn build_operation(
     let mut responses = responses;
     if let Some(schema_name) = spec.and_then(|s| s.response_schema) {
         if let Value::Object(ref mut map) = responses {
-            let entry = map.entry("200").or_insert_with(|| {
-                json!({ "description": "OK" })
-            });
+            let entry = map
+                .entry("200")
+                .or_insert_with(|| json!({ "description": "OK" }));
             if let Value::Object(ref mut resp) = entry {
                 resp.insert(
                     "content".into(),

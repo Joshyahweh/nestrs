@@ -63,6 +63,8 @@ nestrs_core::execution_context::HostType::Rpc
 nestrs_core::execution_context::HostType::Unknown
 nestrs_core::execution_context::HostType::Ws
 nestrs_core::execution_context::HttpExecutionArguments
+nestrs_core::execution_context::RpcExecutionArguments
+nestrs_core::execution_context::WsExecutionArguments
 nestrs_core::guard::CanActivate
 nestrs_core::guard::CanActivate::can_activate
 nestrs_core::guard::CanActivate::resolve
@@ -82,6 +84,11 @@ nestrs_core::request_scope_get
 nestrs_core::request_scope_insert
 nestrs_core::route_registry::OpenApiResponseDesc
 nestrs_core::route_registry::OpenApiRouteSpec
+nestrs_core::route_registry::RouteConflict
+nestrs_core::route_registry::RouteConflictKind
+nestrs_core::route_registry::RouteConflictKind::Duplicate
+nestrs_core::route_registry::RouteConflictKind::Shadow
+nestrs_core::route_registry::RouteConflictReport
 nestrs_core::route_registry::RouteInfo
 nestrs_core::route_registry::RouteRegistry
 nestrs_core::spawn_with_request_scope

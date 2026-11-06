@@ -49,10 +49,8 @@ pub async fn idempotency_middleware(
                 res.headers_mut()
                     .insert(axum::http::header::CONTENT_TYPE, ct);
             }
-            res.headers_mut().insert(
-                "idempotency-replayed",
-                HeaderValue::from_static("true"),
-            );
+            res.headers_mut()
+                .insert("idempotency-replayed", HeaderValue::from_static("true"));
             return res;
         }
         Err(_) => {

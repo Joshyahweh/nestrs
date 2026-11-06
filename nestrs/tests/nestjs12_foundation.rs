@@ -53,9 +53,7 @@ async fn schema_validation_pipe_rejects_invalid() {
         name: String,
     }
 
-    let dto = Dto {
-        name: "a".into(),
-    };
+    let dto = Dto { name: "a".into() };
     let err = SchemaValidationPipe
         .transform(dto)
         .await

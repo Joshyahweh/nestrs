@@ -16,5 +16,5 @@ nestrs-ai = "1.7.0"
 
 - Mintlify: `mintlify-docs/ecosystem/ai.mdx`
 - API: `mintlify-docs/api/crates/nestrs-ai.mdx`
-- Hub: `mintlify-docs/guides/nestjs12.mdx`
+- Hub: `mintlify-docs/guides/reliability.mdx`
 - rustdoc: <https://docs.rs/nestrs-ai/1.7.0>

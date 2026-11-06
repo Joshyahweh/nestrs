@@ -973,7 +973,8 @@ fn is_validation_pipe(ty: &Type) -> bool {
 }
 
 fn types_eq(a: &Type, b: &Type) -> bool {
-    quote::ToTokens::to_token_stream(a).to_string() == quote::ToTokens::to_token_stream(b).to_string()
+    quote::ToTokens::to_token_stream(a).to_string()
+        == quote::ToTokens::to_token_stream(b).to_string()
 }
 
 fn parse_subscribe_message(attrs: &[syn::Attribute]) -> Result<Option<LitStr>> {

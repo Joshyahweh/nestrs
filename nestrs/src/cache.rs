@@ -462,8 +462,7 @@ impl Default for CacheInterceptor {
     fn default() -> Self {
         Self {
             cache: Arc::new(
-                CacheService::from_options(CacheOptions::in_memory())
-                    .expect("in-memory cache"),
+                CacheService::from_options(CacheOptions::in_memory()).expect("in-memory cache"),
             ),
         }
     }
@@ -503,10 +502,7 @@ impl crate::Interceptor for CacheInterceptor {
 
         if let Some(cached) = self.cache.get_json(&key).await {
             if let Some(body) = cached.get("body").and_then(|b| b.as_str()) {
-                let status = cached
-                    .get("status")
-                    .and_then(|s| s.as_u64())
-                    .unwrap_or(200) as u16;
+                let status = cached.get("status").and_then(|s| s.as_u64()).unwrap_or(200) as u16;
                 return axum::response::Response::builder()
                     .status(status)
                     .header(axum::http::header::CONTENT_TYPE, "application/json")
@@ -521,9 +517,7 @@ impl crate::Interceptor for CacheInterceptor {
             return response;
         }
         let (parts, body) = response.into_parts();
-        let bytes = to_bytes(body, 1024 * 1024)
-            .await
-            .unwrap_or_default();
+        let bytes = to_bytes(body, 1024 * 1024).await.unwrap_or_default();
         let body_str = String::from_utf8_lossy(&bytes).into_owned();
         let _ = self
             .cache

@@ -9,7 +9,7 @@ are implemented; others are intentionally staged for later phases.
 - **ScheduleModule**: implemented (feature `schedule`)
 - **QueuesModule**: implemented (feature `queues`, in-process baseline)
 - **I18nModule**: implemented (catalogs + locale resolver; enable via `NestApplication::use_i18n()`)
-- **NestJS 12 packages**: `nestrs-resilience`, `nestrs-idempotency`, `nestrs-outbox`, `nestrs-locks`, `nestrs-mail`, `nestrs-webhooks`, `nestrs-workflows`, `nestrs-ai` (umbrella features on `nestrs`)
+- **Reliability & agents packages**: `nestrs-resilience`, `nestrs-idempotency`, `nestrs-outbox`, `nestrs-locks`, `nestrs-mail`, `nestrs-webhooks`, `nestrs-workflows`, `nestrs-ai` (umbrella features on `nestrs`)
 
 ## CacheModule
 
@@ -127,7 +127,7 @@ struct AppModule;
 
 The `Locale` / `I18n` extractors resolve locale from `?lang=...` (default) or `Accept-Language`, then translate via catalogs registered in `I18nService` / `I18nModule::register(I18nOptions { ... })`.
 
-## NestJS 12 reliability / agents
+## Reliability, mail, webhooks, workflows & AI
 
 | Crate | Umbrella feature | Role |
 |-------|------------------|------|
@@ -140,5 +140,5 @@ The `Locale` / `I18n` extractors resolve locale from `?lang=...` (default) or `A
 | `nestrs-workflows` | `workflows` | Durable steps, resume, human approval |
 | `nestrs-ai` | `ai` | Named models, `generate_text` / `generate_object`, agent tools, `FakeModel` |
 
-Threat-model notes: [nestjs12-security.md](docs/src/nestjs12-security.md). Parity matrix: [roadmap-parity.md](docs/src/roadmap-parity.md).
+Threat-model notes: [reliability-security.md](docs/src/reliability-security.md). Parity matrix: [roadmap-parity.md](docs/src/roadmap-parity.md).
 

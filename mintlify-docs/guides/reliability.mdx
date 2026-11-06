@@ -1,0 +1,127 @@
+---
+title: "Reliability, mail, webhooks, workflows & AI"
+description: "NestRS 1.7 packages for resilience, idempotency, outbox, locks, mail, webhooks, workflows, and AI — plus errorCode, schema validation, and route conflict diagnostics."
+---
+
+NestRS **1.7** adds Axum-native crates for reliability, outbound integrations, durable workflows, and LLM agents. Enable them with umbrella features on `nestrs`, or depend on the crates directly. This page is the hub; each package has an ecosystem guide and an API reference.
+
+<Note>
+**Explicit exceptions (not silent gaps):** Express/Fastify adapters (ADR-0001 Axum-only), Nest Observe SaaS / Mau deploy (open OTel instead), and `nestrs-drizzle` until upstream publishes. See [roadmap](/guides/reliability#roadmap).
+</Note>
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = [
+  "resilience", "idempotency", "outbox", "locks",
+  "mail", "webhooks", "workflows", "ai",
+] }
+```
+
+Or depend on individual crates (`nestrs-resilience = "1.7.0"`, …) for a thinner graph.
+
+## Package map
+
+| NestRS crate | Feature | Guide | API |
+|--------------|---------|-------|-----|
+| `nestrs-resilience` | `resilience` | [Resilience](/ecosystem/resilience) | [API](/api/crates/nestrs-resilience) |
+| `nestrs-idempotency` | `idempotency` | [Idempotency](/ecosystem/idempotency) | [API](/api/crates/nestrs-idempotency) |
+| `nestrs-outbox` | `outbox` | [Outbox](/ecosystem/outbox) | [API](/api/crates/nestrs-outbox) |
+| `nestrs-locks` | `locks` | [Locks](/ecosystem/locks) | [API](/api/crates/nestrs-locks) |
+| `nestrs-mail` | `mail` | [Mail](/ecosystem/mail) | [API](/api/crates/nestrs-mail) |
+| `nestrs-webhooks` | `webhooks` | [Webhooks](/ecosystem/webhooks) | [API](/api/crates/nestrs-webhooks) |
+| `nestrs-workflows` | `workflows` | [Workflows](/ecosystem/workflows) | [API](/api/crates/nestrs-workflows) |
+| `nestrs-ai` | `ai` | [AI](/ecosystem/ai) | [API](/api/crates/nestrs-ai) |
+| Open telemetry | `otel` | [Observability](/guides/observability) | — |
+
+Coming from Nest? See the [migration guide](/migration/from-nestjs#reliability-mail-webhooks-workflows--ai) for Nest package names.
+
+## Foundation features
+
+These live in core `nestrs` / `nestrs-core` / `nestrs-openapi` — no extra crate:
+
+| Capability | NestRS API |
+|------------|------------|
+| Stable machine-readable error codes | `HttpException::with_error_code("WEAK_PASSWORD")` → JSON `errorCode` |
+| Schema + validation for DTOs | `NestrsSchema` + `SchemaValidationPipe` (`Validate` + `JsonSchema`) |
+| OpenAPI DTO `$ref` auto-link | `OpenApiRouteSpec::{request_body_schema, response_schema}` |
+| Route conflict / shadow diagnostics | `RouteConflictPolicy` on `NestApplication` |
+| Richer `ExecutionContext` | `get_class` / `get_handler` / name accessors |
+| Controller-level pipes | `controller_pipes = …` on `#[routes]` |
+| Span attrs for handlers | OTel attrs `nestrs.controller` / `nestrs.handler` |
+
+```rust
+use nestrs::prelude::*;
+
+#[get("/signup")]
+async fn signup() -> Result<Json<Value>, HttpException> {
+    Err(BadRequestException::new("Password is too weak").with_error_code("WEAK_PASSWORD"))
+}
+```
+
+Response body:
+
+```json
+{
+  "statusCode": 400,
+  "message": "Password is too weak",
+  "error": "Bad Request",
+  "errorCode": "WEAK_PASSWORD"
+}
+```
+
+## Wire modules like other NestRS dynamic modules
+
+Every reliability crate follows the same pattern as `CacheModule` / `ThrottlerModule`:
+
+1. Call `FooModule::register(options)` → `DynamicModule`
+2. Put it in `#[module(imports = [...])]`
+3. Inject the exported service (`Arc<FooService>`) into an `#[injectable]` provider
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+struct OrdersService {
+    resilience: Arc<nestrs::resilience::ResilienceService>,
+    mail: Arc<nestrs::mail::MailService>,
+}
+
+#[module(
+    imports = [
+        nestrs::resilience::ResilienceModule::register(
+            nestrs::resilience::ResilienceOptions::default()
+        ),
+        nestrs::mail::MailModule::register(
+            nestrs::mail::MailOptions::default()
+        ),
+    ],
+    providers = [OrdersService],
+    controllers = [OrdersController],
+)]
+struct AppModule;
+```
+
+<Warning>
+`DynamicModule` only **exports** listed `TypeId`s. These modules export their services; if you build a custom dynamic module, pass `vec![TypeId::of::<YourService>()]` to `from_parts` or importers cannot inject it.
+</Warning>
+
+## Try it in the lab
+
+```bash
+cargo run -p lab --bin lab9_nestjs12
+# optional live server on :3612
+cargo run -p lab --bin lab9_nestjs12 -- serve
+```
+
+The smoke hits `errorCode`, resilience retries, mail escaping, AI `FakeModel`, locks, outbox relay, workflows, webhooks sign/verify, and an idempotency race.
+
+## Security
+
+Threat-model notes for key scope, SSRF, poison outbox messages, and AI tool authz: [Reliability security notes](/guides/reliability-security).
+
+## Roadmap
+
+Full matrix (including exceptions): [roadmap parity](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/roadmap-parity.md) in-repo, or the [migration guide](/migration/from-nestjs).

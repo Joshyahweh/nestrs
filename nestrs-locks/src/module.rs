@@ -16,10 +16,7 @@ impl LocksModule {
         DynamicModule::from_parts(
             registry,
             Router::new(),
-            vec![
-                TypeId::of::<LocksService>(),
-                TypeId::of::<LocksOptions>(),
-            ],
+            vec![TypeId::of::<LocksService>(), TypeId::of::<LocksOptions>()],
         )
     }
 }

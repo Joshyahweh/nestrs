@@ -4,7 +4,13 @@
 # `rsa` via **`sqlx-mysql`** (nestrs-prisma optional SQLx backends): RUSTSEC-2023-0071 notes
 # no fixed stable release for the Marvin findings in the 0.9 line; monitor **`rsa`** /
 # **`sqlx`** releases.
+#
+# `crypto-bigint` 0.5.x via **`jsonwebtoken` → p256/p384 → elliptic-curve 0.13**:
+# RUSTSEC-2026-0387 is fixed in crypto-bigint >=0.7.6, but elliptic-curve 0.13
+# cannot take that line. jsonwebtoken 11 still pins p256/p384 0.13. Drop the
+# ignore when those crates move to elliptic-curve 0.14+ / crypto-bigint 0.7+.
 [advisories]
 ignore = [
     "RUSTSEC-2023-0071",
+    "RUSTSEC-2026-0387",
 ]

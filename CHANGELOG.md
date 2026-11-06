@@ -9,21 +9,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [1.7.0] - 2026-11-06
 
-NestJS 12 full parity program (Waves 0–5): eight new packages, foundation DX,
+Reliability, mail, webhooks, workflows, and AI packages (plus foundation DX),
 Partial→Full deepen, and security/perf gates. Workspace version, path-dep pins,
 crate READMEs, mintlify/mdBook, and `html_root_url` all read `1.7.0`.
 
-### Added — NestJS 12 full parity program (Waves 0–5)
+### Added — Reliability & agents packages
 
-- **Nest 12 foundation**: `HttpException::with_error_code` (`errorCode` JSON), `SchemaValidationPipe` / `NestrsSchema`, `RouteConflictPolicy`, richer `ExecutionContext` (`get_class` / `get_handler`), controller-level `controller_pipes`, OpenAPI request/response `$ref` auto-link fields, OTel span attrs `nestrs.controller` / `nestrs.handler`.
+- **Foundation**: `HttpException::with_error_code` (`errorCode` JSON), `SchemaValidationPipe` / `NestrsSchema`, `RouteConflictPolicy`, richer `ExecutionContext` (`get_class` / `get_handler`), controller-level `controller_pipes`, OpenAPI request/response `$ref` auto-link fields, OTel span attrs `nestrs.controller` / `nestrs.handler`.
 - **Packages**: `nestrs-resilience`, `nestrs-idempotency`, `nestrs-outbox`, `nestrs-locks`, `nestrs-mail`, `nestrs-webhooks`, `nestrs-workflows`, `nestrs-ai` (+ umbrella features).
 - **Deepen**: `CacheInterceptor`, i18n cookie resolver, `ClientProxy::{status,unwrap_transport,on}`, `nestrs-cli new workspace`.
-- **Security / perf**: webhook sign/verify property tests, resilience Criterion bench, [nestjs12-security.md](docs/src/nestjs12-security.md); roadmap matrix flipped to **Full** for in-scope Nest 12 surfaces (Observe SaaS / Mau / Express / drizzle remain explicit exceptions).
-- **Lab smoke**: `cargo run -p lab --bin lab9_nestjs12` exercises the Nest 12 surface in-process.
+- **Security / perf**: webhook sign/verify property tests, resilience Criterion bench, [reliability-security.md](docs/src/reliability-security.md); roadmap matrix flipped to **Full** for in-scope surfaces (Observe SaaS / Mau / Express / drizzle remain explicit exceptions).
+- **Lab smoke**: `cargo run -p lab --bin lab9_nestjs12` exercises the new packages in-process.
+- **Docs**: Mintlify/mdBook hub under Reliability & agents (`guides/reliability`).
 
 ### Fixed
 
-- Nest 12 `*Module::register` now **exports** service `TypeId`s so importers can inject them (empty exports previously dropped providers on absorb).
+- Reliability `*Module::register` now **exports** service `TypeId`s so importers can inject them (empty exports previously dropped providers on absorb).
 - OpenAPI response `$ref` auto-link: clarify `Map::entry` key type for serde_json 1.0.154.
 
 ## [1.6.0] - 2026-09-30

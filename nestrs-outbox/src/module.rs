@@ -20,10 +20,7 @@ impl OutboxModule {
         DynamicModule::from_parts(
             registry,
             Router::new(),
-            vec![
-                TypeId::of::<OutboxRelay>(),
-                TypeId::of::<OutboxOptions>(),
-            ],
+            vec![TypeId::of::<OutboxRelay>(), TypeId::of::<OutboxOptions>()],
         )
     }
 }

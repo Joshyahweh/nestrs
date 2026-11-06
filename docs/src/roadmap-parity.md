@@ -1,6 +1,6 @@
 # Roadmap parity (NestJS ↔ nestrs)
 
-This page is a **practical feature matrix**: what feels familiar if you know [NestJS](https://docs.nestjs.com), what is mirrored in nestrs, and what is intentionally out of scope. NestJS **12** packages and features are in scope for NestRS **1.7+** (this matrix).
+This page is a **practical feature matrix**: what feels familiar if you know [NestJS](https://docs.nestjs.com), what is mirrored in nestrs, and what is intentionally out of scope. Reliability, mail, webhooks, workflows, and AI packages are in scope for NestRS **1.7+** (this matrix).
 
 ## How to read the status labels
 
@@ -26,16 +26,16 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 | `@Module` | `#[module(...)]` | **Full** | |
 | `@Controller` / `@Get`… | `#[controller]` + `#[routes]` + `#[get]`… | **Full** | |
 | `@Injectable` | `#[injectable]` | **Full** | |
-| Pipes / validation | `ValidationPipe`, `SchemaValidationPipe`, `Validated*` | **Full** | Nest 12 Standard Schema analogue via `NestrsSchema` |
+| Pipes / validation | `ValidationPipe`, `SchemaValidationPipe`, `Validated*` | **Full** | `NestrsSchema` Standard Schema analogue |
 | Guards | `#[use_guards]`, `CanActivate`, richer `ExecutionContext` | **Full** | `get_class` / `get_handler` analogues |
 | Interceptors | `#[use_interceptors]`, `CacheInterceptor` | **Full** | |
 | Exception filters | `#[use_filters]`, global filter | **Full** | |
 | Middleware | `MiddlewareConsumer` | **Full** | path prefix; no glob DSL |
-| `errorCode` on HTTP exceptions | `HttpException::with_error_code` | **Full** | Nest 12 |
-| Route conflict diagnostics | `RouteConflictPolicy` | **Full** | Nest 12 |
+| `errorCode` on HTTP exceptions | `HttpException::with_error_code` | **Full** | |
+| Route conflict diagnostics | `RouteConflictPolicy` | **Full** | |
 | Controller-level pipes | `controller_pipes = …` on `#[routes]` | **Full** | |
 
-## NestJS 12 first-party packages
+## Reliability & agents packages
 
 | Nest package | nestrs | Status |
 |--------------|--------|--------|
@@ -90,6 +90,6 @@ This page is a **practical feature matrix**: what feels familiar if you know [Ne
 ## Related
 
 - [Changelog](changelog.md)
-- [NestJS migration](nestjs-migration.md) (Nest 12 delta section)
-- [NestJS 12 security notes](nestjs12-security.md)
+- [NestJS migration](nestjs-migration.md) (reliability packages section)
+- [Reliability security notes](reliability-security.md)
 - [Observability](observability.md)

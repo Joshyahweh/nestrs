@@ -1,0 +1,119 @@
+---
+title: "Resilience — `nestrs-resilience`"
+description: "Retry with jitter, timeout, circuit breaker, bulkhead, and fallback — NestJS @nestjs/resilience analogue for NestRS."
+---
+
+`nestrs-resilience` wraps fallible async work in composable policies. It is the NestJS [`@nestjs/resilience`](https://docs.nestjs.com/reliability/resilience) analogue: a `ResilienceService` that runs a closure under retry / timeout / circuit / bulkhead, plus typed `ResilienceError` and `ResilienceEvent` for HTTP/RPC mapping and observability.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = ["resilience"] }
+# or:
+nestrs-resilience = "1.7.0"
+```
+
+## Register the module
+
+```rust
+use nestrs::prelude::*;
+use nestrs::resilience::{ResilienceModule, ResilienceOptions};
+
+#[module(
+    imports = [ResilienceModule::register(ResilienceOptions::default())],
+    providers = [PaymentsService],
+)]
+struct AppModule;
+```
+
+`ResilienceModule::register` exports `ResilienceService` so injectables can take `Arc<ResilienceService>`.
+
+## Execute under a policy bundle
+
+```rust
+use nestrs::resilience::{
+    PolicyBundle, ResilienceError, ResilienceService, RetryPolicy, TimeoutPolicy,
+};
+use std::sync::Arc;
+use std::time::Duration;
+
+async fn charge(svc: Arc<ResilienceService>) -> Result<u64, ResilienceError> {
+    let policy = PolicyBundle {
+        retry: Some(RetryPolicy {
+            attempts: 4,
+            delay: Duration::from_millis(50),
+            factor: 2.0,
+            max_delay: Duration::from_secs(2),
+            jitter: true, // default on RetryPolicy::default() — keep it for production
+        }),
+        timeout: Some(TimeoutPolicy {
+            timeout: Duration::from_secs(3),
+        }),
+        circuit_name: Some("payments".into()),
+        ..Default::default()
+    };
+
+    svc.execute("payments.charge", policy, || async {
+        // call downstream; map transport errors to ResilienceError::Other(...)
+        Ok(42u64)
+    })
+    .await
+}
+```
+
+### `PolicyBundle` fields
+
+| Field | Role |
+|-------|------|
+| `retry` | Max attempts + exponential backoff; `jitter` multiplies delay by `1…1.2` |
+| `timeout` | Per-attempt `tokio::time::timeout` |
+| `bulkhead` | Semaphore of max concurrent executions (module-wide) |
+| `circuit_name` | Named breaker; opens after `circuit_failure_threshold` failures |
+
+When a field is `None`, `ResilienceOptions.defaults` apply.
+
+## Map errors at the HTTP boundary
+
+| `ResilienceError` | Suggested HTTP |
+|-------------------|----------------|
+| `Timeout` | **504** Gateway Timeout |
+| `CircuitOpen { retry_after_secs }` | **503** + `Retry-After` |
+| `BulkheadRejected` | **503** / **429** |
+| `ExhaustedRetries { … }` | **502** / **503** |
+| `Other(…)` | **500** or domain mapping |
+
+```rust
+use nestrs::prelude::*;
+use nestrs::resilience::ResilienceError;
+
+fn map_resilience(err: ResilienceError) -> HttpException {
+    match err {
+        ResilienceError::Timeout => {
+            GatewayTimeoutException::new("upstream timed out").with_error_code("UPSTREAM_TIMEOUT")
+        }
+        ResilienceError::CircuitOpen { retry_after_secs } => ServiceUnavailableException::new(
+            format!("circuit open; retry after {retry_after_secs}s"),
+        )
+        .with_error_code("CIRCUIT_OPEN"),
+        other => InternalServerErrorException::new(other.to_string()),
+    }
+}
+```
+
+## Events
+
+`ResilienceService::subscribe()` returns a `broadcast::Receiver<ResilienceEvent>` for retries, timeouts, and circuit transitions — useful for metrics counters.
+
+## Defaults that matter
+
+- **Jitter is on** for `RetryPolicy::default()` — do not disable in multi-instance deployments.
+- Circuit opens after **5** failures for **30s** (`ResilienceOptions` defaults).
+- AI (`nestrs-ai`) uses this crate for model-call timeout/retry when the `ai` feature is enabled.
+
+## See also
+
+- [NestJS 12 hub](/guides/nestjs12)
+- [Security notes](/guides/nestjs12-security#resilience-nestrs-resilience)
+- [API reference](/api/crates/nestrs-resilience)
+- Lab: `cargo run -p lab --bin lab9_nestjs12`

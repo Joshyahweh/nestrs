@@ -35,13 +35,18 @@ pub use client_ip::{
 };
 pub use database::DatabasePing;
 pub use discovery::DiscoveryService;
-pub use execution_context::{ExecutionContext, HostType, HttpExecutionArguments};
+pub use execution_context::{
+    ExecutionContext, HostType, HttpExecutionArguments, RpcExecutionArguments, WsExecutionArguments,
+};
 pub use guard::{CanActivate, GuardError};
 pub use metadata::MetadataRegistry;
 pub use module_ref::ModuleRef;
 pub use pipe::{HttpPipeTransform, PipeTransform};
 pub use platform::{AxumHttpEngine, HttpServerEngine};
-pub use route_registry::{OpenApiResponseDesc, OpenApiRouteSpec, RouteInfo, RouteRegistry};
+pub use route_registry::{
+    OpenApiResponseDesc, OpenApiRouteSpec, RouteConflict, RouteConflictKind, RouteConflictReport,
+    RouteInfo, RouteRegistry,
+};
 pub use strategy::{AuthError, AuthStrategy};
 pub use trace::{current_trace_context, parse_traceparent, with_trace_context, TraceContext};
 

@@ -1,0 +1,33 @@
+---
+title: "nestrs-workflows API"
+description: "Reference for WorkflowsModule, WorkflowsService, WorkflowInstance, and approval waits."
+---
+
+Crate: [`nestrs-workflows`](https://docs.rs/nestrs-workflows/1.7.0) · Feature: `workflows` · Guide: [Workflows](/ecosystem/workflows)
+
+```toml
+nestrs-workflows = "1.7.0"
+```
+
+## `WorkflowsModule::register`
+
+Exports `WorkflowsService`.
+
+## `WorkflowsService`
+
+```rust
+pub async fn start(&self, name: &str, input: Value) -> WorkflowInstance
+pub async fn get(&self, id: &str) -> Option<WorkflowInstance>
+pub async fn complete_step(&self, id: &str, step: &str, result: Value)
+    -> Result<WorkflowInstance, String>
+pub async fn wait_for_approval(&self, id: &str) -> Result<WorkflowInstance, String>
+pub async fn approve(&self, id: &str) -> Result<WorkflowInstance, String>
+```
+
+## `WorkflowInstance`
+
+Contains `id`, workflow `name`, `input`, `steps: HashMap<String, Value>`, and `status: WorkflowStatus`.
+
+## `WorkflowsOptions`
+
+`store: SharedWorkflowStore` — default `InMemoryWorkflowStore::shared()`.

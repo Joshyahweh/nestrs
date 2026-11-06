@@ -113,6 +113,23 @@ cargo publish -p nestrs-cqrs
 sleep 30
 cargo publish -p nestrs-microservices
 sleep 30
+# NestJS 12 packages (1.7.0+)
+cargo publish -p nestrs-resilience
+sleep 30
+cargo publish -p nestrs-idempotency
+sleep 30
+cargo publish -p nestrs-outbox
+sleep 30
+cargo publish -p nestrs-locks
+sleep 30
+cargo publish -p nestrs-mail
+sleep 30
+cargo publish -p nestrs-webhooks
+sleep 30
+cargo publish -p nestrs-workflows
+sleep 30
+cargo publish -p nestrs-ai
+sleep 30
 cargo publish -p nestrs
 sleep 30
 cargo publish -p nestrs-prisma

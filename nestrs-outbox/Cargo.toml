@@ -1,0 +1,24 @@
+[package]
+name = "nestrs-outbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Transactional outbox / inbox / DLQ for nestrs — NestJS @nestjs/outbox parity."
+keywords = ["outbox", "messaging", "nest", "axum"]
+categories = ["asynchronous", "database"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "1.7.0" }
+axum.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

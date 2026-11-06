@@ -69,6 +69,13 @@
             ]
           },
           {
+            "group": "NestJS 12",
+            "pages": [
+              "guides/nestjs12",
+              "guides/nestjs12-security"
+            ]
+          },
+          {
             "group": "Operations",
             "pages": [
               "guides/configuration",
@@ -89,7 +96,15 @@
               "ecosystem/database",
               "ecosystem/caching",
               "ecosystem/scheduling",
-              "ecosystem/openapi"
+              "ecosystem/openapi",
+              "ecosystem/resilience",
+              "ecosystem/idempotency",
+              "ecosystem/outbox",
+              "ecosystem/locks",
+              "ecosystem/mail",
+              "ecosystem/webhooks",
+              "ecosystem/workflows",
+              "ecosystem/ai"
             ]
           },
           {
@@ -164,7 +179,15 @@
               "api/crates/nestrs-core",
               "api/crates/nestrs-microservices",
               "api/crates/nestrs-openapi",
-              "api/crates/nestrs-mcp"
+              "api/crates/nestrs-mcp",
+              "api/crates/nestrs-resilience",
+              "api/crates/nestrs-idempotency",
+              "api/crates/nestrs-outbox",
+              "api/crates/nestrs-locks",
+              "api/crates/nestrs-mail",
+              "api/crates/nestrs-webhooks",
+              "api/crates/nestrs-workflows",
+              "api/crates/nestrs-ai"
             ]
           },
           {

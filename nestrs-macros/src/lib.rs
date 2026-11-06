@@ -806,12 +806,15 @@ pub fn raw_body(attr: TokenStream, item: TokenStream) -> TokenStream {
 struct RoutesArgs {
     state: Type,
     controller_guards: Option<Type>,
+    /// NestJS controller-level pipes — merged with per-handler `#[use_pipes]`.
+    controller_pipes: Option<Type>,
 }
 
 impl Parse for RoutesArgs {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut state = None::<Type>;
         let mut controller_guards = None::<Type>;
+        let mut controller_pipes = None::<Type>;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -819,6 +822,7 @@ impl Parse for RoutesArgs {
             match key.to_string().as_str() {
                 "state" => state = Some(input.parse()?),
                 "controller_guards" => controller_guards = Some(input.parse()?),
+                "controller_pipes" => controller_pipes = Some(input.parse()?),
                 _ => return Err(syn::Error::new(key.span(), "unknown routes key")),
             }
 
@@ -837,6 +841,7 @@ impl Parse for RoutesArgs {
         Ok(Self {
             state,
             controller_guards,
+            controller_pipes,
         })
     }
 }
@@ -964,7 +969,11 @@ fn is_validation_pipe(ty: &Type) -> bool {
     let Some(seg) = tp.path.segments.last() else {
         return false;
     };
-    seg.ident == "ValidationPipe"
+    seg.ident == "ValidationPipe" || seg.ident == "SchemaValidationPipe"
+}
+
+fn types_eq(a: &Type, b: &Type) -> bool {
+    quote::ToTokens::to_token_stream(a).to_string() == quote::ToTokens::to_token_stream(b).to_string()
 }
 
 fn parse_subscribe_message(attrs: &[syn::Attribute]) -> Result<Option<LitStr>> {
@@ -2104,10 +2113,17 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
             .into();
         }
 
-        let pipes = match parse_use_pipes(&func.attrs) {
+        let mut pipes = match parse_use_pipes(&func.attrs) {
             Ok(v) => v,
             Err(e) => return e.to_compile_error().into(),
         };
+        // NestJS controller-level pipes: `#[routes(..., controller_pipes = ValidationPipe)]`
+        // merges ahead of per-handler `#[use_pipes(...)]`.
+        if let Some(ref ctrl_pipe) = args.controller_pipes {
+            if !pipes.iter().any(|p| types_eq(p, ctrl_pipe)) {
+                pipes.insert(0, ctrl_pipe.clone());
+            }
+        }
 
         // Two cases for parameter binding today:
         //   1. No pipes — use the raw axum extractor.
@@ -2128,7 +2144,12 @@ pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
         //       #[param::query] raw: nestrs::PipedQuery1<String, ParseIntPipe>,
         //   ) -> ... { raw.0 }
         // See `nestrs/tests/pipes_chain.rs`.
-        let has_validation = pipes.iter().any(is_validation_pipe);
+        let has_validation = pipes.iter().any(is_validation_pipe)
+            || args
+                .controller_pipes
+                .as_ref()
+                .map(is_validation_pipe)
+                .unwrap_or(false);
 
         // Expand Nest-like parameter decorators into Axum extractors.
         for input in func.sig.inputs.iter_mut() {

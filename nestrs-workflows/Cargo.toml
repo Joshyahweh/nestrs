@@ -1,0 +1,31 @@
+[package]
+name = "nestrs-workflows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Durable workflows for nestrs — NestJS @nestjs/workflows parity."
+keywords = ["workflows", "durable", "nest"]
+categories = ["asynchronous"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "1.7.0" }
+nestrs-outbox = { path = "../nestrs-outbox", version = "1.7.0", optional = true }
+nestrs-locks = { path = "../nestrs-locks", version = "1.7.0", optional = true }
+axum.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[features]
+default = []
+with-outbox = ["dep:nestrs-outbox"]
+with-locks = ["dep:nestrs-locks"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

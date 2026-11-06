@@ -6,10 +6,10 @@
 //! - Each operation includes **`operationId`** (module path + handler), a short **`summary`** derived
 //!   from the handler name (overridable with `#[openapi(summary = \"...\")]`), and a **`tags`** entry
 //!   inferred from the URL or overridden with `#[openapi(tag = \"...\")]`.
-//! - Responses default to **`200 OK`** only unless you set `#[openapi(responses = ((404, \"...\"), ...))]`;
-//!   request/response **schemas** are not inferred from handlers, but `#[dto]` types derive
-//!   `schemars::JsonSchema` — feed [`schema_entry`] / [`OpenApiOptions::with_schemas`] to land them
-//!   under `components.schemas`.
+//! - Responses default to **`200 OK`** only unless you set `#[openapi(responses = ((404, \"...\"), ...))]`.
+//! - Request/response **schemas** auto-link when `OpenApiRouteSpec::{request_body_schema,response_schema}`
+//!   are set (NestJS 12 Standard Schema → OpenAPI analogue). Land schema bodies with
+//!   [`schema_entry`] / [`OpenApiOptions::with_schemas`].
 //!
 //! ## Nest `@nestjs/swagger` parity (practical)
 //!
@@ -18,7 +18,7 @@
 //! | `@ApiTags` / controller grouping | Inferred **`tags`** from path; optional document-level [`OpenApiOptions::document_tags`]. |
 //! | `@ApiOperation` summary | Auto **`summary`** from handler name; override with **`#[openapi(summary = \"...\")]`**. |
 //! | `@ApiResponse` / status codes | Default **200** only; per-route **`#[openapi(responses = ((404, \"...\"), ...))]`** or manual `components`. |
-//! | DTO / schema generation | **Via `schemars`** — `#[dto]` / entity `Model` + `JsonSchema`; pass [`schema_entry`] / `nestrs_sea_orm::expose_schema` into [`OpenApiOptions::with_schemas`]. One shared type is the NestRS `#[expose]` analogue. |
+//! | DTO / schema generation + op `$ref` | **Via `schemars`** + optional auto-link on the operation via route-spec schema names. |
 //! | `@ApiBearerAuth` / route security | Global [`OpenApiOptions::security`] + [`OpenApiOptions::components`].**securitySchemes**; optional **per-route** [`OpenApiOptions::infer_route_security_from_roles`] (`#[roles]`) or [`OpenApiOptions::infer_route_security_from_posture`] (`nestrs.posture=guarded`). |
 //! | Swagger UI | **Yes** — bundled HTML page at [`OpenApiOptions::docs_path`]. |
 //! | Plugins (CLI, extra decorators) | **No** — keep this crate small; compose with other OpenAPI tools if needed. |
@@ -257,6 +257,37 @@ fn build_operation(
         .collect();
     if !params.is_empty() {
         op.insert("parameters".into(), json!(params));
+    }
+    if let Some(schema_name) = spec.and_then(|s| s.request_body_schema) {
+        op.insert(
+            "requestBody".into(),
+            json!({
+                "required": true,
+                "content": {
+                    "application/json": {
+                        "schema": { "$ref": format!("#/components/schemas/{schema_name}") }
+                    }
+                }
+            }),
+        );
+    }
+    let mut responses = responses;
+    if let Some(schema_name) = spec.and_then(|s| s.response_schema) {
+        if let Value::Object(ref mut map) = responses {
+            let entry = map.entry("200").or_insert_with(|| {
+                json!({ "description": "OK" })
+            });
+            if let Value::Object(ref mut resp) = entry {
+                resp.insert(
+                    "content".into(),
+                    json!({
+                        "application/json": {
+                            "schema": { "$ref": format!("#/components/schemas/{schema_name}") }
+                        }
+                    }),
+                );
+            }
+        }
     }
     op.insert("responses".into(), responses);
     let guarded_posture = MetadataRegistry::get(handler, "nestrs.posture")

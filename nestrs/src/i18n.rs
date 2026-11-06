@@ -15,6 +15,8 @@ pub struct I18nOptions {
     pub supported_locales: Option<Vec<String>>,
     /// Query parameter used to override locale (default: `"lang"`). Set to `None` to disable.
     pub query_param: Option<String>,
+    /// Cookie name used to override locale (default: `None`). NestJS i18n cookie resolver analogue.
+    pub cookie_name: Option<String>,
     /// Catalogs: locale -> (key -> message).
     pub catalogs: HashMap<String, HashMap<String, String>>,
 }
@@ -25,6 +27,7 @@ impl Default for I18nOptions {
             fallback_locale: "en".to_string(),
             supported_locales: None,
             query_param: Some("lang".to_string()),
+            cookie_name: None,
             catalogs: HashMap::new(),
         }
     }
@@ -46,6 +49,11 @@ impl I18nOptions {
         S: Into<String>,
     {
         self.supported_locales = Some(locales.into_iter().map(Into::into).collect());
+        self
+    }
+
+    pub fn with_cookie_name(mut self, name: impl Into<String>) -> Self {
+        self.cookie_name = Some(name.into());
         self
     }
 
@@ -94,6 +102,23 @@ fn query_get<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
+fn cookie_get<'a>(cookie_header: &'a str, name: &str) -> Option<&'a str> {
+    for part in cookie_header.split(';') {
+        let part = part.trim();
+        let mut it = part.splitn(2, '=');
+        let k = it.next()?.trim();
+        if k != name {
+            continue;
+        }
+        let v = it.next().unwrap_or("").trim();
+        if v.is_empty() {
+            return None;
+        }
+        return Some(v);
+    }
+    None
+}
+
 fn parse_accept_language(value: &str) -> Option<String> {
     let mut best: Option<(String, f32)> = None;
     for part in value.split(',') {
@@ -127,6 +152,7 @@ pub struct I18nService {
     fallback_locale: String,
     supported_locales: Option<HashSet<String>>,
     query_param: Option<String>,
+    cookie_name: Option<String>,
     catalogs: HashMap<String, HashMap<String, String>>,
 }
 
@@ -155,6 +181,7 @@ impl I18nService {
             fallback_locale: normalize_locale(&options.fallback_locale),
             supported_locales,
             query_param: options.query_param,
+            cookie_name: options.cookie_name,
             catalogs,
         }
     }
@@ -167,7 +194,19 @@ impl I18nService {
             }
         }
 
-        // 2) Accept-Language
+        // 2) Cookie override (NestJS i18n cookie resolver)
+        if let Some(name) = self.cookie_name.as_deref() {
+            if let Some(raw) = headers
+                .get(axum::http::header::COOKIE)
+                .and_then(|v| v.to_str().ok())
+            {
+                if let Some(v) = cookie_get(raw, name) {
+                    return self.pick_supported(normalize_locale(v));
+                }
+            }
+        }
+
+        // 3) Accept-Language
         if let Some(raw) = headers
             .get(axum::http::header::ACCEPT_LANGUAGE)
             .and_then(|v| v.to_str().ok())
@@ -177,7 +216,7 @@ impl I18nService {
             }
         }
 
-        // 3) Fallback
+        // 4) Fallback
         self.fallback_locale.clone()
     }
 

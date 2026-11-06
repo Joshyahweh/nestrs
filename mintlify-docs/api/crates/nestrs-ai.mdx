@@ -1,0 +1,59 @@
+---
+title: "nestrs-ai API"
+description: "Reference for AiModule, AiService, FakeModel, generate_text / generate_object, and AgentToolRegistry."
+---
+
+Crate: [`nestrs-ai`](https://docs.rs/nestrs-ai/1.7.0) · Feature: `ai` · Guide: [AI](/ecosystem/ai)
+
+```toml
+nestrs-ai = "1.7.0"
+# or nestrs = { version = "1.7.0", features = ["ai"] }
+```
+
+## `AiModule::register`
+
+Exports `AiService`.
+
+## `AiOptions`
+
+| Field | Role |
+|-------|------|
+| `models` | `HashMap<String, Arc<dyn LanguageModel>>` — key `"default"` used when request model is `None` |
+| `defaults_timeout_ms` | Passed to resilience timeout |
+| `max_steps` | Agent loop bound |
+
+## `AiService`
+
+```rust
+pub fn new(options: AiOptions) -> Self
+pub fn with_tools(self, tools: Arc<AgentToolRegistry>) -> Self
+pub async fn generate_text(&self, req: GenerateTextRequest) -> Result<GenerateResult, AiError>
+pub async fn generate_object(&self, req: GenerateObjectRequest) -> Result<GenerateResult, AiError>
+```
+
+`GenerateResult { text, object, steps, finish_reason }`.
+
+## `LanguageModel`
+
+```rust
+async fn call(&self, request: ModelCall) -> Result<ModelResponse, AiError>
+```
+
+`ModelResponse { text, tool_calls: Vec<ToolCall> }`.
+
+## `FakeModel`
+
+```rust
+FakeModel::new(vec![Ok(json!({"text": "…"})), Ok(json!({
+  "tool_calls": [{"name": "echo", "arguments": {}}],
+  "text": ""
+}))])
+```
+
+## `AgentToolRegistry`
+
+`register(AgentFunction { name, description, handler })` · `call(name, args).await`.
+
+## `AiError`
+
+`Configuration` · `Output` (validation / tool) · `Transport` (timeout / resilience).

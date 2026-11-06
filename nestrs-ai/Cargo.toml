@@ -1,0 +1,30 @@
+[package]
+name = "nestrs-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "LLM / agent module for nestrs — NestJS @nestjs/ai parity (AI SDK-style, OpenAI-compatible)."
+keywords = ["ai", "llm", "agents", "nest"]
+categories = ["web-programming", "api-bindings"]
+
+[dependencies]
+nestrs-core = { path = "../nestrs-core", version = "1.7.0" }
+nestrs-resilience = { path = "../nestrs-resilience", version = "1.7.0" }
+axum.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+schemars = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+
+[features]
+default = []
+http = ["dep:reqwest"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

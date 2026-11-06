@@ -1,0 +1,125 @@
+---
+title: "NestJS 12 parity in nestrs"
+description: "Map NestJS 12 packages and foundation features to NestRS 1.7 — resilience, idempotency, outbox, locks, mail, webhooks, workflows, AI, errorCode, and Standard Schema."
+---
+
+NestJS 12 introduced first-party reliability, mail, webhooks, workflows, and AI packages. NestRS **1.7** mirrors that surface with Axum-native crates and umbrella features on `nestrs`. This page is the hub; each package has a dedicated ecosystem guide and an API reference page.
+
+<Note>
+**Explicit exceptions (not silent gaps):** Express/Fastify adapters (ADR-0001 Axum-only), Nest Observe SaaS / Mau deploy (open OTel instead), and `@nestjs/drizzle` until upstream publishes. See [roadmap parity](/guides/nestjs12#roadmap).
+</Note>
+
+## Install the Nest 12 surface
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = [
+  "resilience", "idempotency", "outbox", "locks",
+  "mail", "webhooks", "workflows", "ai",
+] }
+```
+
+Or depend on individual crates (`nestrs-resilience = "1.7.0"`, …) when you want a thinner dependency graph.
+
+## Package map
+
+| NestJS 12 | NestRS | Guide | API |
+|-----------|--------|-------|-----|
+| `@nestjs/resilience` | `nestrs-resilience` / `resilience` | [Resilience](/ecosystem/resilience) | [API](/api/crates/nestrs-resilience) |
+| `@nestjs/idempotency` | `nestrs-idempotency` / `idempotency` | [Idempotency](/ecosystem/idempotency) | [API](/api/crates/nestrs-idempotency) |
+| `@nestjs/outbox` | `nestrs-outbox` / `outbox` | [Outbox](/ecosystem/outbox) | [API](/api/crates/nestrs-outbox) |
+| `@nestjs/locks` | `nestrs-locks` / `locks` | [Locks](/ecosystem/locks) | [API](/api/crates/nestrs-locks) |
+| `@nestjs/mail` | `nestrs-mail` / `mail` | [Mail](/ecosystem/mail) | [API](/api/crates/nestrs-mail) |
+| `@nestjs/webhooks` | `nestrs-webhooks` / `webhooks` | [Webhooks](/ecosystem/webhooks) | [API](/api/crates/nestrs-webhooks) |
+| `@nestjs/workflows` | `nestrs-workflows` / `workflows` | [Workflows](/ecosystem/workflows) | [API](/api/crates/nestrs-workflows) |
+| `@nestjs/ai` | `nestrs-ai` / `ai` | [AI](/ecosystem/ai) | [API](/api/crates/nestrs-ai) |
+| Nest Observe SaaS | `otel` + instrument hooks | [Observability](/guides/observability) | — |
+
+## Foundation features (Wave 0)
+
+These live in core `nestrs` / `nestrs-core` / `nestrs-openapi` — no extra crate:
+
+| NestJS 12 idea | NestRS API |
+|----------------|------------|
+| `errorCode` on HTTP exceptions | `HttpException::with_error_code("WEAK_PASSWORD")` → JSON `errorCode` |
+| Standard Schema validation | `NestrsSchema` + `SchemaValidationPipe` (`Validate` + `JsonSchema`) |
+| OpenAPI DTO `$ref` auto-link | `OpenApiRouteSpec::{request_body_schema, response_schema}` |
+| Route conflict / shadow diagnostics | `RouteConflictPolicy` on `NestApplication` |
+| Richer `ExecutionContext` | `get_class` / `get_handler` / name accessors |
+| Controller-level pipes | `controller_pipes = …` on `#[routes]` |
+| Observe-style span attrs | OTel attrs `nestrs.controller` / `nestrs.handler` |
+
+```rust
+use nestrs::prelude::*;
+
+#[get("/signup")]
+async fn signup() -> Result<Json<Value>, HttpException> {
+    Err(BadRequestException::new("Password is too weak").with_error_code("WEAK_PASSWORD"))
+}
+```
+
+Response body:
+
+```json
+{
+  "statusCode": 400,
+  "message": "Password is too weak",
+  "error": "Bad Request",
+  "errorCode": "WEAK_PASSWORD"
+}
+```
+
+## Wire modules like Nest dynamic modules
+
+Every Nest 12 crate follows the same pattern as `CacheModule` / `ThrottlerModule`:
+
+1. Call `FooModule::register(options)` → `DynamicModule`
+2. Put it in `#[module(imports = [...])]`
+3. Inject the exported service (`Arc<FooService>`) into an `#[injectable]` provider
+
+```rust
+use nestrs::prelude::*;
+use std::sync::Arc;
+
+#[injectable]
+struct OrdersService {
+    resilience: Arc<nestrs::resilience::ResilienceService>,
+    mail: Arc<nestrs::mail::MailService>,
+}
+
+#[module(
+    imports = [
+        nestrs::resilience::ResilienceModule::register(
+            nestrs::resilience::ResilienceOptions::default()
+        ),
+        nestrs::mail::MailModule::register(
+            nestrs::mail::MailOptions::default()
+        ),
+    ],
+    providers = [OrdersService],
+    controllers = [OrdersController],
+)]
+struct AppModule;
+```
+
+<Warning>
+`DynamicModule` only **exports** listed `TypeId`s. NestRS 1.7 modules export their services; if you build a custom dynamic module, pass `vec![TypeId::of::<YourService>()]` to `from_parts` or importers cannot inject it.
+</Warning>
+
+## Try it in the lab
+
+```bash
+cargo run -p lab --bin lab9_nestjs12
+# optional live server on :3612
+cargo run -p lab --bin lab9_nestjs12 -- serve
+```
+
+The smoke hits `errorCode`, resilience retries, mail escaping, AI `FakeModel`, locks, outbox relay, workflows, webhooks sign/verify, and an idempotency race.
+
+## Security
+
+Threat-model notes for key scope, SSRF, poison outbox messages, and AI tool authz: [NestJS 12 security notes](/guides/nestjs12-security).
+
+## Roadmap
+
+Full matrix (including exceptions): see the mdBook [roadmap parity](https://docs.nestrs.dev) page in-repo at `docs/src/roadmap-parity.md`, or the [migration guide Nest 12 delta](/migration/from-nestjs#nestjs-12-delta).

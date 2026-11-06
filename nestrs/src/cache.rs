@@ -443,6 +443,103 @@ impl CacheModule {
     }
 }
 
+/// NestJS `CacheInterceptor` analogue — caches GET responses by path (+ optional key metadata).
+///
+/// Register the interceptor with DI-resolved [`CacheService`]. Metadata keys:
+/// - `cache_key` — override cache key (via `#[set_metadata(cache_key = "...")]`)
+/// - `cache_ttl_secs` — TTL in seconds as a decimal string
+pub struct CacheInterceptor {
+    cache: Arc<CacheService>,
+}
+
+impl CacheInterceptor {
+    pub fn new(cache: Arc<CacheService>) -> Self {
+        Self { cache }
+    }
+}
+
+impl Default for CacheInterceptor {
+    fn default() -> Self {
+        Self {
+            cache: Arc::new(
+                CacheService::from_options(CacheOptions::in_memory())
+                    .expect("in-memory cache"),
+            ),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::Interceptor for CacheInterceptor {
+    fn resolve(registry: &ProviderRegistry) -> Self
+    where
+        Self: Sized,
+    {
+        if let Some(cache) = registry.try_get::<CacheService>() {
+            Self::new(cache)
+        } else {
+            Self::default()
+        }
+    }
+
+    async fn intercept(
+        &self,
+        req: axum::extract::Request,
+        next: axum::middleware::Next,
+    ) -> axum::response::Response {
+        use axum::body::to_bytes;
+        use axum::http::Method;
+
+        if req.method() != Method::GET {
+            return next.run(req).await;
+        }
+        let path = req.uri().path().to_string();
+        let handler = crate::core::RouteRegistry::handler_for("GET", &path).unwrap_or_default();
+        let key = crate::core::MetadataRegistry::get(&handler, "cache_key")
+            .unwrap_or_else(|| format!("http:GET:{path}"));
+        let ttl = crate::core::MetadataRegistry::get(&handler, "cache_ttl_secs")
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(Duration::from_secs);
+
+        if let Some(cached) = self.cache.get_json(&key).await {
+            if let Some(body) = cached.get("body").and_then(|b| b.as_str()) {
+                let status = cached
+                    .get("status")
+                    .and_then(|s| s.as_u64())
+                    .unwrap_or(200) as u16;
+                return axum::response::Response::builder()
+                    .status(status)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .header("x-nestrs-cache", "HIT")
+                    .body(axum::body::Body::from(body.to_string()))
+                    .unwrap_or_else(|_| axum::response::Response::new(axum::body::Body::empty()));
+            }
+        }
+
+        let response = next.run(req).await;
+        if !response.status().is_success() {
+            return response;
+        }
+        let (parts, body) = response.into_parts();
+        let bytes = to_bytes(body, 1024 * 1024)
+            .await
+            .unwrap_or_default();
+        let body_str = String::from_utf8_lossy(&bytes).into_owned();
+        let _ = self
+            .cache
+            .set(
+                &key,
+                &serde_json::json!({
+                    "status": parts.status.as_u16(),
+                    "body": body_str,
+                }),
+                ttl,
+            )
+            .await;
+        axum::response::Response::from_parts(parts, axum::body::Body::from(bytes))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

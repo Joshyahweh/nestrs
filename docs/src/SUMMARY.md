@@ -19,6 +19,8 @@
 - [Production runbook](production.md)
 - [OpenAPI & HTTP (schemas, security)](openapi-http.md)
 - [Security](security.md)
+- [NestJS 12 parity](nestjs12.md)
+- [NestJS 12 security notes](nestjs12-security.md)
 - [Secure defaults checklist](secure-defaults.md)
 - [HTTP pipeline order](http-pipeline-order.md)
 - [Contributing](contributing.md)

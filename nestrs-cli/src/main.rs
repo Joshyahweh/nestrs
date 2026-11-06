@@ -133,7 +133,7 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
 
     let kind = args[0].as_str();
     let name = match kind {
-        "app" | "lib" | "resource" => {
+        "app" | "lib" | "resource" | "workspace" => {
             if args.len() < 2 {
                 return Err(format!("expected `nestrs-cli new {kind} <name> ...`"));
             }
@@ -149,7 +149,7 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
     let mut package_manager = String::from("cargo");
 
     let mut i = match kind {
-        "app" | "lib" | "resource" => 2usize,
+        "app" | "lib" | "resource" | "workspace" => 2usize,
         _ => 1usize,
     };
     while i < args.len() {
@@ -178,8 +178,58 @@ fn create_new_project(args: &[String]) -> Result<(), String> {
         "app" => create_new_app(&name, no_git, strict)?,
         "lib" => create_new_lib(&name, no_git, strict)?,
         "resource" => create_new_resource(&name, no_git)?,
+        "workspace" => create_new_workspace(&name, no_git, strict)?,
         _ => create_new_app(&name, no_git, strict)?,
     }
+    Ok(())
+}
+
+/// NestJS monorepo analogue — Cargo workspace with `apps/api` + `crates/shared`.
+fn create_new_workspace(name: &str, no_git: bool, strict: bool) -> Result<(), String> {
+    let root = PathBuf::from(name);
+    if root.exists() {
+        return Err(format!("target path already exists: {}", root.display()));
+    }
+    fs::create_dir_all(root.join("apps/api/src")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(root.join("crates/shared/src")).map_err(|e| e.to_string())?;
+
+    let workspace_toml = format!(
+        "[workspace]\nmembers = [\"apps/api\", \"crates/shared\"]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+    );
+    fs::write(root.join("Cargo.toml"), workspace_toml).map_err(|e| e.to_string())?;
+
+    let shared_toml = "[package]\nname = \"shared\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nserde = { version = \"1\", features = [\"derive\"] }\n";
+    fs::write(root.join("crates/shared/Cargo.toml"), shared_toml).map_err(|e| e.to_string())?;
+    fs::write(
+        root.join("crates/shared/src/lib.rs"),
+        "//! Shared types for the workspace.\n\npub fn ping() -> &'static str { \"pong\" }\n",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let api_toml = "[package]\nname = \"api\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nnestrs = \"1\"\nshared = { path = \"../../crates/shared\" }\ntokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n";
+    fs::write(root.join("apps/api/Cargo.toml"), api_toml).map_err(|e| e.to_string())?;
+    let deny = if strict {
+        "#![deny(unsafe_code)]\n\n"
+    } else {
+        ""
+    };
+    let main_rs = format!(
+        "{deny}use nestrs::prelude::*;\n\n#[controller(prefix = \"/\")]\npub struct AppController;\n\nimpl AppController {{\n    #[get(\"/\")]\n    pub async fn root() -> &'static str {{\n        shared::ping()\n    }}\n}}\n\n#[derive(Default)]\n#[injectable]\npub struct AppService;\n\nimpl_routes!(AppController, state AppService => [\n    GET \"/\" with () => AppController::root,\n]);\n\n#[module(controllers = [AppController], providers = [AppService])]\npub struct AppModule;\n\n#[tokio::main]\nasync fn main() {{\n    NestFactory::create::<AppModule>()\n        .enable_health_check(\"/health\")\n        .listen_graceful(3000)\n        .await;\n}}\n"
+    );
+    fs::write(root.join("apps/api/src/main.rs"), main_rs).map_err(|e| e.to_string())?;
+    fs::write(
+        root.join("README.md"),
+        format!("# {name}\n\nCargo workspace scaffolded by `nestrs-cli new workspace` (NestJS monorepo analogue).\n\n```bash\ncargo run -p api\n```\n"),
+    )
+    .map_err(|e| e.to_string())?;
+
+    if !no_git {
+        let _ = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&root)
+            .status();
+    }
+    println!("created workspace `{name}` (apps/api + crates/shared)");
     Ok(())
 }
 

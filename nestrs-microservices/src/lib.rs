@@ -426,11 +426,37 @@ where
 #[derive(Clone)]
 pub struct ClientProxy {
     transport: Arc<dyn Transport>,
+    connected: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ClientProxy {
     pub fn new(transport: Arc<dyn Transport>) -> Self {
-        Self { transport }
+        Self {
+            transport,
+            connected: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        }
+    }
+
+    /// NestJS 11 `ClientProxy.status` analogue — whether the client is considered connected.
+    pub fn status(&self) -> bool {
+        self.connected.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// NestJS 11 `ClientProxy.unwrap` analogue — access the underlying transport.
+    pub fn unwrap_transport(&self) -> Arc<dyn Transport> {
+        self.transport.clone()
+    }
+
+    /// NestJS 11 `ClientProxy.on` analogue — subscribe to transport lifecycle labels
+    /// (`"connect"` / `"disconnect"` / `"error"`). Currently records intent for observability;
+    /// transports that emit events can hook this later.
+    pub fn on(&self, event: &str, _handler: impl Fn(&str) + Send + Sync + 'static) {
+        tracing::debug!(target: "nestrs_microservices::client", event, "client proxy on()");
+    }
+
+    pub fn mark_disconnected(&self) {
+        self.connected
+            .store(false, std::sync::atomic::Ordering::Release);
     }
 
     pub async fn send<TReq, TRes>(

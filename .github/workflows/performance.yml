@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "nestrs/**"
+      - "nestrs-resilience/**"
       - "scripts/**"
       - "PRODUCTION_RUNBOOK.md"
       - ".github/workflows/performance.yml"
@@ -38,6 +39,11 @@ jobs:
 
       - name: Compile benchmark targets
         run: cargo check -p nestrs --benches
+
+      - name: Resilience policy overhead smoke gate
+        run: |
+          chmod +x scripts/ci/resilience_overhead.sh
+          scripts/ci/resilience_overhead.sh
 
       - name: Run stabilized benchmark suite + gate
         run: |

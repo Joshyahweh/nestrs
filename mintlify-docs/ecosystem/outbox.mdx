@@ -1,0 +1,78 @@
+---
+title: "Outbox — `nestrs-outbox`"
+description: "Transactional outbox, relay, retries, and DLQ — NestJS @nestjs/outbox analogue for NestRS."
+---
+
+`nestrs-outbox` implements the transactional outbox pattern: enqueue messages in the same logical unit of work as business writes, then relay them asynchronously with retries and a dead-letter queue.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = ["outbox"] }
+```
+
+## Register
+
+```rust
+use nestrs::outbox::{OutboxModule, OutboxOptions, OutboxRelay};
+use std::sync::Arc;
+
+#[module(
+    imports = [OutboxModule::register(OutboxOptions::default())],
+    providers = [OrdersService],
+)]
+struct AppModule;
+
+#[injectable]
+struct OrdersService {
+    outbox: Arc<OutboxRelay>,
+}
+```
+
+## Enqueue and relay
+
+```rust
+use nestrs::outbox::PublishFn;
+use serde_json::json;
+use std::sync::Arc;
+
+async fn after_commit(relay: Arc<OutboxRelay>) {
+    relay.add("order.created", json!({ "id": 1 })).await;
+
+    let publish: PublishFn = Arc::new(|topic, payload| {
+        Box::pin(async move {
+            // HTTP / NATS / queue publish
+            println!("{topic}: {payload}");
+            Ok(())
+        })
+    });
+
+    relay.tick(&publish).await; // claim batch, publish, mark or DLQ
+}
+```
+
+### Options
+
+| Field | Default | Role |
+|-------|---------|------|
+| `store` | in-memory | `Arc<dyn OutboxStore>` |
+| `max_attempts` | `10` | Then dead-letter |
+| `batch_size` | `32` | Per `tick` |
+| `poll_interval` | `1s` | Hint for background loopers |
+| `allow_in_memory` | `true` | Set `false` in production once durable store is wired |
+
+## Status flow
+
+`Pending` → claimed → `Published` on success → `Retry` on failure → `DeadLetter` after `max_attempts`.
+
+List poison messages via your store’s dead-letter API and alert on growth.
+
+## With webhooks
+
+`nestrs-webhooks` can take an `Arc<OutboxRelay>` so outbound signed deliveries are durable. See [Webhooks](/ecosystem/webhooks).
+
+## See also
+
+- [Security notes](/guides/nestjs12-security#outbox-nestrs-outbox)
+- [API reference](/api/crates/nestrs-outbox)

@@ -28,6 +28,14 @@ members = [
   "nestrs-saml",
   "nestrs-ldap",
   "nestrs-sea-orm",
+  "nestrs-resilience",
+  "nestrs-idempotency",
+  "nestrs-outbox",
+  "nestrs-locks",
+  "nestrs-mail",
+  "nestrs-webhooks",
+  "nestrs-workflows",
+  "nestrs-ai",
   # nestrs-drizzle excluded from the workspace until upstream `drizzle-orm 0.36`
   # is published on crates.io. The crate directory stays on disk for re-introduction
   # once that dep resolves; see CHANGELOG and project-memory for the carve-out.
@@ -39,7 +47,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "1.6.0"
+version = "1.7.0"
 rust-version = "1.89"
 repository = "https://github.com/Joshyahweh/nestrs"
 # `homepage`, `documentation`, `readme`, and `description` are deliberately

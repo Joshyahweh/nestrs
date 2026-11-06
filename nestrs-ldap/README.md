@@ -3,7 +3,7 @@
 LDAP simple-bind adapter (NestJS `passport-ldap` analogue).
 
 ```toml
-nestrs-ldap = "1.6.0"
+nestrs-ldap = "1.7.0"
 ```
 
 ```rust,ignore

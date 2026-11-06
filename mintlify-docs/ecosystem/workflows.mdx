@@ -1,0 +1,76 @@
+---
+title: "Workflows — `nestrs-workflows`"
+description: "Durable multi-step workflows with resume-after-restart and human approval — NestJS @nestjs/workflows analogue."
+---
+
+`nestrs-workflows` stores workflow instances in a pluggable store so steps survive process restart. Pair with [locks](/ecosystem/locks) for single-runner steppers and [outbox](/ecosystem/outbox) for side effects.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = ["workflows"] } # pulls outbox + locks
+```
+
+## Lifecycle
+
+```rust
+use nestrs::workflows::{WorkflowsModule, WorkflowsOptions, WorkflowsService, WorkflowStatus};
+use serde_json::json;
+use std::sync::Arc;
+
+#[injectable]
+struct Orders {
+    wf: Arc<WorkflowsService>,
+}
+
+impl Orders {
+    async fn start_order(&self) -> String {
+        let inst = self.wf.start("order", json!({ "id": 1 })).await;
+        self.wf
+            .complete_step(&inst.id, "charge", json!({ "ok": true }))
+            .await
+            .unwrap();
+        self.wf.wait_for_approval(&inst.id).await.unwrap();
+        // … later, after human action …
+        self.wf.approve(&inst.id).await.unwrap();
+        inst.id
+    }
+
+    async fn resume_after_restart(&self, id: &str) {
+        let loaded = self.wf.get(id).await.expect("persisted");
+        assert!(loaded.steps.contains_key("charge"));
+        assert_eq!(loaded.status, WorkflowStatus::WaitingApproval);
+    }
+}
+```
+
+### Statuses
+
+| Status | Meaning |
+|--------|---------|
+| `Running` | Active |
+| `WaitingApproval` | Parked until `approve` |
+| completed / failed | Terminal (store-defined) |
+
+## Module registration
+
+```rust
+#[module(
+    imports = [WorkflowsModule::register(WorkflowsOptions::default())],
+    providers = [Orders],
+)]
+struct AppModule;
+```
+
+Default store is in-memory (`InMemoryWorkflowStore::shared()`). Swap the store for a durable DB adapter in production.
+
+## Security
+
+Treat approval / resume tokens as capability secrets — do not log them. See [security notes](/guides/nestjs12-security#locks--workflows-nestrs-locks-nestrs-workflows).
+
+## See also
+
+- [Locks](/ecosystem/locks)
+- [API reference](/api/crates/nestrs-workflows)
+- Lab smoke: `POST /lab/n12/workflows`

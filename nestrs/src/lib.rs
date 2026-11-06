@@ -174,7 +174,7 @@ pub use authn::{
 };
 #[cfg(feature = "cache-redis")]
 pub use cache::RedisCacheOptions;
-pub use cache::{CacheError, CacheModule, CacheOptions, CacheService};
+pub use cache::{CacheError, CacheInterceptor, CacheModule, CacheOptions, CacheService};
 pub use client_ip::{ClientIp, ClientIpMissing};
 #[cfg(feature = "config-hot-reload")]
 pub use config::ConfigWatcher;
@@ -234,7 +234,9 @@ pub use oauth2_bridge::{
 pub use opentelemetry;
 #[cfg(feature = "otel")]
 pub use otel::{OpenTelemetryConfig, OtlpProtocol};
+pub use pipes::NestrsSchema;
 pub use pipes::ParseIntPipe;
+pub use pipes::SchemaValidationPipe;
 pub use pipes::TrimPipe;
 pub use pipes::ValidationPipe;
 #[cfg(feature = "authz")]
@@ -261,6 +263,22 @@ pub use session_store::RedisSessionStore;
 pub use nestrs_macros::crud;
 #[cfg(feature = "sea-orm")]
 pub use nestrs_sea_orm as sea_orm;
+#[cfg(feature = "resilience")]
+pub use nestrs_resilience as resilience;
+#[cfg(feature = "idempotency")]
+pub use nestrs_idempotency as idempotency;
+#[cfg(feature = "outbox")]
+pub use nestrs_outbox as outbox;
+#[cfg(feature = "locks")]
+pub use nestrs_locks as locks;
+#[cfg(feature = "mail")]
+pub use nestrs_mail as mail;
+#[cfg(feature = "webhooks")]
+pub use nestrs_webhooks as webhooks;
+#[cfg(feature = "workflows")]
+pub use nestrs_workflows as workflows;
+#[cfg(feature = "ai")]
+pub use nestrs_ai as ai;
 #[cfg(feature = "authz-row-level")]
 pub use predicates::{
     AuthorIsCurrentUser, BelongsToUser, HasRole, NotDeleted, OwnerOrAdmin, PublicOrOwner,
@@ -410,8 +428,9 @@ pub mod prelude {
         HttpExecutionContext, I18n, I18nMissing, I18nModule, I18nOptions, I18nService, Interceptor,
         InternalServerErrorException, Locale, LoggingInterceptor, MethodNotAllowedException,
         MiddlewareConsumer, NestApiVersion, NestApplication, NestConfig, NestDto, NestFactory,
-        NotAcceptableException, NotFoundException, NotImplementedException, ParseIntPipe,
-        PathNormalization, PayloadTooLargeException, PaymentRequiredException, PipedBody1,
+        NestrsSchema, NotAcceptableException, NotFoundException, NotImplementedException,
+        ParseIntPipe, PathNormalization, PayloadTooLargeException, PaymentRequiredException,
+        PipedBody1, SchemaValidationPipe,
         PipedBody2, PipedBody3, PipedBody4, PipedPath1, PipedPath2, PipedPath3, PipedPath4,
         PipedQuery1, PipedQuery2, PipedQuery3, PipedQuery4, ProblemDetails, RateLimitOptions,
         RawBody, ReadinessContext, RequestContext, RequestContextMissing, RequestScoped,
@@ -420,6 +439,7 @@ pub mod prelude {
         TooManyRequestsException, TracingConfig, TracingFormat, TrimPipe, TypedConfigModule,
         UnauthorizedException, UnprocessableEntityException, UnsupportedMediaTypeException,
         ValidatedBody, ValidatedPath, ValidatedQuery, ValidationPipe, VersioningType,
+        RouteConflictAction, RouteConflictPolicy,
     };
     #[cfg(feature = "authn")]
     pub use crate::{
@@ -1094,6 +1114,34 @@ pub struct NestApplication {
     /// When true, [`Self::listen`] / [`Self::into_router`] refuse to start if any
     /// application route lacks `#[public]` or `#[use_guards]` posture metadata.
     require_route_posture: bool,
+    /// NestJS 12 `routeConflictPolicy` analogue (duplicate / shadow diagnostics).
+    route_conflict_policy: Option<RouteConflictPolicy>,
+}
+
+/// NestJS 12 route conflict diagnostics (applied at router build).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteConflictPolicy {
+    /// How to treat exact duplicate `(method, path)` registrations.
+    pub duplicate: RouteConflictAction,
+    /// How to treat static routes shadowed by earlier param routes.
+    pub shadow: RouteConflictAction,
+}
+
+impl Default for RouteConflictPolicy {
+    fn default() -> Self {
+        Self {
+            duplicate: RouteConflictAction::Error,
+            shadow: RouteConflictAction::Warn,
+        }
+    }
+}
+
+/// Action taken when a route conflict is detected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteConflictAction {
+    Ignore,
+    Warn,
+    Error,
 }
 
 type GlobalLayerFn = Box<dyn Fn(axum::Router) -> axum::Router + Send + Sync + 'static>;
@@ -1156,6 +1204,7 @@ impl NestApplication {
             #[cfg(feature = "csrf")]
             csrf: None,
             require_route_posture: false,
+            route_conflict_policy: None,
         }
     }
 }
@@ -1884,6 +1933,12 @@ impl NestApplication {
     ///
     /// Panics from [`Self::into_router`] / [`Self::listen`] with a message
     /// listing unguarded routes — prefer fixing the routes over catching.
+    /// Enable NestJS 12-style route conflict diagnostics at router build.
+    pub fn route_conflict_policy(mut self, policy: RouteConflictPolicy) -> Self {
+        self.route_conflict_policy = Some(policy);
+        self
+    }
+
     pub fn require_route_posture(mut self) -> Self {
         self.require_route_posture = true;
         self
@@ -1894,6 +1949,26 @@ impl NestApplication {
         let excludes = self.posture_exclude_prefixes();
         let refs: Vec<&str> = excludes.iter().map(String::as_str).collect();
         crate::assert_route_posture(&refs)
+    }
+
+    fn apply_route_conflict_policy(policy: RouteConflictPolicy) {
+        use crate::core::{RouteConflictKind, RouteRegistry};
+        let report = RouteRegistry::conflict_report();
+        for c in report.duplicates.iter().chain(report.shadows.iter()) {
+            let action = match c.kind {
+                RouteConflictKind::Duplicate => policy.duplicate,
+                RouteConflictKind::Shadow => policy.shadow,
+            };
+            let msg = format!(
+                "route conflict ({:?}): {} {} — {} vs {}",
+                c.kind, c.method, c.path, c.first_handler, c.second_handler
+            );
+            match action {
+                RouteConflictAction::Ignore => {}
+                RouteConflictAction::Warn => tracing::warn!("{msg}"),
+                RouteConflictAction::Error => panic!("nestrs route conflict: {msg}"),
+            }
+        }
     }
 
     fn posture_exclude_prefixes(&self) -> Vec<String> {
@@ -2139,6 +2214,9 @@ impl NestApplication {
 
     fn build_router(self) -> axum::Router {
         Self::log_security_footguns(&self);
+        if let Some(policy) = self.route_conflict_policy {
+            Self::apply_route_conflict_policy(policy);
+        }
         if self.require_route_posture {
             if let Err(e) = self.assert_route_posture() {
                 panic!("nestrs route posture check failed: {e}");
@@ -3114,10 +3192,21 @@ async fn request_tracing_middleware(
 
     // Span name aligns with OpenTelemetry HTTP server conventions; `http.route` uses the matched path
     // (Axum template not available here — literal path documents the request line in traces).
+    // NestJS Observe alternative: name spans with controller/handler when registered.
+    let handler = crate::core::RouteRegistry::handler_for(&method, &path);
+    let (controller_attr, handler_attr) = match handler.as_deref() {
+        Some(h) => {
+            let controller = h.rsplit_once("::").map(|(c, _)| c).unwrap_or(h);
+            (controller.to_string(), h.to_string())
+        }
+        None => (String::new(), String::new()),
+    };
     let span = tracing::info_span!(
         "http.server.request",
         http.request.method = %method,
         http.route = %path,
+        nestrs.controller = %controller_attr,
+        nestrs.handler = %handler_attr,
     );
 
     async move {
@@ -3610,6 +3699,9 @@ pub struct HttpException {
     /// `Result<T, HttpException>` everywhere, and a large error variant trips
     /// `clippy::result_large_err` (>= 128 bytes) under `-D warnings`.
     pub details: Option<Box<serde_json::Value>>,
+    /// NestJS 12-style machine-readable `errorCode` for clients that branch
+    /// on a stable identifier instead of parsing `message` strings.
+    pub error_code: Option<String>,
 }
 
 impl std::fmt::Display for HttpException {
@@ -3631,11 +3723,18 @@ impl HttpException {
             message: message.into(),
             error: error.into(),
             details: None,
+            error_code: None,
         }
     }
 
     pub fn with_details(mut self, details: impl Into<Box<serde_json::Value>>) -> Self {
         self.details = Some(details.into());
+        self
+    }
+
+    /// Attach a stable machine-readable code (serialized as `errorCode`).
+    pub fn with_error_code(mut self, code: impl Into<String>) -> Self {
+        self.error_code = Some(code.into());
         self
     }
 }
@@ -3770,6 +3869,9 @@ impl axum::response::IntoResponse for HttpException {
             "message": &self.message,
             "error": &self.error,
         });
+        if let Some(ref code) = self.error_code {
+            payload["errorCode"] = serde_json::Value::String(code.clone());
+        }
         if let Some(ref details) = self.details {
             payload["errors"] = (**details).clone();
         }
@@ -4853,7 +4955,7 @@ where
 }
 
 /// Builds a leaked [`crate::core::OpenApiRouteSpec`] for [`impl_routes!`] / route registration.
-/// Returns [`None`] when there is nothing to attach (no summary, tag, or responses).
+/// Returns [`None`] when there is nothing to attach (no summary, tag, responses, or schema links).
 /// If summary or tag is set but `responses` is empty, defaults to a single **200** `"OK"` response.
 #[doc(hidden)]
 pub fn __nestrs_openapi_spec_leaked(
@@ -4861,7 +4963,25 @@ pub fn __nestrs_openapi_spec_leaked(
     tag: Option<&'static str>,
     responses: &[(u16, &'static str)],
 ) -> Option<&'static crate::core::OpenApiRouteSpec> {
-    if summary.is_none() && tag.is_none() && responses.is_empty() {
+    __nestrs_openapi_spec_leaked_with_schemas(summary, tag, responses, None, None)
+}
+
+/// Like [`__nestrs_openapi_spec_leaked`] with optional request/response schema `$ref` names
+/// (NestJS 12 Standard Schema → OpenAPI auto-link analogue).
+#[doc(hidden)]
+pub fn __nestrs_openapi_spec_leaked_with_schemas(
+    summary: Option<&'static str>,
+    tag: Option<&'static str>,
+    responses: &[(u16, &'static str)],
+    request_body_schema: Option<&'static str>,
+    response_schema: Option<&'static str>,
+) -> Option<&'static crate::core::OpenApiRouteSpec> {
+    if summary.is_none()
+        && tag.is_none()
+        && responses.is_empty()
+        && request_body_schema.is_none()
+        && response_schema.is_none()
+    {
         return None;
     }
     let responses_sl: &'static [crate::core::OpenApiResponseDesc] = if responses.is_empty() {
@@ -4883,6 +5003,8 @@ pub fn __nestrs_openapi_spec_leaked(
         summary,
         tag,
         responses: responses_sl,
+        request_body_schema,
+        response_schema,
     }));
     Some(spec)
 }

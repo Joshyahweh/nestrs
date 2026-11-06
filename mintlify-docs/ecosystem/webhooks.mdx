@@ -1,0 +1,91 @@
+---
+title: "Webhooks — `nestrs-webhooks`"
+description: "Standard Webhooks signing, verification, and outbox-backed outbound delivery — NestJS @nestjs/webhooks analogue."
+---
+
+`nestrs-webhooks` implements [Standard Webhooks](https://www.standardwebhooks.com/) signing and verification, plus optional durable outbound dispatch through `nestrs-outbox`.
+
+## Install
+
+```toml
+[dependencies]
+nestrs = { version = "1.7.0", features = ["webhooks"] } # implies outbox
+```
+
+## Sign and verify
+
+```rust
+use nestrs::webhooks::{WebhooksModule, WebhooksOptions, WebhooksService};
+use std::sync::Arc;
+
+#[module(
+    imports = [WebhooksModule::register(WebhooksOptions::new("whsec_…"))],
+    providers = [Hooks],
+)]
+struct AppModule;
+
+#[injectable]
+struct Hooks {
+    webhooks: Arc<WebhooksService>,
+}
+
+impl Hooks {
+    fn outbound(&self, body: &[u8]) -> String {
+        let signed = self.webhooks.sign("msg_123", 1_700_000_000, body);
+        signed.signature_header
+    }
+
+    fn inbound(&self, msg_id: &str, ts: &str, sig: &str, raw: &[u8]) {
+        self.webhooks.verify(msg_id, ts, sig, raw).expect("valid");
+    }
+}
+```
+
+<Warning>
+Verify on the **raw body** before JSON parsing. Parsed-then-re-serialized bodies break signatures.
+</Warning>
+
+## Outbox-backed dispatch
+
+```rust
+use nestrs::outbox::OutboxRelay;
+use nestrs::webhooks::{WebhooksOptions, WebhooksService};
+use serde_json::json;
+use std::sync::Arc;
+
+let outbox: Arc<OutboxRelay> = /* from OutboxModule */;
+let hooks = WebhooksService::new("whsec_…", Some(outbox));
+hooks
+    .dispatch("invoice.paid", "https://partner.example/hooks", json!({ "id": 1 }))
+    .await
+    .unwrap();
+```
+
+Your relay `PublishFn` should HTTP POST with Standard Webhooks headers from `sign`.
+
+## Free functions
+
+```rust
+use nestrs::webhooks::{sign_standard_webhook, verify_standard_webhook};
+
+let signed = sign_standard_webhook("whsec_…", "msg_1", 1_700_000_000, body);
+verify_standard_webhook(
+    "whsec_…",
+    "msg_1",
+    &ts.to_string(),
+    &signed.signature_header,
+    body,
+)?;
+```
+
+## Security
+
+- Prefer `whsec_`-encoded secrets; never log them.
+- Allowlist outbound URLs (SSRF).
+- Property tests live in `nestrs-webhooks/tests/sign_verify_prop.rs`.
+
+## See also
+
+- [Outbox](/ecosystem/outbox)
+- [Security notes](/guides/nestjs12-security#webhooks-nestrs-webhooks)
+- [API reference](/api/crates/nestrs-webhooks)

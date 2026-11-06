@@ -2411,7 +2411,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-app"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs",
@@ -2540,6 +2540,12 @@ checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
 dependencies = [
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "html-escape"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9356095b4b41197bba32173600e1582792cda618f65d12f68e2e77d273413c5"
 
 [[package]]
 name = "http"
@@ -3090,7 +3096,7 @@ dependencies = [
 
 [[package]]
 name = "lab"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-graphql",
  "async-trait",
@@ -3105,6 +3111,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+ "tower 0.5.3",
  "tower-cookies",
  "validator",
 ]
@@ -3760,7 +3767,7 @@ checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "nestrs"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "argon2",
  "async-graphql",
@@ -3783,19 +3790,27 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "minijinja",
+ "nestrs-ai",
  "nestrs-core",
  "nestrs-events",
  "nestrs-graphql",
  "nestrs-health",
  "nestrs-http",
+ "nestrs-idempotency",
+ "nestrs-locks",
  "nestrs-macros",
+ "nestrs-mail",
  "nestrs-microservices",
  "nestrs-mongodb",
  "nestrs-oauth2",
  "nestrs-openapi",
+ "nestrs-outbox",
+ "nestrs-resilience",
  "nestrs-sea-orm",
  "nestrs-security",
  "nestrs-throttle",
+ "nestrs-webhooks",
+ "nestrs-workflows",
  "nestrs-ws",
  "notify",
  "opentelemetry",
@@ -3832,8 +3847,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-ai"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "nestrs-core",
+ "nestrs-resilience",
+ "reqwest 0.12.28",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nestrs-auth-strategy"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3845,7 +3876,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-better-auth"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3855,7 +3886,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-bullmq"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "redis",
  "serde",
@@ -3866,7 +3897,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-core"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3880,7 +3911,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-cqrs"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -3890,7 +3921,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-events"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "nestrs-core",
@@ -3900,7 +3931,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-graphql"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-graphql",
  "async-graphql-derive",
@@ -3913,7 +3944,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-health"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -3930,7 +3961,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-http"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "nestrs-core",
@@ -3939,8 +3970,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-idempotency"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "bytes",
+ "http-body-util",
+ "nestrs-core",
+ "redis",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nestrs-lambda"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.7.9",
  "lambda_http",
@@ -3949,7 +3996,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-ldap"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "ldap3",
  "thiserror 1.0.69",
@@ -3957,8 +4004,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-locks"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "nestrs-core",
+ "redis",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nestrs-macros"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -3969,8 +4030,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-mail"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "html-escape",
+ "nestrs-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nestrs-mcp"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -4001,7 +4077,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-microservices"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -4034,7 +4110,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-mongodb"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.7.9",
  "bson",
@@ -4048,7 +4124,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-oauth2"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -4081,7 +4157,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-oauth2-macros"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4090,7 +4166,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-openapi"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -4099,8 +4175,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-outbox"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "nestrs-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nestrs-prisma"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -4116,8 +4206,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-resilience"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "criterion",
+ "futures-util",
+ "nestrs-core",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
 name = "nestrs-saml"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "url",
  "uuid",
@@ -4125,7 +4232,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-scaffold"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "nestrs-mcp",
  "regex",
@@ -4137,7 +4244,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-sea-orm"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.7.9",
  "nestrs-core",
@@ -4152,7 +4259,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-security"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -4167,7 +4274,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-socketio"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.7.9",
  "socketioxide",
@@ -4176,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-storage"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4194,7 +4301,7 @@ dependencies = [
 
 [[package]]
 name = "nestrs-throttle"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -4207,8 +4314,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestrs-webhooks"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "base64 0.22.1",
+ "hex",
+ "hmac 0.12.1",
+ "nestrs-core",
+ "nestrs-outbox",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "nestrs-workflows"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "axum 0.7.9",
+ "nestrs-core",
+ "nestrs-locks",
+ "nestrs-outbox",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nestrs-ws"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",

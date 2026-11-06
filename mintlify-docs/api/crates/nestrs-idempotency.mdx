@@ -1,0 +1,47 @@
+---
+title: "nestrs-idempotency API"
+description: "Reference for IdempotencyModule, IdempotencyOptions, IdempotencyStore, and idempotency_middleware."
+---
+
+Crate: [`nestrs-idempotency`](https://docs.rs/nestrs-idempotency/1.7.0) · Feature: `idempotency` · Guide: [Idempotency](/ecosystem/idempotency)
+
+```toml
+nestrs-idempotency = "1.7.0"
+```
+
+## `IdempotencyModule::register`
+
+Exports `IdempotencyOptions` (`TypeId`).
+
+## `IdempotencyOptions`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `store` | `SharedIdempotencyStore` | Memory or Redis |
+| `header_name` | `String` | Default `idempotency-key` |
+| `required` | `bool` | Missing key → 400 |
+| `scope` | `Option<String>` | Prefixed into store key |
+
+Helpers: `IdempotencyOptions::default()`, `::in_memory(ttl)`.
+
+## `idempotency_middleware`
+
+```rust
+pub async fn idempotency_middleware(
+    State(opts): State<Arc<IdempotencyOptions>>,
+    req: Request,
+    next: Next,
+) -> Response
+```
+
+Replay header: `idempotency-replayed: true`. In-flight: **409** `IDEMPOTENCY_IN_FLIGHT`.
+
+## `IdempotencyStore`
+
+```rust
+async fn begin_or_get(&self, scope_key: &str)
+    -> Result<Option<IdempotencyRecord>, IdempotencyBusy>;
+async fn complete(&self, scope_key: &str, record: IdempotencyRecord);
+```
+
+`IdempotencyRecord { status, body, content_type }`.

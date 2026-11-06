@@ -29,6 +29,8 @@ mod transport;
 
 pub use module::MailModule;
 pub use options::{MailMessage, MailOptions};
+#[cfg(feature = "http")]
+pub use transport::HttpMailTransport;
 pub use transport::{InMemoryMailTransport, MailTransport, SharedMailTransport};
 
 pub use nestrs_core::{DynamicModule, Injectable, ProviderRegistry};

@@ -3,7 +3,7 @@
 //!
 //! Persist steps via [`WorkflowsService::complete_step`]; park with
 //! [`WorkflowsService::wait_for_approval`] and continue with [`WorkflowsService::approve`].
-//! Combine with [`nestrs_locks`] for single-runner steppers and [`nestrs_outbox`] for
+//! Combine with `nestrs-locks` for single-runner steppers and `nestrs-outbox` for
 //! side effects.
 //!
 //! Umbrella feature: `nestrs` / `workflows` → `nestrs::workflows`.

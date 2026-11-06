@@ -193,9 +193,7 @@ fn create_new_workspace(name: &str, no_git: bool, strict: bool) -> Result<(), St
     fs::create_dir_all(root.join("apps/api/src")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("crates/shared/src")).map_err(|e| e.to_string())?;
 
-    let workspace_toml = format!(
-        "[workspace]\nmembers = [\"apps/api\", \"crates/shared\"]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2021\"\n"
-    );
+    let workspace_toml = "[workspace]\nmembers = [\"apps/api\", \"crates/shared\"]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2021\"\n";
     fs::write(root.join("Cargo.toml"), workspace_toml).map_err(|e| e.to_string())?;
 
     let shared_toml = "[package]\nname = \"shared\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nserde = { version = \"1\", features = [\"derive\"] }\n";

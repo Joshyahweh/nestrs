@@ -160,25 +160,32 @@ async fn database_indicator_reports_ping_outcome() {
 #[tokio::test]
 async fn http_indicator_up_and_down_paths() {
     use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    // A one-shot HTTP server on an ephemeral port.
+    // Tiny HTTP/1.1 server: read the request, then reply 200. Reading first
+    // avoids races with clients that expect a complete request/response cycle.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
-        let Ok((sock, _)) = listener.accept().await else {
+        let Ok((mut sock, _)) = listener.accept().await else {
             return;
         };
-        let mut sock = sock;
-        use tokio::io::AsyncWriteExt;
+        let mut buf = [0u8; 1024];
+        let _ = sock.read(&mut buf).await;
         let _ = sock
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .await;
+        let _ = sock.shutdown().await;
     });
 
     let up = nestrs::HttpIndicator::new(format!("http://{addr}/health"), Duration::from_secs(2));
-    assert!(matches!(up.check().await, nestrs::HealthStatus::Up));
+    let up_status = up.check().await;
+    assert!(
+        matches!(up_status, nestrs::HealthStatus::Up),
+        "expected Up, got {up_status:?}"
+    );
 
     // Nothing listening on the handshake port of a second bind-free addr —
     // point at an unroutable loopback port instead.

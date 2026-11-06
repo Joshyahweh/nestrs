@@ -12,10 +12,6 @@ impl AiModule {
         let mut registry = ProviderRegistry::new();
         let service = Arc::new(AiService::new(options));
         registry.register_use_value::<AiService>(service);
-        DynamicModule::from_parts(
-            registry,
-            Router::new(),
-            vec![TypeId::of::<AiService>()],
-        )
+        DynamicModule::from_parts(registry, Router::new(), vec![TypeId::of::<AiService>()])
     }
 }

@@ -12,10 +12,6 @@ impl MailModule {
         let mut registry = ProviderRegistry::new();
         let service = Arc::new(MailService::from_options(&options));
         registry.register_use_value::<MailService>(service);
-        DynamicModule::from_parts(
-            registry,
-            Router::new(),
-            vec![TypeId::of::<MailService>()],
-        )
+        DynamicModule::from_parts(registry, Router::new(), vec![TypeId::of::<MailService>()])
     }
 }

@@ -19,4 +19,4 @@ nestrs-idempotency = "1.7.0"
 - Mintlify guide: [Idempotency](https://docs.nestrs.dev/ecosystem/idempotency) (path: `mintlify-docs/ecosystem/idempotency.mdx`)
 - API: `mintlify-docs/api/crates/nestrs-idempotency.mdx`
 - rustdoc: <https://docs.rs/nestrs-idempotency/1.7.0>
-- Security: `docs/src/nestjs12-security.md`
+- Security: `docs/src/reliability-security.md`

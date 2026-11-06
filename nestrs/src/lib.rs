@@ -256,29 +256,29 @@ pub use session_store::RedisSessionStore;
 // NOTE: `policies::Principal` is deliberately NOT root-exported — the authn
 // extractor newtype `nestrs::Principal` owns that name. Use the
 // module-qualified path `nestrs::policies::Principal`.
+#[cfg(feature = "ai")]
+pub use nestrs_ai as ai;
+#[cfg(feature = "idempotency")]
+pub use nestrs_idempotency as idempotency;
+#[cfg(feature = "locks")]
+pub use nestrs_locks as locks;
 /// `#[nestrs::crud]` proc-macro: generates a 5-verb controller (HTTP
 /// or GraphQL) plus its service + state from one attribute on a struct
 /// that holds an `Arc<sqlx::AnyPool>`. See
 /// `nestrs::crud_macro::__CrudQueryAdapter` for the runtime side.
 pub use nestrs_macros::crud;
-#[cfg(feature = "sea-orm")]
-pub use nestrs_sea_orm as sea_orm;
-#[cfg(feature = "resilience")]
-pub use nestrs_resilience as resilience;
-#[cfg(feature = "idempotency")]
-pub use nestrs_idempotency as idempotency;
-#[cfg(feature = "outbox")]
-pub use nestrs_outbox as outbox;
-#[cfg(feature = "locks")]
-pub use nestrs_locks as locks;
 #[cfg(feature = "mail")]
 pub use nestrs_mail as mail;
+#[cfg(feature = "outbox")]
+pub use nestrs_outbox as outbox;
+#[cfg(feature = "resilience")]
+pub use nestrs_resilience as resilience;
+#[cfg(feature = "sea-orm")]
+pub use nestrs_sea_orm as sea_orm;
 #[cfg(feature = "webhooks")]
 pub use nestrs_webhooks as webhooks;
 #[cfg(feature = "workflows")]
 pub use nestrs_workflows as workflows;
-#[cfg(feature = "ai")]
-pub use nestrs_ai as ai;
 #[cfg(feature = "authz-row-level")]
 pub use predicates::{
     AuthorIsCurrentUser, BelongsToUser, HasRole, NotDeleted, OwnerOrAdmin, PublicOrOwner,
@@ -430,16 +430,15 @@ pub mod prelude {
         MiddlewareConsumer, NestApiVersion, NestApplication, NestConfig, NestDto, NestFactory,
         NestrsSchema, NotAcceptableException, NotFoundException, NotImplementedException,
         ParseIntPipe, PathNormalization, PayloadTooLargeException, PaymentRequiredException,
-        PipedBody1, SchemaValidationPipe,
-        PipedBody2, PipedBody3, PipedBody4, PipedPath1, PipedPath2, PipedPath3, PipedPath4,
-        PipedQuery1, PipedQuery2, PipedQuery3, PipedQuery4, ProblemDetails, RateLimitOptions,
-        RawBody, ReadinessContext, RequestContext, RequestContextMissing, RequestScoped,
-        RequestScopedMissing, RequestTimeoutException, RequestTracingOptions, SecurityHeaders,
+        PipedBody1, PipedBody2, PipedBody3, PipedBody4, PipedPath1, PipedPath2, PipedPath3,
+        PipedPath4, PipedQuery1, PipedQuery2, PipedQuery3, PipedQuery4, ProblemDetails,
+        RateLimitOptions, RawBody, ReadinessContext, RequestContext, RequestContextMissing,
+        RequestScoped, RequestScopedMissing, RequestTimeoutException, RequestTracingOptions,
+        RouteConflictAction, RouteConflictPolicy, SchemaValidationPipe, SecurityHeaders,
         ServiceUnavailableException, TestClient, TestRequest, TestingModule, TestingModuleBuilder,
         TooManyRequestsException, TracingConfig, TracingFormat, TrimPipe, TypedConfigModule,
         UnauthorizedException, UnprocessableEntityException, UnsupportedMediaTypeException,
         ValidatedBody, ValidatedPath, ValidatedQuery, ValidationPipe, VersioningType,
-        RouteConflictAction, RouteConflictPolicy,
     };
     #[cfg(feature = "authn")]
     pub use crate::{

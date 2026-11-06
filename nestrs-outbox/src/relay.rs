@@ -71,9 +71,7 @@ mod tests {
     async fn relay_publishes_and_marks() {
         let opts = OutboxOptions::default();
         let relay = OutboxRelay::from_options(&opts);
-        relay
-            .add("orders", serde_json::json!({"id": 1}))
-            .await;
+        relay.add("orders", serde_json::json!({"id": 1})).await;
         let published = Arc::new(AtomicU32::new(0));
         let published_c = published.clone();
         let publish: PublishFn = Arc::new(move |_topic, _payload| {
@@ -83,7 +81,6 @@ mod tests {
         relay.tick(&publish).await;
         assert_eq!(published.load(Ordering::SeqCst), 1);
         let pending = opts.store.claim_batch(10).await;
-        assert!(pending.iter().all(|m| m.status != OutboxStatus::Pending)
-            || pending.is_empty());
+        assert!(pending.iter().all(|m| m.status != OutboxStatus::Pending) || pending.is_empty());
     }
 }

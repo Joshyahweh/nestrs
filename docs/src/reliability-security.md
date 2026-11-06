@@ -1,9 +1,6 @@
----
-title: NestJS 12 security notes
-description: Threat-model notes for NestRS NestJS 12 reliability, mail, webhooks, workflows, and AI packages.
----
+# Reliability & agents — security notes
 
-Threat model notes for the NestJS 12 parity packages (Wave 5). Start with the [NestJS 12 hub](/guides/nestjs12) for install and package maps; this page is the security checklist only.
+Threat-model notes for the reliability / integration / AI packages.
 
 ## Idempotency (`nestrs-idempotency`)
 
@@ -13,7 +10,7 @@ Threat model notes for the NestJS 12 parity packages (Wave 5). Start with the [N
 
 ## Webhooks (`nestrs-webhooks`)
 
-- Secrets: prefer `whsec_` Standard Webhooks encoding; never log raw secrets.
+- Secrets: prefer `whsec_` Standard Webhooks encoding; never log raw secrets (`Debug` should not print them in app code).
 - Verify on the **raw body** before JSON parse.
 - Outbound URLs from user input are SSRF-sensitive — validate allowlists at the application layer before `dispatch`.
 
@@ -26,7 +23,6 @@ Threat model notes for the NestJS 12 parity packages (Wave 5). Start with the [N
 
 - Agent tools must enforce the **caller's** authz (guards / `Ability`) — never run privileged tools anonymously.
 - `FakeModel` is for tests only; never configure it in production binaries.
-- `generate_object` fails closed on invalid JSON or missing required schema fields.
 
 ## Resilience (`nestrs-resilience`)
 
@@ -35,8 +31,8 @@ Threat model notes for the NestJS 12 parity packages (Wave 5). Start with the [N
 
 ## Mail (`nestrs-mail`)
 
-- Template render must escape HTML by default.
-- HTTP providers inherit SSRF rules — pin destinations; do not follow arbitrary redirect targets from user content.
+- Template render must escape HTML by default; never concatenate untrusted input into SMTP bodies without escaping.
+- HTTP providers (SES/Resend-style) inherit webhook/HTTP SSRF rules — pin destinations; do not follow arbitrary redirect targets from user content.
 
 ## Locks / workflows (`nestrs-locks`, `nestrs-workflows`)
 

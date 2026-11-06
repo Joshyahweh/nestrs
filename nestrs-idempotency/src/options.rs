@@ -14,7 +14,9 @@ pub struct IdempotencyOptions {
 impl Default for IdempotencyOptions {
     fn default() -> Self {
         Self {
-            store: Arc::new(InMemoryIdempotencyStore::new(Duration::from_secs(24 * 3600))),
+            store: Arc::new(InMemoryIdempotencyStore::new(Duration::from_secs(
+                24 * 3600,
+            ))),
             header_name: "idempotency-key".into(),
             required: false,
             scope: None,

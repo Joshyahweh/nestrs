@@ -92,7 +92,13 @@ mod tests {
         let msg_id = "msg_1";
         let ts = 1_700_000_000_i64;
         let signed = sign_standard_webhook(secret, msg_id, ts, body);
-        verify_standard_webhook(secret, msg_id, &ts.to_string(), &signed.signature_header, body)
-            .expect("verify");
+        verify_standard_webhook(
+            secret,
+            msg_id,
+            &ts.to_string(),
+            &signed.signature_header,
+            body,
+        )
+        .expect("verify");
     }
 }

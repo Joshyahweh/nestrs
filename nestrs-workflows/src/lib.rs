@@ -54,7 +54,9 @@ impl WorkflowsService {
 
     /// Park the workflow until [`Self::approve`].
     pub async fn wait_for_approval(&self, id: &str) -> Result<WorkflowInstance, String> {
-        self.store.set_status(id, WorkflowStatus::WaitingApproval).await
+        self.store
+            .set_status(id, WorkflowStatus::WaitingApproval)
+            .await
     }
 
     pub async fn approve(&self, id: &str) -> Result<WorkflowInstance, String> {

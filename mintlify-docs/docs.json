@@ -69,10 +69,10 @@
             ]
           },
           {
-            "group": "NestJS 12",
+            "group": "Reliability & agents",
             "pages": [
-              "guides/nestjs12",
-              "guides/nestjs12-security"
+              "guides/reliability",
+              "guides/reliability-security"
             ]
           },
           {

@@ -4,9 +4,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-pub type AgentHandler = Arc<
-    dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync,
->;
+pub type AgentHandler =
+    Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
 
 pub struct AgentFunction {
     pub name: String,
@@ -35,7 +34,9 @@ impl AgentToolRegistry {
     pub async fn call(&self, name: &str, args: Value) -> Result<Value, String> {
         let handler = {
             let guard = self.tools.lock().expect("tools");
-            let f = guard.get(name).ok_or_else(|| format!("unknown tool {name}"))?;
+            let f = guard
+                .get(name)
+                .ok_or_else(|| format!("unknown tool {name}"))?;
             f.handler.clone()
         };
         handler(args).await

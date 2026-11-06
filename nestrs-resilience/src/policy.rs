@@ -36,31 +36,14 @@ impl std::error::Error for ResilienceError {}
 /// Events emitted by policies (NestJS ResilienceEvents analogue).
 #[derive(Debug, Clone)]
 pub enum ResilienceEvent {
-    Retry {
-        label: String,
-        attempt: u32,
-    },
-    Timeout {
-        label: String,
-    },
-    CircuitOpen {
-        label: String,
-    },
-    CircuitHalfOpen {
-        label: String,
-    },
-    CircuitClosed {
-        label: String,
-    },
-    CircuitRejected {
-        label: String,
-    },
-    BulkheadRejected {
-        label: String,
-    },
-    Fallback {
-        label: String,
-    },
+    Retry { label: String, attempt: u32 },
+    Timeout { label: String },
+    CircuitOpen { label: String },
+    CircuitHalfOpen { label: String },
+    CircuitClosed { label: String },
+    CircuitRejected { label: String },
+    BulkheadRejected { label: String },
+    Fallback { label: String },
 }
 
 #[derive(Debug, Clone)]
@@ -119,15 +102,12 @@ pub struct BulkheadPolicy {
 
 impl Default for BulkheadPolicy {
     fn default() -> Self {
-        Self {
-            max_concurrent: 64,
-        }
+        Self { max_concurrent: 64 }
     }
 }
 
-pub type FallbackFn<T> = Arc<
-    dyn Fn() -> Pin<Box<dyn Future<Output = Result<T, ResilienceError>> + Send>> + Send + Sync,
->;
+pub type FallbackFn<T> =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<T, ResilienceError>> + Send>> + Send + Sync>;
 
 #[derive(Clone, Default)]
 pub struct PolicyBundle {

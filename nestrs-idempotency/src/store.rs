@@ -38,8 +38,13 @@ impl std::error::Error for IdempotencyBusy {}
 
 #[derive(Debug)]
 enum Slot {
-    InFlight { since: Instant },
-    Done { record: IdempotencyRecord, at: Instant },
+    InFlight {
+        since: Instant,
+    },
+    Done {
+        record: IdempotencyRecord,
+        at: Instant,
+    },
 }
 
 pub struct InMemoryIdempotencyStore {
@@ -72,10 +77,7 @@ impl IdempotencyStore for InMemoryIdempotencyStore {
             Some(Slot::Done { record, .. }) => Ok(Some(record.clone())),
             Some(Slot::InFlight { .. }) => Err(IdempotencyBusy),
             None => {
-                guard.insert(
-                    scope_key.to_string(),
-                    Slot::InFlight { since: now },
-                );
+                guard.insert(scope_key.to_string(), Slot::InFlight { since: now });
                 Ok(None)
             }
         }
@@ -132,7 +134,9 @@ mod tests {
         let mut handles = Vec::new();
         for _ in 0..32 {
             let s = Arc::clone(&store);
-            handles.push(tokio::spawn(async move { s.begin_or_get("race:key").await }));
+            handles.push(tokio::spawn(
+                async move { s.begin_or_get("race:key").await },
+            ));
         }
         let mut winners = 0usize;
         let mut busy = 0usize;

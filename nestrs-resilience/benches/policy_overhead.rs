@@ -34,9 +34,7 @@ fn bench_execute_ok(c: &mut Criterion) {
             let policy = policy.clone();
             async move {
                 let out = svc
-                    .execute("bench", policy, || async {
-                        Ok::<_, ResilienceError>(1u32)
-                    })
+                    .execute("bench", policy, || async { Ok::<_, ResilienceError>(1u32) })
                     .await
                     .expect("execute");
                 black_box(out)

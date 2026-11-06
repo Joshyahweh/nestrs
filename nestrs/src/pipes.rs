@@ -78,10 +78,7 @@ where
     }
 }
 
-impl<T> HttpPipeTransform<T> for SchemaValidationPipe where
-    T: NestrsSchema + Send + Sync + 'static
-{
-}
+impl<T> HttpPipeTransform<T> for SchemaValidationPipe where T: NestrsSchema + Send + Sync + 'static {}
 
 /// Validates a value using [`validator::Validate`] (NestJS `ValidationPipe` analogue).
 ///

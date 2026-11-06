@@ -64,7 +64,10 @@ impl WorkflowStore for InMemoryWorkflowStore {
             status: WorkflowStatus::Running,
             steps: HashMap::new(),
         };
-        self.inner.lock().await.insert(inst.id.clone(), inst.clone());
+        self.inner
+            .lock()
+            .await
+            .insert(inst.id.clone(), inst.clone());
         inst
     }
 
@@ -79,7 +82,9 @@ impl WorkflowStore for InMemoryWorkflowStore {
         result: Value,
     ) -> Result<WorkflowInstance, String> {
         let mut guard = self.inner.lock().await;
-        let inst = guard.get_mut(id).ok_or_else(|| "workflow not found".to_string())?;
+        let inst = guard
+            .get_mut(id)
+            .ok_or_else(|| "workflow not found".to_string())?;
         inst.steps.insert(step.to_string(), result);
         Ok(inst.clone())
     }
@@ -90,7 +95,9 @@ impl WorkflowStore for InMemoryWorkflowStore {
         status: WorkflowStatus,
     ) -> Result<WorkflowInstance, String> {
         let mut guard = self.inner.lock().await;
-        let inst = guard.get_mut(id).ok_or_else(|| "workflow not found".to_string())?;
+        let inst = guard
+            .get_mut(id)
+            .ok_or_else(|| "workflow not found".to_string())?;
         inst.status = status;
         Ok(inst.clone())
     }

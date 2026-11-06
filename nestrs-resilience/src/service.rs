@@ -1,8 +1,6 @@
 use crate::circuit::CircuitBreaker;
 use crate::options::ResilienceOptions;
-use crate::policy::{
-    PolicyBundle, ResilienceError, ResilienceEvent, RetryPolicy, TimeoutPolicy,
-};
+use crate::policy::{PolicyBundle, ResilienceError, ResilienceEvent, RetryPolicy, TimeoutPolicy};
 use nestrs_core::Injectable;
 use std::collections::HashMap;
 use std::future::Future;
@@ -72,25 +70,33 @@ impl ResilienceService {
             .unwrap_or_else(|| self.options.defaults.timeout.clone());
 
         if policy.bulkhead.is_some() {
-            let permit = self
-                .bulkhead
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| {
-                    self.emit(ResilienceEvent::BulkheadRejected {
-                        label: label.clone(),
-                    });
-                    ResilienceError::BulkheadRejected
-                })?;
+            let permit = self.bulkhead.clone().try_acquire_owned().map_err(|_| {
+                self.emit(ResilienceEvent::BulkheadRejected {
+                    label: label.clone(),
+                });
+                ResilienceError::BulkheadRejected
+            })?;
             let result = self
-                .execute_inner(&label, &retry, &timeout, policy.circuit_name.as_deref(), &op)
+                .execute_inner(
+                    &label,
+                    &retry,
+                    &timeout,
+                    policy.circuit_name.as_deref(),
+                    &op,
+                )
                 .await;
             drop(permit);
             return result;
         }
 
-        self.execute_inner(&label, &retry, &timeout, policy.circuit_name.as_deref(), &op)
-            .await
+        self.execute_inner(
+            &label,
+            &retry,
+            &timeout,
+            policy.circuit_name.as_deref(),
+            &op,
+        )
+        .await
     }
 
     async fn execute_inner<T, F, Fut>(

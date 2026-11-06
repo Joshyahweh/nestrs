@@ -22,9 +22,7 @@ static MAIL_INBOX: OnceLock<Arc<nestrs::mail::InMemoryMailTransport>> = OnceLock
 fn mail_module() -> DynamicModule {
     let inbox = nestrs::mail::InMemoryMailTransport::new();
     let _ = MAIL_INBOX.set(Arc::clone(&inbox));
-    nestrs::mail::MailModule::register(nestrs::mail::MailOptions {
-        transport: inbox,
-    })
+    nestrs::mail::MailModule::register(nestrs::mail::MailOptions { transport: inbox })
 }
 
 fn ai_module() -> DynamicModule {
@@ -156,10 +154,7 @@ impl DemoController {
     pub async fn outbox(State(state): State<Arc<DemoState>>) -> Json<Value> {
         use nestrs::outbox::PublishFn;
         use std::sync::atomic::{AtomicU32, Ordering};
-        state
-            .outbox
-            .add("lab9", json!({ "hello": "world" }))
-            .await;
+        state.outbox.add("lab9", json!({ "hello": "world" })).await;
         let published = Arc::new(AtomicU32::new(0));
         let published_c = Arc::clone(&published);
         let publish: PublishFn = Arc::new(move |_topic, _payload| {
@@ -193,12 +188,7 @@ impl DemoController {
         let signed = state.webhooks.sign("msg_lab9", 1_700_000_000, body);
         state
             .webhooks
-            .verify(
-                "msg_lab9",
-                "1700000000",
-                &signed.signature_header,
-                body,
-            )
+            .verify("msg_lab9", "1700000000", &signed.signature_header, body)
             .expect("verify");
         Json(json!({ "ok": true }))
     }
@@ -271,7 +261,11 @@ async fn run_smoke() -> bool {
     let mut ok = true;
 
     let (st, v) = get(&router, "/lab/n12/health").await;
-    ok &= check("health", st == StatusCode::OK && v["ok"] == true, format!("{st} {v}"));
+    ok &= check(
+        "health",
+        st == StatusCode::OK && v["ok"] == true,
+        format!("{st} {v}"),
+    );
 
     let (st, v) = get(&router, "/lab/n12/weak-password").await;
     ok &= check(
@@ -342,7 +336,9 @@ async fn run_smoke() -> bool {
         let mut handles = Vec::new();
         for _ in 0..16 {
             let s = Arc::clone(&store);
-            handles.push(tokio::spawn(async move { s.begin_or_get("lab9:race").await }));
+            handles.push(tokio::spawn(
+                async move { s.begin_or_get("lab9:race").await },
+            ));
         }
         let mut winners = 0usize;
         for h in handles {
@@ -350,7 +346,11 @@ async fn run_smoke() -> bool {
                 winners += 1;
             }
         }
-        ok &= check("idempotency race", winners == 1, format!("winners={winners}"));
+        ok &= check(
+            "idempotency race",
+            winners == 1,
+            format!("winners={winners}"),
+        );
     }
 
     println!();

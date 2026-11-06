@@ -76,9 +76,9 @@ Exactly one concurrent `begin_or_get` wins (`Ok(None)`); others get `Idempotency
 
 - Scope by authenticated user/tenant — never share a global key namespace.
 - Prefer Redis TTL in multi-instance deploys.
-- Details: [security notes](/guides/nestjs12-security#idempotency-nestrs-idempotency).
+- Details: [security notes](/guides/reliability-security#idempotency-nestrs-idempotency).
 
 ## See also
 
-- [NestJS 12 hub](/guides/nestjs12)
+- [Reliability hub](/guides/reliability)
 - [API reference](/api/crates/nestrs-idempotency)

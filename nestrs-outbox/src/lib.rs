@@ -15,7 +15,7 @@
 //! ```
 //!
 //! Set `allow_in_memory: false` once a durable store adapter is configured.
-//! Pair with [`nestrs_webhooks`] for signed outbound delivery.
+//! Pair with `nestrs-webhooks` for signed outbound delivery.
 //!
 //! Umbrella feature: `nestrs` / `outbox` → `nestrs::outbox`.
 

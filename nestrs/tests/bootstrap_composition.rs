@@ -1804,7 +1804,9 @@ async fn global_exception_filter_runs_before_outer_middleware() {
 }
 
 #[tokio::test]
+#[serial(env)]
 async fn development_errors_keep_5xx_message() {
+    let _clear = ClearProductionEnvGuard::new();
     let router = NestFactory::create::<AppModule>().into_router();
 
     let response = router
@@ -1822,8 +1824,11 @@ async fn development_errors_keep_5xx_message() {
     let body = response.into_body();
     let bytes = to_bytes(body, 64 * 1024).await.expect("read body");
     let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
-    assert!(v["message"]
-        .as_str()
-        .unwrap()
-        .contains("secret-internal-detail"));
+    assert!(
+        v["message"]
+            .as_str()
+            .unwrap()
+            .contains("secret-internal-detail"),
+        "expected detailed 5xx message in non-production env, got {v}"
+    );
 }

@@ -5,6 +5,10 @@ use axum::response::IntoResponse;
 use nestrs::prelude::*;
 use nestrs_core::RouteRegistry;
 use serde_json::Value;
+use std::sync::Mutex;
+
+/// `RouteRegistry` is process-global; serialize tests that clear/register into it.
+static ROUTE_REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[tokio::test]
 async fn http_exception_error_code_in_json_body() {
@@ -20,6 +24,9 @@ async fn http_exception_error_code_in_json_body() {
 
 #[test]
 fn route_conflict_detects_duplicates() {
+    let _guard = ROUTE_REGISTRY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     RouteRegistry::clear_for_tests();
     RouteRegistry::register("GET", "/users/:id", "a::one");
     RouteRegistry::register("GET", "/users/:id", "a::two");
@@ -31,6 +38,9 @@ fn route_conflict_detects_duplicates() {
 
 #[test]
 fn route_conflict_detects_shadow() {
+    let _guard = ROUTE_REGISTRY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     RouteRegistry::clear_for_tests();
     RouteRegistry::register("GET", "/users/:id", "a::param");
     RouteRegistry::register("GET", "/users/me", "a::me");

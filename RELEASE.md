@@ -113,7 +113,7 @@ cargo publish -p nestrs-cqrs
 sleep 30
 cargo publish -p nestrs-microservices
 sleep 30
-# Reliability & agents packages (1.7.0+)
+# Reliability & agents packages (1.7.1+)
 cargo publish -p nestrs-resilience
 sleep 30
 cargo publish -p nestrs-idempotency

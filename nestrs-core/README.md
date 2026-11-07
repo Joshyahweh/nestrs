@@ -10,7 +10,7 @@ You rarely depend on this crate alone in application code; the main framework re
 
 ```toml
 [dependencies]
-nestrs-core = "1.7.0"
+nestrs-core = "1.7.1"
 axum = "0.7"
 async-trait = "0.1"
 ```

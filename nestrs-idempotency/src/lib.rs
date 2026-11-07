@@ -26,7 +26,7 @@
 //!
 //! Umbrella feature: `nestrs` / `idempotency` → `nestrs::idempotency`.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-idempotency/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-idempotency/1.7.1")]
 
 mod middleware;
 mod module;

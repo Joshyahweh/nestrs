@@ -21,7 +21,7 @@
 //! ```
 //!
 //! Umbrella feature: `nestrs` / `mail` → `nestrs::mail`.
-#![doc(html_root_url = "https://docs.rs/nestrs-mail/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-mail/1.7.1")]
 
 mod module;
 mod options;

@@ -7,7 +7,7 @@
 //! durable delivery.
 //!
 //! Umbrella feature: `nestrs` / `webhooks` (implies `outbox`) → `nestrs::webhooks`.
-#![doc(html_root_url = "https://docs.rs/nestrs-webhooks/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-webhooks/1.7.1")]
 
 mod module;
 mod options;

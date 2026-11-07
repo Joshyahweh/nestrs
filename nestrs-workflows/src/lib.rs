@@ -7,7 +7,7 @@
 //! side effects.
 //!
 //! Umbrella feature: `nestrs` / `workflows` → `nestrs::workflows`.
-#![doc(html_root_url = "https://docs.rs/nestrs-workflows/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-workflows/1.7.1")]
 
 mod module;
 mod options;

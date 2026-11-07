@@ -47,7 +47,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "1.7.0"
+version = "1.7.1"
 rust-version = "1.89"
 repository = "https://github.com/Joshyahweh/nestrs"
 # `homepage`, `documentation`, `readme`, and `description` are deliberately

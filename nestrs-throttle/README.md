@@ -8,15 +8,15 @@ crates.io package name is **`nestrs-throttle`** (`nestrs-throttler` is owned by 
 
 ```toml
 [dependencies]
-nestrs-throttle = "1.7.0"
+nestrs-throttle = "1.7.1"
 ```
 
 Or via the umbrella:
 
 ```toml
-nestrs = { version = "1.7.0", features = ["throttler"] }
+nestrs = { version = "1.7.1", features = ["throttler"] }
 # distributed counters:
-# nestrs = { version = "1.7.0", features = ["throttler-redis"] }
+# nestrs = { version = "1.7.1", features = ["throttler-redis"] }
 ```
 
 ## Surface

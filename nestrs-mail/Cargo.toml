@@ -11,7 +11,7 @@ keywords = ["mail", "email", "smtp", "nest"]
 categories = ["email", "web-programming"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.7.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.7.1" }
 axum.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 async-trait = "0.1"

@@ -36,7 +36,7 @@
 //!
 //! **Docs:** mdBook **Health** (`docs/src/health.md`).
 
-#![doc(html_root_url = "https://docs.rs/nestrs-health/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-health/1.7.1")]
 
 mod indicators;
 mod microservice_indicators;

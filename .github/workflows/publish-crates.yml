@@ -116,18 +116,16 @@ jobs:
                 return 0
               fi
               # crates.io new-crate rate limit includes a concrete retry time.
-              if wait_secs=$(python3 - <<'PY' "$log"
-import re, sys, time
-from email.utils import parsedate_to_datetime
-log = sys.argv[1]
-m = re.search(r"try again after ([A-Za-z]{3}, [^.\n]+)", log)
-if not m:
-    raise SystemExit(1)
-target = parsedate_to_datetime(m.group(1)).timestamp()
-print(max(30, int(target - time.time()) + 15))
-PY
-              ); then
-                echo "::warning::crates.io rate-limited $pkg; sleeping ${wait_secs}s until retry window"
+              # Example: "Please try again after Sat, 07 Nov 2026 08:57:34 GMT"
+              after=$(grep -oE 'try again after [A-Za-z]{3}, [0-9]{1,2} [A-Za-z]{3} [0-9]{4} [0-9:]+ GMT' <<<"$log" | sed 's/^try again after //' || true)
+              if [ -n "$after" ]; then
+                target=$(date -d "$after" +%s)
+                now=$(date +%s)
+                wait_secs=$(( target - now + 30 ))
+                if [ "$wait_secs" -lt 60 ]; then
+                  wait_secs=60
+                fi
+                echo "::warning::crates.io rate-limited $pkg; sleeping ${wait_secs}s until ${after}"
                 sleep "$wait_secs"
               else
                 echo "::warning::cargo publish for $pkg failed on attempt $attempt; sleeping before retry"

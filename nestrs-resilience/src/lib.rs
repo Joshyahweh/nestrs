@@ -29,7 +29,7 @@
 //! # HTTP mapping
 //!
 //! Map [`ResilienceError::Timeout`] → 504 and [`ResilienceError::CircuitOpen`] → 503 +
-//! `Retry-After`. Prefer stable `errorCode` values on [`nestrs::HttpException`].
+//! `Retry-After`. Prefer stable `errorCode` values on `nestrs::HttpException`.
 //!
 //! # Umbrella feature
 //!

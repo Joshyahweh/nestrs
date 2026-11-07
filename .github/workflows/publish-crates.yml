@@ -101,8 +101,9 @@ jobs:
           publish_pkg() {
             local pkg="$1"
             local attempt=1
-            local max_attempts=5
+            local max_attempts=8
             local log
+            local wait_secs
             while [ "$attempt" -le "$max_attempts" ]; do
               echo "Publishing $pkg (attempt $attempt/$max_attempts) ..."
               if log=$(cargo publish -p "$pkg" --locked 2>&1); then
@@ -114,8 +115,24 @@ jobs:
                 echo "::notice::$pkg is already on crates.io at this version; skipping"
                 return 0
               fi
-              echo "::warning::cargo publish for $pkg failed on attempt $attempt; sleeping before retry"
-              sleep $((attempt * 30))
+              # crates.io new-crate rate limit includes a concrete retry time.
+              if wait_secs=$(python3 - <<'PY' "$log"
+import re, sys, time
+from email.utils import parsedate_to_datetime
+log = sys.argv[1]
+m = re.search(r"try again after ([A-Za-z]{3}, [^.\n]+)", log)
+if not m:
+    raise SystemExit(1)
+target = parsedate_to_datetime(m.group(1)).timestamp()
+print(max(30, int(target - time.time()) + 15))
+PY
+              ); then
+                echo "::warning::crates.io rate-limited $pkg; sleeping ${wait_secs}s until retry window"
+                sleep "$wait_secs"
+              else
+                echo "::warning::cargo publish for $pkg failed on attempt $attempt; sleeping before retry"
+                sleep $((attempt * 45))
+              fi
               attempt=$((attempt + 1))
             done
             echo "::error::cargo publish for $pkg failed after $max_attempts attempts"

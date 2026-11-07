@@ -37,7 +37,7 @@ NestJS-like API framework for Rust built on Axum and Tower.
 ## Ownership and release
 
 - Maintainer / code owner: @Joshyahweh
-- Current workspace version: `1.7.0` (from `VERSION` and workspace package settings) — a minor release on the 1.0 stable contract; the public API is covered by full semver (see `STABILITY.md`)
+- Current workspace version: `1.7.1` (from `VERSION` and workspace package settings) — a minor release on the 1.0 stable contract; the public API is covered by full semver (see `STABILITY.md`)
 - Release notes template: `.github/release-template.md`
 - Changelog: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
@@ -73,6 +73,14 @@ NestJS-like API framework for Rust built on Axum and Tower.
 - `nestrs-throttle/` - per-route rate limits (`ThrottlerGuard`, in-memory or Redis)
 - `nestrs-health/` - readiness / liveness indicators
 - `nestrs-security/` - Bearer parsing, helmet headers, CSRF middleware
+- `nestrs-resilience/` - retry / timeout / circuit / bulkhead (feature `resilience`)
+- `nestrs-idempotency/` - `Idempotency-Key` dedupe (feature `idempotency`)
+- `nestrs-outbox/` - transactional outbox + DLQ (feature `outbox`)
+- `nestrs-locks/` - lease locks for single-runner work (feature `locks`)
+- `nestrs-mail/` - templated email (feature `mail`)
+- `nestrs-webhooks/` - Standard Webhooks sign/verify (feature `webhooks`)
+- `nestrs-workflows/` - durable steps + human approval (feature `workflows`)
+- `nestrs-ai/` - LLM / agent module (feature `ai`)
 - `nestrs-socketio/` - Socket.IO adapter (socketioxide)
 - `nestrs-lambda/` - AWS Lambda / API Gateway adapter
 - `nestrs-better-auth/` - Better Auth session-cookie guard + router nest

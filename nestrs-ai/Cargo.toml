@@ -11,8 +11,8 @@ keywords = ["ai", "llm", "agents", "nest"]
 categories = ["web-programming", "api-bindings"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.7.0" }
-nestrs-resilience = { path = "../nestrs-resilience", version = "1.7.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.7.1" }
+nestrs-resilience = { path = "../nestrs-resilience", version = "1.7.1" }
 axum.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 async-trait = "0.1"

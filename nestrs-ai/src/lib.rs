@@ -7,7 +7,7 @@
 //! schema fields. Tool handlers must enforce the **caller's** authorization.
 //!
 //! Umbrella feature: `nestrs` / `ai` (implies `resilience`) → `nestrs::ai`.
-#![doc(html_root_url = "https://docs.rs/nestrs-ai/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-ai/1.7.1")]
 
 mod fake;
 mod module;

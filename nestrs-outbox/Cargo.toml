@@ -11,7 +11,7 @@ keywords = ["outbox", "messaging", "nest", "axum"]
 categories = ["asynchronous", "database"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.7.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.7.1" }
 axum.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "macros"] }
 async-trait = "0.1"

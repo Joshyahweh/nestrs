@@ -1,6 +1,6 @@
 name: publish-crates
 
-# Publishes every workspace member after preflight. Tag `v1.7.0` on `main` or use manual dispatch.
+# Publishes every workspace member after preflight. Tag `v1.7.1` on `main` or use manual dispatch.
 # After a successful tag-triggered publish, creates a GitHub Release (shows "Latest" on the repo).
 on:
   push:
@@ -137,7 +137,7 @@ jobs:
             return 1
           }
           # Dependency order for every publishable workspace member at
-          # workspace.package.version (currently 1.7.0). `nestrs-drizzle`
+          # workspace.package.version (currently 1.7.1). `nestrs-drizzle`
           # stays carved out (not a workspace member).
           #
           # Leaves (no nestrs-* deps):
@@ -190,7 +190,7 @@ jobs:
           sleep 60
           publish_pkg nestrs-oauth2
           sleep 60
-          # Reliability & agents (1.7.0+); webhooks needs outbox, ai needs resilience:
+          # Reliability & agents (1.7.1+); webhooks needs outbox, ai needs resilience:
           publish_pkg nestrs-resilience
           sleep 60
           publish_pkg nestrs-idempotency

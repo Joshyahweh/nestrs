@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-07
+
+### Docs
+
+- Enrich crate READMEs for reliability & agents packages (`nestrs-resilience`,
+  `nestrs-idempotency`, `nestrs-outbox`, `nestrs-locks`, `nestrs-mail`,
+  `nestrs-webhooks`, `nestrs-workflows`, `nestrs-ai`) with install, register,
+  usage examples, and surface tables.
+- Expand umbrella [`nestrs`](https://crates.io/crates/nestrs) README: feature
+  matrix and ecosystem tables listing the 1.7 reliability/agent crates.
+- Document the new packages in the workspace project layout.
+
 ## [1.7.0] - 2026-11-06
 
 Reliability, mail, webhooks, workflows, and AI packages (plus foundation DX),

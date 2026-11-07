@@ -10,7 +10,7 @@
 
 ```toml
 [dependencies]
-nestrs-storage = { version = "1.7.0", features = ["local"] }
+nestrs-storage = { version = "1.7.1", features = ["local"] }
 # or: features = ["s3"], ["gcs"], ["azure"], or ["all"]
 ```
 

@@ -19,7 +19,7 @@
 //!
 //! Umbrella feature: `nestrs` / `outbox` → `nestrs::outbox`.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-outbox/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-outbox/1.7.1")]
 
 mod module;
 mod options;

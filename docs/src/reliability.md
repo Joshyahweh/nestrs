@@ -8,7 +8,7 @@ NestRS **1.7** workspace crates and umbrella features for resilience, idempotenc
 
 ```toml
 [dependencies]
-nestrs = { version = "1.7.0", features = [
+nestrs = { version = "1.7.1", features = [
   "resilience", "idempotency", "outbox", "locks",
   "mail", "webhooks", "workflows", "ai",
 ] }

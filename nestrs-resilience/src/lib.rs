@@ -37,7 +37,7 @@
 //!
 //! See also the Mintlify guide **Resilience** and lab binary `lab9_nestjs12`.
 
-#![doc(html_root_url = "https://docs.rs/nestrs-resilience/1.7.0")]
+#![doc(html_root_url = "https://docs.rs/nestrs-resilience/1.7.1")]
 
 mod circuit;
 mod module;

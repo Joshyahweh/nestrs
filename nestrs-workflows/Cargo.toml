@@ -11,7 +11,7 @@ keywords = ["workflows", "durable", "nest"]
 categories = ["asynchronous"]
 
 [dependencies]
-nestrs-core = { path = "../nestrs-core", version = "1.7.0" }
+nestrs-core = { path = "../nestrs-core", version = "1.7.1" }
 axum.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 async-trait = "0.1"

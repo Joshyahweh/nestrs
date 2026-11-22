@@ -21,7 +21,9 @@
 //! matching grant has no field list. Only the second case leaves the
 //! object intact. An object the principal cannot `read` — no grant, a
 //! condition miss, or a predicate rejection — keeps the `type` marker and
-//! drops every other field. Nested objects and arrays are walked the same
+//! drops its other scalar fields. Arrays on that object are kept and
+//! walked, so a list wrapper the caller cannot read still field-masks the
+//! subjects inside it. Nested objects and arrays are walked the same
 //! way. Responses with no `"type"` marker are passed through unchanged —
 //! a no-op rather than a hard fail.
 //!
@@ -180,8 +182,9 @@ fn withheld(mut parts: Parts) -> Response {
 /// grant with conditions or a row predicate matches only when that object
 /// satisfies them. A matching `read` grant with no field list leaves the
 /// object intact. A matching grant with a field list keeps only those
-/// fields. No matching `read` grant keeps `type` and drops every other
-/// field: `allowed_fields` returns `None` in both the "no rule" and "no
+/// fields. No matching `read` grant keeps `type`, drops every other scalar
+/// field, and keeps arrays so the walk can still mask the subjects inside
+/// them. `allowed_fields` returns `None` in both the "no rule" and "no
 /// field list" cases, and treating a type-level match as "show everything"
 /// returned instances the conditions rejected.
 ///
@@ -200,7 +203,10 @@ pub fn mask_value(value: &mut Value, ability: &Ability) {
             if let Some(type_name) = type_name {
                 let subject = read_subject(&type_name, map);
                 if !ability.can(&Action::Read, &subject) {
-                    map.retain(|k, _| k == "type");
+                    // Scalars are this instance's own fields. Arrays are
+                    // containers: a `PostList` the caller cannot read still
+                    // holds `Post` objects that have their own grants.
+                    map.retain(|k, v| k == "type" || v.is_array());
                 } else if let Some(allowed) = ability.allowed_fields(&Action::Read, &subject) {
                     let allowed: std::collections::HashSet<&str> =
                         allowed.iter().map(|s| s.as_str()).collect();

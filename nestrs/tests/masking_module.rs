@@ -229,6 +229,48 @@ async fn masking_recurses_into_arrays_of_objects() {
 }
 
 #[tokio::test]
+async fn masking_walks_items_inside_an_unreadable_list_wrapper() {
+    // A `PostList` the principal cannot read is not a reason to drop the
+    // Posts inside it. Scalar fields on the wrapper go; the array stays
+    // and each element is field-masked.
+    let ability = ability_with_post_fields();
+    let resp = json_response(
+        StatusCode::OK,
+        json!({
+            "type": "PostList",
+            "total": 2,
+            "items": [
+                { "type": "Post", "id": 1, "title": "a", "body": "x" },
+                { "type": "Post", "id": 2, "title": "b", "body": "y" }
+            ]
+        }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let v = response_json(masked).await;
+    assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("PostList"));
+    assert!(
+        v.get("total").is_none(),
+        "scalar fields of an unreadable wrapper are dropped, got {v}"
+    );
+    let items = v
+        .get("items")
+        .and_then(|value| value.as_array())
+        .expect("items array");
+    assert_eq!(items.len(), 2);
+    for item in items {
+        assert!(
+            item.get("body").is_none(),
+            "body should be masked, got {item}"
+        );
+        assert!(
+            item.get("title").is_some(),
+            "title should remain, got {item}"
+        );
+        assert!(item.get("id").is_some(), "id should remain, got {item}");
+    }
+}
+
+#[tokio::test]
 async fn masking_still_strips_fields_when_body_is_exactly_the_cap() {
     let ability = ability_with_post_fields();
     let resp = json_response(

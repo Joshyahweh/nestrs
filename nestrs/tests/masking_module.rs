@@ -258,6 +258,89 @@ async fn masking_still_strips_fields_when_body_is_exactly_the_cap() {
 }
 
 #[tokio::test]
+async fn masking_strips_fields_when_principal_cannot_read_the_type() {
+    // `allowed_fields` is `None` both when no rule matches and when a
+    // grant has no field list. The no-rule case used to return the object
+    // intact, so a `User` payload on a principal who can only read `Post`
+    // kept `ssn`.
+    let ability = ability_with_post_fields();
+    let resp = json_response(
+        StatusCode::OK,
+        json!({
+            "type": "User",
+            "id": 7,
+            "email": "ada@example.com",
+            "ssn": "123-45-6789"
+        }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let body = axum::body::to_bytes(masked.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("User"));
+    assert!(
+        v.get("ssn").is_none() && v.get("email").is_none() && v.get("id").is_none(),
+        "an unreadable subject must not keep its fields, got {v}"
+    );
+}
+
+#[tokio::test]
+async fn masking_strips_nested_object_when_its_type_is_not_readable() {
+    let ability = Arc::new(
+        Ability::builder()
+            .can_on_fields(
+                Action::Read,
+                "Post",
+                vec!["type".into(), "id".into(), "title".into(), "author".into()],
+            )
+            .build(),
+    );
+    let resp = json_response(
+        StatusCode::OK,
+        json!({
+            "type": "Post",
+            "id": 1,
+            "title": "hi",
+            "body": "secret",
+            "author": { "type": "User", "name": "ada", "ssn": "secret" }
+        }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let body = axum::body::to_bytes(masked.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        v.get("body").is_none(),
+        "post body is not in the allow-list"
+    );
+    assert_eq!(v.get("title").and_then(|t| t.as_str()), Some("hi"));
+    let author = v.get("author").expect("author is allow-listed");
+    assert_eq!(author.get("type").and_then(|t| t.as_str()), Some("User"));
+    assert!(
+        author.get("ssn").is_none() && author.get("name").is_none(),
+        "nested unreadable subject must not keep its fields, got {author}"
+    );
+}
+
+#[tokio::test]
+async fn masking_empty_ability_drops_fields_on_a_typed_object() {
+    let ability = Arc::new(Ability::builder().build());
+    let resp = json_response(
+        StatusCode::OK,
+        json!({ "type": "Post", "id": 1, "body": "secret" }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let body = axum::body::to_bytes(masked.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.as_object().map(|m| m.len()), Some(1));
+    assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("Post"));
+}
+
+#[tokio::test]
 async fn masking_masks_runtime_built_type_names_without_leaking() {
     // Audit regression: the walker used to Box::leak the response's "type"
     // value into a Subject::Type(&'static str) — one leaked allocation per

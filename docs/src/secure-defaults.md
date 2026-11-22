@@ -47,7 +47,7 @@ Authorization is opt-in (`authz`, `authz-row-level` features), but once enabled 
 - No `Ability` in request scope makes `PoliciesGuard` return **403**, and makes authorized repository / `CrudService` calls return an **error**, not a fallback to unfiltered queries.
 - A row-level predicate with no `Principal` in scope returns an **error** rather than leaking rows.
 - Unauthorized reads are invisible (`Ok(None)` / empty lists); unauthorized writes never silently succeed.
-- `PolicyMaskingInterceptor` passes bodies through **unchanged** — rather than failing or buffering without bound — when there is no ability on the request, the body is non-JSON or unparseable, or it reaches the 1 MiB cap.
+- `PolicyMaskingInterceptor` passes a body through unchanged when there is no ability on the request, the body is non-JSON or unparseable, or the JSON has no `"type"` marker. A body over the 1 MiB cap is withheld (empty), not returned unmasked. An object whose `"type"` the principal cannot `read` keeps only that marker.
 
 The full model — abilities, guards, row predicates, SQL pushdown, masking — is covered in [Authorization](authorization.md).
 
@@ -66,7 +66,7 @@ The full model — abilities, guards, row predicates, SQL pushdown, masking — 
 | Production error sanitization | **On by default when the runtime environment is production** (`NESTRS_ENV`/`APP_ENV`/`RUST_ENV` ∈ {`production`, `prod`}): 5xx `message` → generic string, `errors` dropped. `enable_production_errors()` forces on; `disable_production_errors()` opts out | On (default) — opt out only behind a trusted boundary |
 | Route policies (`authz`) | Off until feature + middleware; when enabled, an **empty `Ability` denies everything** and `PoliciesGuard` fails closed (403) | Enable for non-public routes |
 | Row-level authorization (`authz-row-level`) | **Deny-closed when enabled**: missing `Ability` / `Principal` errors rather than falling back; unauthorized reads invisible, writes denied | Enable for per-user / multi-tenant data |
-| Response masking (`PolicyMaskingInterceptor`) | Off until layered; no-ability, non-JSON, and ≥ 1 MiB bodies pass through unmasked | Layer for field-level visibility |
+| Response masking (`PolicyMaskingInterceptor`) | Off until layered. No-ability, non-JSON, and untyped JSON pass through. Over-cap bodies are withheld. A typed object with no `read` grant keeps only `type` | Layer for field-level visibility |
 | JSON unknown keys on `#[dto]` | **Denied by default** | Use `#[dto(allow_unknown_fields)]` only when needed |
 
 ## Further reading

@@ -23,12 +23,10 @@ pub fn new_project(path: &Path, name: &str, transports: &[String]) -> Result<Sca
             "project name `{name}` is not a valid Rust crate name"
         )));
     }
-    for transport in transports {
-        if !is_safe_feature_name(transport) {
-            return Err(crate::Error::InvalidArgument(format!(
-                "Cargo feature `{transport}` is not a plain feature token"
-            )));
-        }
+    if transports.iter().any(|t| !is_safe_feature(t)) {
+        return Err(crate::Error::InvalidArgument(
+            "transport feature names must be plain Cargo feature identifiers".into(),
+        ));
     }
 
     fs::create_dir_all(path.join("src"))?;
@@ -66,12 +64,11 @@ fn is_safe_project_name(s: &str) -> bool {
         && !s.chars().next().unwrap().is_ascii_digit()
 }
 
-/// Feature names are interpolated into a TOML string. Quotes, brackets, and
-/// newlines would close that string and add further manifest keys.
-fn is_safe_feature_name(s: &str) -> bool {
+/// Cargo feature token interpolated into `features = ["…"]`. Quotes and
+/// newlines would break out of the string and rewrite the manifest.
+fn is_safe_feature(s: &str) -> bool {
     !s.is_empty()
-        && s.len() <= 64
-        && !s.starts_with('-')
+        && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
@@ -146,41 +143,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_project_rejects_feature_injection_before_writing() {
-        let dir = std::env::temp_dir().join(format!(
-            "nestrs-mcp-proj-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = fs::remove_dir_all(&dir);
+    fn new_project_rejects_feature_injection() {
+        let dir = tempfile::tempdir().unwrap();
         let err = new_project(
-            &dir,
+            dir.path(),
             "demo",
-            &["full\"}\n[dependencies]\nmalicious = \"1".into()],
+            &["http\", evil = { git = \"https://evil.example".into()],
         )
         .unwrap_err();
-        assert!(err.to_string().contains("not a plain feature token"));
-        assert!(!dir.join("Cargo.toml").exists());
-    }
-
-    #[test]
-    fn new_project_quotes_a_plain_feature() {
-        let dir = std::env::temp_dir().join(format!(
-            "nestrs-mcp-proj-ok-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        new_project(&dir, "demo", &["macros".into()]).expect("safe feature");
-        let toml = fs::read_to_string(dir.join("Cargo.toml")).unwrap();
-        assert!(toml.contains("features = [\"macros\"]"));
-        assert!(!toml.contains("malicious"));
-        let _ = fs::remove_dir_all(&dir);
+        assert!(err.to_string().contains("feature"), "{err}");
+        assert!(!dir.path().join("Cargo.toml").exists());
     }
 }

@@ -27,24 +27,17 @@ pub fn create_dto(path: &Path, name: &str, fields: &[DtoFieldSpec]) -> Result<Sc
             "DTO name `{name}` is not a valid Rust ident"
         )));
     }
-    for field in fields {
-        if !is_safe_ident(&field.name) {
-            return Err(crate::Error::InvalidArgument(format!(
-                "DTO field `{}` is not a valid Rust ident",
-                field.name
-            )));
+    for f in fields {
+        if !is_safe_ident(&f.name) || !is_safe_type(&f.ty) {
+            return Err(crate::Error::InvalidArgument(
+                "DTO field has an unsafe name or type".into(),
+            ));
         }
-        if !is_safe_rust_type(&field.ty) {
-            return Err(crate::Error::InvalidArgument(format!(
-                "DTO field type `{}` is not a plain Rust type",
-                field.ty
-            )));
-        }
-        for validator in &field.validators {
-            if !is_safe_attribute(validator) {
-                return Err(crate::Error::InvalidArgument(format!(
-                    "DTO validator `{validator}` is not a single Rust attribute"
-                )));
+        for v in &f.validators {
+            if !is_safe_validator(v) {
+                return Err(crate::Error::InvalidArgument(
+                    "DTO validator must be a single attribute, not arbitrary Rust".into(),
+                ));
             }
         }
     }
@@ -81,55 +74,69 @@ fn render_dto(name: &str, fields: &[DtoFieldSpec]) -> String {
 
 fn is_safe_ident(s: &str) -> bool {
     !s.is_empty()
-        && s.len() <= 64
         && s.chars()
             .next()
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Type position only: idents, paths, references, generics. No quotes,
-/// comments, or statement breaks, so a field type cannot close the struct.
-fn is_safe_rust_type(ty: &str) -> bool {
-    !ty.is_empty()
-        && ty.len() <= 128
-        && !ty.contains("--")
-        && ty.chars().all(|c| {
-            c.is_ascii_alphanumeric()
-                || matches!(
-                    c,
-                    '_' | ':' | '<' | '>' | ',' | ' ' | '&' | '\'' | '[' | ']'
-                )
-        })
+/// A type written into generated Rust. One path, optionally one level of
+/// generics (`Vec<String>`, `HashMap<String, i64>`). Braces, semicolons,
+/// attributes, and nested generics are rejected so a field type cannot
+/// close the struct and inject items.
+fn is_safe_type(ty: &str) -> bool {
+    let Some((head, tail)) = split_generics(ty) else {
+        return false;
+    };
+    if !is_path(head) {
+        return false;
+    }
+    match tail {
+        None => true,
+        Some(inner) => {
+            !inner.is_empty()
+                && inner.split(',').all(|part| {
+                    let part = part.trim();
+                    !part.is_empty() && is_path(part)
+                })
+        }
+    }
 }
 
-/// One attribute token (`#[validate(email)]`). Newlines and braces would
-/// let the string insert further items into the generated module.
-fn is_safe_attribute(attr: &str) -> bool {
-    attr.len() <= 256
-        && attr.starts_with("#[")
-        && attr.ends_with(']')
-        && !attr.contains('\n')
-        && !attr.contains('\r')
-        && attr.chars().all(|c| {
+fn is_path(s: &str) -> bool {
+    !s.is_empty() && s.split("::").all(is_safe_ident)
+}
+
+fn split_generics(ty: &str) -> Option<(&str, Option<&str>)> {
+    match ty.find('<') {
+        None => Some((ty, None)),
+        Some(i) => {
+            if !ty.ends_with('>') || ty[..i].contains('>') {
+                return None;
+            }
+            let inner = &ty[i + 1..ty.len() - 1];
+            if inner.contains('<') || inner.contains('>') {
+                return None;
+            }
+            Some((&ty[..i], Some(inner)))
+        }
+    }
+}
+
+/// One attribute, and nothing after it. Newlines, braces, and a second
+/// `]` would let a validator line escape the struct.
+fn is_safe_validator(v: &str) -> bool {
+    if v.len() < 3 || !v.starts_with("#[") || !v.ends_with(']') {
+        return false;
+    }
+    let interior = &v[2..v.len() - 1];
+    !interior.is_empty()
+        && !interior.contains(']')
+        && interior.chars().all(|c| {
             c.is_ascii_alphanumeric()
                 || matches!(
                     c,
-                    '_' | ':'
-                        | ','
-                        | '='
-                        | '('
-                        | ')'
-                        | ' '
-                        | '"'
-                        | '\''
-                        | '.'
-                        | '<'
-                        | '>'
-                        | '-'
-                        | '#'
-                        | '['
-                        | ']'
+                    '_' | ':' | ',' | '=' | '(' | ')' | '.' | '-' | '"' | '\'' | ' '
                 )
         })
 }
@@ -153,74 +160,42 @@ fn snake_case(s: &str) -> String {
 mod tests {
     use super::*;
 
-    fn field(name: &str, ty: &str, validators: &[&str]) -> DtoFieldSpec {
-        DtoFieldSpec {
-            name: name.into(),
-            ty: ty.into(),
+    #[test]
+    fn create_dto_rejects_injected_field_type_and_validator() {
+        let dir = tempfile::tempdir().unwrap();
+        let injected = DtoFieldSpec {
+            name: "email".into(),
+            ty: "String }\nfn pwned() {}".into(),
             optional: false,
-            validators: validators.iter().map(|v| (*v).to_string()).collect(),
-        }
+            validators: vec![],
+        };
+        let err = create_dto(dir.path(), "User", &[injected]).unwrap_err();
+        assert!(err.to_string().contains("unsafe"), "{err}");
+        assert!(!dir.path().join("src").join("user.rs").exists());
+
+        let injected_attr = DtoFieldSpec {
+            name: "email".into(),
+            ty: "String".into(),
+            optional: false,
+            validators: vec!["#[validate(email)]\npub fn pwned() {}".into()],
+        };
+        let err = create_dto(dir.path(), "User", &[injected_attr]).unwrap_err();
+        assert!(err.to_string().contains("validator"), "{err}");
     }
 
     #[test]
-    fn create_dto_writes_a_plain_field() {
-        let dir = std::env::temp_dir().join(format!(
-            "nestrs-mcp-dto-ok-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        create_dto(
-            &dir,
-            "UserDto",
-            &[field("email", "String", &["#[validate(email)]"])],
-        )
-        .expect("safe dto");
-        let text = fs::read_to_string(dir.join("src/user_dto.rs")).unwrap();
-        assert!(text.contains("pub email: String"));
-        assert!(text.contains("#[validate(email)]"));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn create_dto_rejects_type_and_validator_injection_before_writing() {
-        let dir = std::env::temp_dir().join(format!(
-            "nestrs-mcp-dto-bad-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        let type_err = create_dto(
-            &dir,
-            "User",
-            &[field(
-                "name",
-                "String; std::process::exit(0); pub x: u8",
-                &[],
-            )],
-        )
-        .unwrap_err();
-        assert!(type_err.to_string().contains("not a plain Rust type"));
-        let attr_err = create_dto(
-            &dir,
-            "User",
-            &[field(
-                "name",
-                "String",
-                &["#[validate(email)]\npub pwned: String,"],
-            )],
-        )
-        .unwrap_err();
-        assert!(attr_err.to_string().contains("not a single Rust attribute"));
-        assert!(
-            !dir.join("src").exists(),
-            "rejected scaffold must not write files"
-        );
+    fn create_dto_accepts_ordinary_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let fields = vec![DtoFieldSpec {
+            name: "email".into(),
+            ty: "std::string::String".into(),
+            optional: true,
+            validators: vec!["#[validate(length(min = 1, max = 32))]".into()],
+        }];
+        create_dto(dir.path(), "User", &fields).unwrap();
+        let src = std::fs::read_to_string(dir.path().join("src/user.rs")).unwrap();
+        assert!(src.contains("pub email: Option<std::string::String>"));
+        assert!(src.contains("#[validate(length(min = 1, max = 32))]"));
+        assert!(!src.contains("pwned"));
     }
 }

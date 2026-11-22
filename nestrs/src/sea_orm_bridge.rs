@@ -50,18 +50,19 @@ impl RowAuthz for AbilityAuthz {
 
 /// Build the instance [`Subject`] for a stored row.
 ///
-/// The caller passes `subject_type`; a column named `type` must not switch
-/// the check onto a different grant. Columns are presented as the CASL
-/// `attributes` object so a user-controlled `attributes` value cannot hide
-/// the real columns (conditions and predicates read `attributes` when it
-/// is present).
+/// The outer `type` is the caller-supplied subject, so a column named `type`
+/// cannot switch the check onto another grant. Columns are copied under
+/// `attributes` (what conditions and predicates read). A nested `attributes`
+/// object is dropped so it cannot hide those columns. The stored `type`
+/// column is left as data: replacing it with `subject_type` made
+/// `{ "type": "<subject>" }` true for every row, and a predicate that
+/// rejected a discriminator never saw the stored value.
 fn row_as_subject(subject_type: &str, row: &Value) -> Option<Subject> {
     let Value::Object(src) = row else {
         return None;
     };
     let mut columns = src.clone();
     columns.remove("attributes");
-    columns.insert("type".to_string(), Value::String(subject_type.to_string()));
     Some(Subject::Instance(serde_json::json!({
         "type": subject_type,
         "attributes": columns,
@@ -139,5 +140,54 @@ mod tests {
         let authz = post_reader_and_user_reader();
         assert!(!authz.allows_row("read", "Post", &json!("alice")));
         assert!(!authz.allows_row("read", "Post", &Value::Null));
+    }
+
+    #[test]
+    fn allows_row_type_condition_sees_the_stored_column() {
+        let mut conds = Conditions::new();
+        conds.insert("type".into(), json!("Document"));
+        let ability = Ability::builder()
+            .can_with_conditions(Action::Read, "Document", conds)
+            .build();
+        let authz = AbilityAuthz::new(Arc::new(ability));
+        let document = json!({ "type": "Document", "body": "ok" });
+        let secret = json!({ "type": "secret", "body": "hidden" });
+        assert!(authz.allows_row("read", "Document", &document));
+        assert!(
+            !authz.allows_row("read", "Document", &secret),
+            "the subject name must not replace the stored type column"
+        );
+    }
+
+    #[tokio::test]
+    async fn allows_row_predicate_sees_the_stored_type_column() {
+        use crate::policies::{with_principal, Principal};
+
+        let ability = Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Document",
+                vec![],
+                |row: &Value, _: &Principal| {
+                    row.get("type").and_then(|v| v.as_str()) != Some("secret")
+                },
+            )
+            .build();
+        let authz = AbilityAuthz::new(Arc::new(ability));
+        let principal = Arc::new(Principal {
+            subject: "alice".into(),
+            roles: vec![],
+            claims: json!({}),
+        });
+        with_principal(principal, async move {
+            let note = json!({ "type": "note", "body": "hi" });
+            let secret = json!({ "type": "secret", "body": "hidden" });
+            assert!(authz.allows_row("read", "Document", &note));
+            assert!(
+                !authz.allows_row("read", "Document", &secret),
+                "a predicate must observe the stored type, not the subject name"
+            );
+        })
+        .await;
     }
 }

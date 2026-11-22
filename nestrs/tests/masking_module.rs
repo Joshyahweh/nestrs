@@ -229,6 +229,35 @@ async fn masking_recurses_into_arrays_of_objects() {
 }
 
 #[tokio::test]
+async fn masking_still_strips_fields_when_body_is_exactly_the_cap() {
+    let ability = ability_with_post_fields();
+    let resp = json_response(
+        StatusCode::OK,
+        json!({ "type": "Post", "id": 1, "title": "hi", "body": "secret" }),
+    );
+    let raw = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let resp = json_response(
+        StatusCode::OK,
+        json!({ "type": "Post", "id": 1, "title": "hi", "body": "secret" }),
+    );
+    let cfg = MaskingConfig {
+        max_body_bytes: raw.len(),
+    };
+    let masked = mask_response(resp, &ability, cfg).await;
+    let body = axum::body::to_bytes(masked.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        v.get("body").is_none(),
+        "a body that fills the cap must still be masked, got {v}"
+    );
+    assert_eq!(v.get("title").and_then(|t| t.as_str()), Some("hi"));
+}
+
+#[tokio::test]
 async fn masking_masks_runtime_built_type_names_without_leaking() {
     // Audit regression: the walker used to Box::leak the response's "type"
     // value into a Subject::Type(&'static str) — one leaked allocation per

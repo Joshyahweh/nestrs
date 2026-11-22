@@ -4,7 +4,7 @@
 //! can resolve path rows under deny-closed policy via
 //! [`nestrs_sea_orm::bind_read`].
 
-use crate::policies::{current_principal, Ability, Action, Subject};
+use crate::policies::{Ability, Action, Subject};
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
@@ -41,14 +41,31 @@ impl RowAuthz for AbilityAuthz {
         {
             return false;
         }
-        let mut instance = row.clone();
-        if let Value::Object(map) = &mut instance {
-            map.entry("type".to_string())
-                .or_insert_with(|| Value::String(subject_type.to_string()));
-        }
-        let _ = current_principal();
-        self.0.can(&action, &Subject::Instance(instance))
+        let Some(instance) = row_as_subject(subject_type, row) else {
+            return false;
+        };
+        self.0.can(&action, &instance)
     }
+}
+
+/// Build the instance [`Subject`] for a stored row.
+///
+/// The caller passes `subject_type`; a column named `type` must not switch
+/// the check onto a different grant. Columns are presented as the CASL
+/// `attributes` object so a user-controlled `attributes` value cannot hide
+/// the real columns (conditions and predicates read `attributes` when it
+/// is present).
+fn row_as_subject(subject_type: &str, row: &Value) -> Option<Subject> {
+    let Value::Object(src) = row else {
+        return None;
+    };
+    let mut columns = src.clone();
+    columns.remove("attributes");
+    columns.insert("type".to_string(), Value::String(subject_type.to_string()));
+    Some(Subject::Instance(serde_json::json!({
+        "type": subject_type,
+        "attributes": columns,
+    })))
 }
 
 /// Build [`AbilityAuthz`] from the request-scoped [`crate::current_ability`].
@@ -76,4 +93,51 @@ pub async fn attach_row_authz_middleware(mut req: Request, next: Next) -> Respon
         req.extensions_mut().insert(BoundAuthz::new(dyn_authz));
     }
     next.run(req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policies::Conditions;
+    use serde_json::json;
+
+    fn post_reader_and_user_reader() -> AbilityAuthz {
+        let mut conds = Conditions::new();
+        conds.insert("author".into(), json!("alice"));
+        let ability = Ability::builder()
+            .can_with_conditions(Action::Read, "Post", conds)
+            .can(Action::Read, "User")
+            .build();
+        AbilityAuthz::new(Arc::new(ability))
+    }
+
+    #[test]
+    fn allows_row_ignores_a_forged_type_and_attributes() {
+        let authz = post_reader_and_user_reader();
+        let forged = json!({
+            "type": "User",
+            "author": "bob",
+            "attributes": { "author": "alice", "type": "User" }
+        });
+        assert!(
+            !authz.allows_row("read", "Post", &forged),
+            "row type and attributes must not select the User grant or spoof author"
+        );
+    }
+
+    #[test]
+    fn allows_row_uses_real_columns() {
+        let authz = post_reader_and_user_reader();
+        let alice = json!({ "author": "alice", "title": "hi" });
+        let bob = json!({ "author": "bob", "title": "hi" });
+        assert!(authz.allows_row("read", "Post", &alice));
+        assert!(!authz.allows_row("read", "Post", &bob));
+    }
+
+    #[test]
+    fn allows_row_rejects_non_object_rows() {
+        let authz = post_reader_and_user_reader();
+        assert!(!authz.allows_row("read", "Post", &json!("alice")));
+        assert!(!authz.allows_row("read", "Post", &Value::Null));
+    }
 }

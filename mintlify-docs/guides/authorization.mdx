@@ -75,7 +75,7 @@ let ability = Ability::builder()
 
 ### The vocabulary
 
-- **`Action`** — `Read`, `Create`, `Update`, `Delete`, `Manage` (a wildcard that satisfies every other action on the same subject, CASL convention), or `Custom(String)` for domain verbs like `"publish"`. The wildcard matches in both directions: a `Manage` rule grants any action, and `can(&Action::Manage, ...)` asks "may the caller do *anything* here".
+- **`Action`** — `Read`, `Create`, `Update`, `Delete`, `Manage` (a wildcard **grant** that satisfies every other action on the same subject, CASL convention), or `Custom(String)` for domain verbs like `"publish"`. A `Read` grant does not satisfy `can(&Action::Manage, ...)` or `#[check_policies("manage:…")]`.
 - **`Subject`** — `Subject::Type(String)` matches a *type* of resource (`"posts"`); `Subject::Instance(json)` matches one concrete document, which is when `conditions` and row predicates get evaluated. Instances may use the CASL wire shape `{"type": "Post", "attributes": {...}}` — attributes under `"attributes"` — or be a bare row.
 - **`Conditions`** — a `serde_json::Map<String, Value>` of `field: value` equality constraints, checked against the instance's fields with exact JSON equality (`"12"` the string never equals `12` the number; a missing field matches only a `null` condition value).
 - **`Rule`** — one grant: `action` + `subject_type` (`&'static str` in the builder) + optionally `fields` (an allow-list), `conditions`, and a `predicate` (a [`RowPredicate`](#rowpredicate-two-layers)). `None` on each optional slot means "no restriction of that kind".
@@ -180,7 +180,7 @@ impl PostsController {
 
 ### Conditions at the guard
 
-When the matched rule carries `conditions`, the guard re-evaluates them against the *principal*, built as `{"type": "User", "attributes": {"sub": ..., "roles": [...]}}`. Exact JSON equality applies, so `{"sub": "alice"}` is the way to express a per-user grant:
+When the matched rule carries `conditions`, the guard re-evaluates them against the principal as an instance of the **route subject** (`{"type": "<subject from check_policies>", "attributes": { ...verified claims }}`). `sub` and `roles` are the values `AuthnGuard` extracted, and they overwrite claims of the same name. A grant on a different subject, including `"User"`, does not satisfy the check. Exact JSON equality applies, so `{"sub": "alice"}` is the way to express a per-user grant:
 
 ```rust
 let only_alice: Conditions = json!({ "sub": "alice" }).as_object().unwrap().clone();

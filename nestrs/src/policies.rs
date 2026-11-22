@@ -46,11 +46,16 @@ pub enum Action {
 }
 
 impl Action {
-    /// Wildcard match: `Manage` implies everything; otherwise strict equality.
-    pub fn matches(&self, other: &Action) -> bool {
-        match (self, other) {
-            (Action::Manage, _) | (_, Action::Manage) => true,
-            (a, b) => a == b,
+    /// Whether this **grant** covers a requested action.
+    ///
+    /// `Manage` on the grant covers every requested action (CASL). A narrower
+    /// grant does not cover `Manage`: `can(&Action::Manage, …)` and
+    /// `#[check_policies("manage:…")]` require a `Manage` grant, not merely
+    /// some other permission on the same subject.
+    pub fn matches(&self, requested: &Action) -> bool {
+        match self {
+            Action::Manage => true,
+            grant => grant == requested,
         }
     }
 
@@ -489,26 +494,11 @@ impl CanActivate for PoliciesGuard {
                 )
             })?;
 
-        // The principal is required so we can build an instance subject for
-        // rules with `conditions`. The PrincipalIdentity is set by
-        // `install_authn_middleware`; if it didn't run, we have no caller to
-        // evaluate conditions against.
+        // The principal is required so conditional rules can be checked
+        // against the verified identity. `install_authn_middleware` /
+        // `AuthnGuard` put `PrincipalIdentity` on the request.
         #[cfg(feature = "authn")]
-        let principal_subject: Option<Subject> = parts
-            .extensions
-            .get::<PrincipalIdentity>()
-            .cloned()
-            .map(|p| {
-                Subject::Instance(serde_json::json!({
-                    "type": "User",
-                    "attributes": {
-                        "sub": p.subject,
-                        "roles": p.roles,
-                    }
-                }))
-            });
-        #[cfg(not(feature = "authn"))]
-        let principal_subject: Option<Subject> = None;
+        let principal = parts.extensions.get::<PrincipalIdentity>().cloned();
 
         let csv = route_metadata_csv(parts, "check_policies")
             .ok_or_else(|| GuardError::forbidden("no #[check_policies(...)] on route"))?;
@@ -519,9 +509,9 @@ impl CanActivate for PoliciesGuard {
 
         for entry in &entries {
             // The subject is the **type** declared in the route metadata. A
-            // matching rule must (a) grant the action on the type, and (b) if
-            // the rule carries `conditions`, satisfy them against the
-            // *principal* (so `{ "roles": "admin" }` can gate admin routes).
+            // matching rule must (a) grant the action on that type, and (b) if
+            // the rule carries `conditions`, satisfy them against this same
+            // type populated with the principal's verified claims.
             let subject = Subject::Type(entry.subject_type.clone());
             if !ability.can(&entry.action, &subject) {
                 return Err(GuardError::forbidden(
@@ -533,11 +523,24 @@ impl CanActivate for PoliciesGuard {
                     .as_str(),
                 ));
             }
-            // Conditions pass: re-evaluate specifically against the principal
-            // (the CASL convention is conditions describe the principal).
+            // Type checks ignore conditions. Re-check as an instance of the
+            // route subject so a grant on a different type (for example
+            // `can(Read, "User")`) cannot satisfy `read:Post`.
             if ability.constraint(&entry.action, &subject).is_some() {
-                if let Some(ref ps) = principal_subject {
-                    if !ability.can(&entry.action, ps) {
+                #[cfg(feature = "authn")]
+                {
+                    let Some(ref principal) = principal else {
+                        return Err(GuardError::forbidden(
+                            format!(
+                                "policy denied: rule has conditions but no principal is present ({} on {})",
+                                entry.action.as_key(),
+                                entry.subject_type
+                            )
+                            .as_str(),
+                        ));
+                    };
+                    let instance = principal_as_subject(&entry.subject_type, principal);
+                    if !ability.can(&entry.action, &instance) {
                         return Err(GuardError::forbidden(
                             format!(
                                 "policy denied: principal does not satisfy conditions for {} on {}",
@@ -547,9 +550,9 @@ impl CanActivate for PoliciesGuard {
                             .as_str(),
                         ));
                     }
-                } else {
-                    // No principal available (e.g. `authn` not enabled) but a
-                    // rule has conditions — deny conservatively.
+                }
+                #[cfg(not(feature = "authn"))]
+                {
                     return Err(GuardError::forbidden(
                         format!(
                             "policy denied: rule has conditions but no principal is present ({} on {})",
@@ -563,6 +566,30 @@ impl CanActivate for PoliciesGuard {
         }
         Ok(())
     }
+}
+
+/// Instance of `subject_type` whose attributes are the verified principal.
+///
+/// `sub` and `roles` overwrite the raw claims of the same name so a token
+/// cannot present a different identity than the one [`PrincipalIdentity`]
+/// extracted. The subject type is the route's type, not a fixed `"User"`.
+#[cfg(feature = "authn")]
+fn principal_as_subject(subject_type: &str, principal: &PrincipalIdentity) -> Subject {
+    let mut attributes = serde_json::Map::new();
+    if let Some(claims) = principal.claims.as_object() {
+        for (key, value) in claims {
+            attributes.insert(key.clone(), value.clone());
+        }
+    }
+    attributes.insert(
+        "sub".to_string(),
+        serde_json::Value::String(principal.subject.clone()),
+    );
+    attributes.insert("roles".to_string(), serde_json::json!(principal.roles));
+    Subject::Instance(serde_json::json!({
+        "type": subject_type,
+        "attributes": attributes,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -823,6 +850,23 @@ mod tests {
     fn action_read_does_not_imply_update() {
         assert!(!Action::Read.matches(&Action::Update));
         assert!(!Action::Update.matches(&Action::Delete));
+    }
+
+    #[test]
+    fn narrower_grant_does_not_satisfy_manage() {
+        assert!(!Action::Read.matches(&Action::Manage));
+        assert!(!Action::Update.matches(&Action::Manage));
+        assert!(!Action::Delete.matches(&Action::Manage));
+        assert!(!Action::Custom("audit".into()).matches(&Action::Manage));
+        assert!(Action::Manage.matches(&Action::Manage));
+        assert!(Action::Manage.matches(&Action::Read));
+
+        let ab = Ability::builder().can(Action::Read, "Post").build();
+        assert!(
+            !ab.can(&Action::Manage, &Subject::Type("Post".into())),
+            "a read grant must not pass a manage check"
+        );
+        assert!(ab.can(&Action::Read, &Subject::Type("Post".into())));
     }
 
     #[test]

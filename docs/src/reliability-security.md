@@ -4,8 +4,10 @@ Threat-model notes for the reliability / integration / AI packages.
 
 ## Idempotency (`nestrs-idempotency`)
 
-- Always **scope** keys by authenticated principal (`IdempotencyOptions.scope`) so tenants cannot replay another user's response.
-- Treat in-flight collisions as **409**, not 200 — never execute the handler twice for the same key.
+- The middleware binds each key to a hash of `Authorization` and `Cookie`. A client-supplied key is not a global lookup, and a different caller does not receive the cached body.
+- `IdempotencyOptions.scope` is an additional partition (tenant, route group), not the only one.
+- A completed key is replayed only for the same method, path, query, and body. Reuse against a different request is **409** `IDEMPOTENCY_KEY_MISMATCH` and does not return the stored body.
+- Treat in-flight collisions as **409**, not 200 — never execute the handler twice for the same key. Redis claim-or-read is one `EVAL`.
 - TTL must bound store growth; defaults to 24h in-memory.
 
 ## Webhooks (`nestrs-webhooks`)

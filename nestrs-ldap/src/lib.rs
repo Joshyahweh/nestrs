@@ -139,8 +139,16 @@ mod tests {
         });
         let err = auth.authenticate("ada", "").await.unwrap_err();
         assert!(matches!(err, LdapAuthError::EmptyCredentials));
-        let test_password = std::env::var("NESTRS_LDAP_TEST_PASSWORD")
-            .unwrap_or_else(|_| String::from("not-used-in-this-test"));
+        let test_password = std::env::var("NESTRS_LDAP_TEST_PASSWORD").unwrap_or_else(|_| {
+            format!(
+                "test-password-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            )
+        });
         let err = auth.authenticate("", &test_password).await.unwrap_err();
         assert!(matches!(err, LdapAuthError::EmptyCredentials));
     }

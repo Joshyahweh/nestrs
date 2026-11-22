@@ -68,11 +68,14 @@ Your relay `PublishFn` should HTTP POST with Standard Webhooks headers from `sig
 ```rust
 use nestrs::webhooks::{sign_standard_webhook, verify_standard_webhook};
 
-let signed = sign_standard_webhook("whsec_…", "msg_1", 1_700_000_000, body);
+let now = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)?
+    .as_secs() as i64;
+let signed = sign_standard_webhook("whsec_…", "msg_1", now, body);
 verify_standard_webhook(
     "whsec_…",
     "msg_1",
-    &ts.to_string(),
+    &now.to_string(),
     &signed.signature_header,
     body,
 )?;
@@ -81,6 +84,7 @@ verify_standard_webhook(
 ## Security
 
 - Prefer `whsec_`-encoded secrets; never log them.
+- Verification rejects timestamps outside a five-minute window. A correct signature does not make an old delivery valid.
 - Allowlist outbound URLs (SSRF).
 - Property tests live in `nestrs-webhooks/tests/sign_verify_prop.rs`.
 

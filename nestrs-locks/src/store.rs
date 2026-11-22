@@ -191,13 +191,20 @@ impl LockStore for RedisLockStore {
     }
 
     async fn release(&self, name: &str, token: &str) {
-        use redis::AsyncCommands;
         if let Ok(mut conn) = self.client.get_multiplexed_async_connection().await {
             let key = format!("{}{}", self.prefix, name);
-            let current: Option<String> = conn.get(&key).await.ok().flatten();
-            if current.as_deref() == Some(token) {
-                let _: Result<(), _> = conn.del(key).await;
-            }
+            // GET then DEL is not atomic: the lease can expire and another
+            // holder can acquire the same key between the two commands, and
+            // the DEL would drop their lock. Compare and delete in one EVAL.
+            let _: Result<i32, _> = redis::cmd("EVAL")
+                .arg(
+                    r#"if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end"#,
+                )
+                .arg(1)
+                .arg(&key)
+                .arg(token)
+                .query_async(&mut conn)
+                .await;
         }
     }
 }

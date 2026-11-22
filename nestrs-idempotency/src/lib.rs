@@ -13,11 +13,14 @@
 //!
 //! # Security
 //!
-//! The store key is bound to a hash of `Authorization` and `Cookie`, so a client-supplied
-//! key is not a global lookup. [`IdempotencyOptions::scope`] is an extra partition (tenant,
-//! route group). Prefer Redis TTL in multi-instance deploys (`cache-redis`). Redis
-//! claim-or-read is one `EVAL`, so a peer cannot run the handler again between a `GET` of
-//! the stored response and `SET NX` of the lock.
+//! The store key is bound to a hash of every `Authorization` and `Cookie` value, so a
+//! client-supplied key is not a global lookup and a second header cannot leave the real
+//! session cookie outside the partition. [`IdempotencyOptions::scope`] is an extra
+//! partition (tenant, route group). Bodies larger than
+//! [`IdempotencyOptions::max_body_bytes`] are **413** and are not executed. Prefer Redis
+//! TTL in multi-instance deploys (`cache-redis`). Claim-or-read is one `EVAL`, and
+//! `complete` publishes the body and deletes the lock only while it still holds the
+//! fence token from that claim.
 //!
 //! # Middleware
 //!
@@ -41,8 +44,8 @@ mod store;
 
 pub use middleware::idempotency_middleware;
 pub use module::IdempotencyModule;
-pub use options::IdempotencyOptions;
-pub use store::{IdempotencyRecord, IdempotencyStore, InMemoryIdempotencyStore};
+pub use options::{IdempotencyOptions, DEFAULT_MAX_BODY_BYTES, MAX_IDEMPOTENCY_KEY_BYTES};
+pub use store::{IdempotencyClaim, IdempotencyRecord, IdempotencyStore, InMemoryIdempotencyStore};
 
 #[cfg(feature = "cache-redis")]
 pub use store::RedisIdempotencyStore;

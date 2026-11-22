@@ -3,7 +3,7 @@ title: "Idempotency — `nestrs-idempotency`"
 description: "Idempotency-Key request deduplication with in-memory or Redis stores — NestJS @nestjs/idempotency analogue."
 ---
 
-`nestrs-idempotency` deduplicates mutating requests by `Idempotency-Key` (configurable header). The first writer executes the handler and stores status + body. A replay requires the same caller (`Authorization` and `Cookie`) and the same method, path, query, and body, and returns the cached response with `idempotency-replayed: true`. A different request with that key is **409** `IDEMPOTENCY_KEY_MISMATCH` and does not include the stored body. In-flight collisions return **409**.
+`nestrs-idempotency` deduplicates mutating requests by `Idempotency-Key` (configurable header). The first writer executes the handler and stores status + body. A replay requires the same caller (every `Authorization` and `Cookie` value) and the same method, path, query, and body, and returns the cached response with `idempotency-replayed: true`. A different request with that key is **409** `IDEMPOTENCY_KEY_MISMATCH` and does not include the stored body. In-flight collisions return **409**. A body over `max_body_bytes` is **413** and the handler does not run.
 
 ## Install
 
@@ -34,7 +34,8 @@ let opts = IdempotencyOptions {
 | `store` | `Arc<dyn IdempotencyStore>` — memory or Redis |
 | `header_name` | Looked up case-insensitively; also accepts `Idempotency-Key` |
 | `required` | Reject requests without a key |
-| `scope` | Extra prefix. The storage key also includes a hash of `Authorization` and `Cookie`. |
+| `scope` | Extra prefix. The storage key also includes a hash of every `Authorization` and `Cookie` value. |
+| `max_body_bytes` | Default 2 MiB. A larger body with a key is **413** and is not executed. |
 
 ## Middleware
 
@@ -65,19 +66,19 @@ pub trait IdempotencyStore: Send + Sync {
     async fn begin_or_get(
         &self,
         scope_key: &str,
-    ) -> Result<Option<IdempotencyRecord>, IdempotencyBusy>;
+    ) -> Result<IdempotencyClaim, IdempotencyBusy>;
 
-    async fn complete(&self, scope_key: &str, record: IdempotencyRecord);
+    async fn complete(&self, scope_key: &str, token: &str, record: IdempotencyRecord);
 }
 ```
 
-Exactly one concurrent `begin_or_get` wins (`Ok(None)`); others get `IdempotencyBusy`.
+Exactly one concurrent `begin_or_get` wins (`IdempotencyClaim::Acquired { token }`); others get `IdempotencyBusy`. `complete` stores the body only while `token` still owns the lock.
 
 ## Security
 
-- The middleware binds the key to `Authorization` and `Cookie`. `scope` is an extra tenant or route partition.
-- Prefer Redis TTL in multi-instance deploys. Redis claim-or-read is a single `EVAL`.
-- Upgrading changes the storage key, so an in-flight retry from an older build runs the handler once instead of replaying the old body.
+- The middleware binds the key to every `Authorization` and `Cookie` value. `scope` is an extra tenant or route partition.
+- Prefer Redis TTL in multi-instance deploys. Redis claim-or-read is a single `EVAL`, and the lock value is a fence token.
+- The caller hash covers every header value, so a retry of a key stored by the previous build runs the handler once instead of replaying the old body.
 - Details: [security notes](/guides/reliability-security#idempotency-nestrs-idempotency).
 
 ## See also

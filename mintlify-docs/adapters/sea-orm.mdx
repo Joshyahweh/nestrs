@@ -130,6 +130,8 @@ let row = repo
 
 Authorized helpers are **deny-closed**: missing ability / failed predicate → `RepoError::Denied` (or `Ok(None)` for invisible reads).
 
+`AbilityAuthz` selects the grant from the subject you pass (`"Post"`), not from a column named `type`. Conditions and predicates still see that column's stored value, and a nested `attributes` object on the row cannot hide the other columns.
+
 ## Route posture (umbrella)
 
 ```rust

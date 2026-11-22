@@ -20,10 +20,10 @@
 //!
 //! ## Body size cap
 //!
-//! Bodies larger than 1 MiB are passed through unmasked (with a `tracing`
-//! `warn!`) so a malicious or accidentally large response cannot OOM the
-//! server. The cap is conservative and configurable via
-//! [`MaskingConfig::max_body_bytes`].
+//! Bodies larger than [`MaskingConfig::max_body_bytes`] (default 1 MiB) are
+//! not returned unmasked. Buffering stops at the cap and the response body
+//! is replaced with an empty one, so a payload sized to the cap cannot skip
+//! field stripping. The original status is kept.
 //!
 //! ## Test
 //!
@@ -45,8 +45,8 @@ pub const DEFAULT_MAX_BODY_BYTES: usize = 1024 * 1024;
 /// Tunables for [`PolicyMaskingInterceptor`].
 #[derive(Clone, Debug)]
 pub struct MaskingConfig {
-    /// Maximum body size (in bytes) we'll buffer for masking. Larger bodies
-    /// pass through unmasked.
+    /// Maximum body size (in bytes) buffered for masking. A larger body is
+    /// replaced with an empty one so it cannot skip field stripping.
     pub max_body_bytes: usize,
 }
 
@@ -97,20 +97,20 @@ pub async fn mask_response(response: Response, ability: &Ability, cfg: MaskingCo
     let bytes = match to_bytes(body, cfg.max_body_bytes).await {
         Ok(b) => b,
         Err(_) => {
+            // `to_bytes` errors when the body is larger than the limit.
+            // Returning that prefix, or the original body, would skip
+            // field stripping. Empty keeps the status and withholds the
+            // payload.
             tracing::warn!(
                 target: "nestrs::masking",
-                "response body exceeds cap; passing through unmasked"
+                "response body exceeds cap; withholding body instead of skipping masking"
             );
             return Response::from_parts(parts, Body::empty());
         }
     };
-    if bytes.len() >= cfg.max_body_bytes {
-        tracing::warn!(
-            target: "nestrs::masking",
-            "response body at or above cap; passing through unmasked"
-        );
-        return Response::from_parts(parts, Body::from(bytes));
-    }
+    // A body that fills the cap was fully read (`to_bytes` only returns
+    // `Ok` at or under the limit). Mask it. The previous `>= cap` branch
+    // sent that exact-sized body through with every field intact.
 
     let mut value: Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,

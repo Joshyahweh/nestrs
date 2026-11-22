@@ -2,7 +2,7 @@
 
 `Idempotency-Key` request deduplication for [nestrs](https://crates.io/crates/nestrs) — NestJS [`@nestjs/idempotency`](https://docs.nestjs.com/reliability/idempotency) analogue.
 
-Safe retries for POSTs and other mutating routes: the first caller runs the handler; later callers with the same key **replay** the completed response. Concurrent in-flight keys return **409 Conflict**.
+Safe retries for POSTs and other mutating routes: the first caller runs the handler; a later call with the same key **from the same caller and the same request** replays the completed response. A different method, path, query, or body is **409** and does not return the stored body. Concurrent in-flight keys return **409 Conflict**. The store key includes a hash of `Authorization` and `Cookie`, so another caller cannot read the cached response by reusing the key.
 
 ## Install
 
@@ -40,7 +40,9 @@ Mount `idempotency_middleware` on mutating routes (or globally) so the store see
 | Situation | Result |
 |-----------|--------|
 | First request with key | Handler runs; response stored |
-| Replay of completed key | Cached status + body returned |
+| Same caller, same method/path/query/body | Cached status + body returned |
+| Same key, different request | **409** (`IDEMPOTENCY_KEY_MISMATCH`), stored body withheld |
+| Different `Authorization` or `Cookie` | Separate slot; the other caller's body is not returned |
 | Second caller while in-flight | **409** (`IdempotencyBusy`) |
 | Missing key when `required` | Rejected (configurable) |
 
@@ -51,9 +53,9 @@ Mount `idempotency_middleware` on mutating routes (or globally) so the store see
 | `store` | in-memory (24h TTL) | `IdempotencyStore` impl |
 | `header_name` | `idempotency-key` | Incoming header |
 | `required` | `false` | Fail if header absent |
-| `scope` | `None` | Prefix keys (e.g. tenant / user id) |
+| `scope` | `None` | Extra prefix (tenant / route group). Credentials are always part of the key. |
 
-Use `scope` so tenants cannot collide on the same client-supplied key.
+`scope` is optional. Caller identity comes from `Authorization` and `Cookie` even when `scope` is unset. Set `scope` when one process serves several tenants that share credentials.
 
 ## Surface
 
@@ -65,8 +67,9 @@ Use `scope` so tenants cannot collide on the same client-supplied key.
 
 ## Security notes
 
-- Keys are attacker-chosen; always combine with auth + `scope`.
+- Keys are attacker-chosen. The middleware binds them to `Authorization` and `Cookie` and refuses to replay a different request.
 - Replay stores the full response body — avoid caching secrets in error payloads.
+- After this change, retries of keys stored by an older build run the handler once (the storage key changed) instead of returning the previous body.
 - See [reliability-security](https://github.com/Joshyahweh/nestrs/blob/main/docs/src/reliability-security.md).
 
 ## Docs

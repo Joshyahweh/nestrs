@@ -706,6 +706,11 @@ pub async fn install_policies_middleware(
 /// entity's JSON blob. Pass `None` to treat the keys as raw SQL column names.
 /// Multiple conditions are joined with `AND`.
 ///
+/// Column names and `json_column` are identifiers, not bind parameters.
+/// A name that is not `[A-Za-z_][A-Za-z0-9_]{0,63}` fails closed: the
+/// fragment is `0 = 1` and no binds are returned, so a policy key cannot
+/// break out of `json_extract(..., '$.…')` or become a raw predicate.
+///
 /// The first bind index is `start_at` (typically the count of preceding
 /// `?` placeholders already in the surrounding query).
 pub fn conditions_to_sql(
@@ -713,6 +718,14 @@ pub fn conditions_to_sql(
     start_at: usize,
     json_column: Option<&str>,
 ) -> (String, Vec<serde_json::Value>) {
+    if conds.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    if json_column.is_some_and(|column| !is_safe_sql_ident(column))
+        || conds.keys().any(|col| !is_safe_sql_ident(col))
+    {
+        return ("0 = 1".to_string(), Vec::new());
+    }
     let mut parts: Vec<String> = Vec::new();
     let mut binds: Vec<serde_json::Value> = Vec::new();
     let mut idx = start_at;
@@ -742,6 +755,23 @@ pub fn conditions_to_sql(
         }
     }
     (parts.join(" AND "), binds)
+}
+
+/// ASCII identifier safe to interpolate into SQL. Values stay bound.
+fn is_safe_sql_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    let mut len = 1usize;
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '_') || len >= 64 {
+            return false;
+        }
+        len += 1;
+    }
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -1048,5 +1078,41 @@ mod tests {
         let rendered = format!("{ab:?}");
         assert!(rendered.contains("predicate: true"));
         assert!(rendered.contains("predicate: false"));
+    }
+
+    #[test]
+    fn conditions_to_sql_keeps_safe_identifiers_parameterized() {
+        let mut conds = Conditions::new();
+        conds.insert("tenant_id".into(), json!(7));
+        let (sql, binds) = conditions_to_sql(&conds, 1, Some("data"));
+        assert_eq!(sql, "json_extract(data, '$.tenant_id') = $1");
+        assert_eq!(binds, vec![json!(7)]);
+
+        let mut conds = Conditions::new();
+        conds.insert("status".into(), json!(["a", "b"]));
+        let (sql, binds) = conditions_to_sql(&conds, 3, None);
+        assert_eq!(sql, "status IN ($3, $4)");
+        assert_eq!(binds, vec![json!("a"), json!("b")]);
+    }
+
+    #[test]
+    fn conditions_to_sql_fails_closed_on_identifier_injection() {
+        let mut conds = Conditions::new();
+        conds.insert("tenant_id".into(), json!(1));
+        conds.insert("x') OR 1=1 --".into(), json!(1));
+        let (sql, binds) = conditions_to_sql(&conds, 1, Some("data"));
+        assert_eq!(sql, "0 = 1");
+        assert!(binds.is_empty());
+
+        let mut conds = Conditions::new();
+        conds.insert("tenant_id".into(), json!(1));
+        let (sql, binds) = conditions_to_sql(&conds, 1, Some("data); drop table t; --"));
+        assert_eq!(sql, "0 = 1");
+        assert!(binds.is_empty());
+
+        let mut conds = Conditions::new();
+        conds.insert("1bad".into(), json!(1));
+        let (sql, _) = conditions_to_sql(&conds, 1, None);
+        assert_eq!(sql, "0 = 1");
     }
 }

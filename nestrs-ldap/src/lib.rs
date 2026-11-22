@@ -166,7 +166,7 @@ mod tests {
             let err = auth.authenticate("ada", password).await.unwrap_err();
             assert!(
                 matches!(err, LdapAuthError::EmptyCredentials),
-                "{password:?} -> {err:?}"
+                "Unexpected LDAP auth error for NUL-containing password case: {err:?}"
             );
         }
     }

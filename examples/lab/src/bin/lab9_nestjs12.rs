@@ -185,14 +185,14 @@ impl DemoController {
     #[post("/webhooks/roundtrip")]
     pub async fn webhooks(State(state): State<Arc<DemoState>>) -> Json<Value> {
         let body = br#"{"event":"lab9"}"#;
-        let ts = std::time::SystemTime::now()
+        let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_secs() as i64;
-        let signed = state.webhooks.sign("msg_lab9", ts, body);
+        let signed = state.webhooks.sign("msg_lab9", now, body);
         state
             .webhooks
-            .verify("msg_lab9", &ts.to_string(), &signed.signature_header, body)
+            .verify("msg_lab9", &now.to_string(), &signed.signature_header, body)
             .expect("verify");
         Json(json!({ "ok": true }))
     }

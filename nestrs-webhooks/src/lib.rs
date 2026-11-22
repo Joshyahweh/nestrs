@@ -2,9 +2,10 @@
 //! [Standard Webhooks](https://www.standardwebhooks.com/) signing/verification and
 //! optional outbox-backed outbound dispatch.
 //!
-//! Always verify on the **raw** request body. Prefer `whsec_`-encoded secrets and never
-//! log them. Pair [`WebhooksOptions::outbox`] with [`nestrs_outbox::OutboxRelay`] for
-//! durable delivery.
+//! Always verify on the **raw** request body. [`verify_standard_webhook`] rejects
+//! timestamps more than five minutes from now, so a captured delivery cannot be
+//! replayed later. Prefer `whsec_`-encoded secrets and never log them. Pair
+//! [`WebhooksOptions::outbox`] with [`nestrs_outbox::OutboxRelay`] for durable delivery.
 //!
 //! Umbrella feature: `nestrs` / `webhooks` (implies `outbox`) → `nestrs::webhooks`.
 #![doc(html_root_url = "https://docs.rs/nestrs-webhooks/1.7.1")]
@@ -18,7 +19,7 @@ pub use module::WebhooksModule;
 pub use options::WebhooksOptions;
 pub use sign::{sign_standard_webhook, SignedWebhook};
 pub use verify::{
-    verify_standard_webhook, verify_standard_webhook_within, WebhookVerifyError,
+    verify_standard_webhook, verify_standard_webhook_at, WebhookVerifyError,
     DEFAULT_WEBHOOK_TOLERANCE_SECS,
 };
 

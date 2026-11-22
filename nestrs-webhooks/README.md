@@ -37,40 +37,40 @@ use nestrs_webhooks::{sign_standard_webhook, verify_standard_webhook, WebhooksSe
 use std::sync::Arc;
 
 fn roundtrip(svc: &WebhooksService, body: &[u8]) {
-    // `verify` rejects timestamps outside a 5-minute window (replay protection).
-    let ts = std::time::SystemTime::now()
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .expect("clock")
         .as_secs() as i64;
-    let signed = svc.sign("msg_01", ts, body);
-    svc.verify("msg_01", &ts.to_string(), &signed.signature_header, body)
+    let signed = svc.sign("msg_01", now, body);
+    svc.verify("msg_01", &now.to_string(), &signed.signature_header, body)
         .expect("valid");
 }
 
-// Or free functions. The timestamp must be within 5 minutes of now;
-// `verify_standard_webhook_within` takes an explicit clock and tolerance.
-let ts = std::time::SystemTime::now()
+// Or free functions. `verify_standard_webhook` rejects timestamps more than
+// five minutes from now (Standard Webhooks replay window).
+let now = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
-    .unwrap()
+    .expect("clock")
     .as_secs() as i64;
-let signed = sign_standard_webhook("whsec_…", "msg_01", ts, body);
+let signed = sign_standard_webhook("whsec_…", "msg_01", now, body);
 verify_standard_webhook(
     "whsec_…",
     "msg_01",
-    &ts.to_string(),
+    &now.to_string(),
     &signed.signature_header,
     body,
 )
 .expect("valid");
 ```
 
-**Always verify against the raw request body** (before JSON parsing). Property tests live in `tests/sign_verify_prop.rs`.
+**Always verify against the raw request body** (before JSON parsing). A valid signature with a stale timestamp is still rejected. Property tests live in `tests/sign_verify_prop.rs`.
 
 ## Surface
 
 - `WebhooksModule` / `WebhooksOptions` / `WebhooksService`
 - `sign_standard_webhook` / `SignedWebhook`
-- `verify_standard_webhook` / `verify_standard_webhook_within` / `WebhookVerifyError`
+- `verify_standard_webhook` / `verify_standard_webhook_at` / `WebhookVerifyError`
+- `DEFAULT_WEBHOOK_TOLERANCE_SECS` (300)
 
 ## Docs
 

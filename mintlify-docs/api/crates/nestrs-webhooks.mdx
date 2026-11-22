@@ -32,6 +32,9 @@ pub async fn dispatch(&self, topic: &str, url: &str, body: Value) -> Result<(), 
 ```rust
 pub fn sign_standard_webhook(secret: &str, msg_id: &str, timestamp: i64, body: &[u8]) -> SignedWebhook
 pub fn verify_standard_webhook(...) -> Result<(), WebhookVerifyError>
+pub fn verify_standard_webhook_at(..., now_unix: i64, tolerance_secs: i64) -> Result<(), WebhookVerifyError>
 ```
+
+`verify_standard_webhook` uses a five-minute tolerance around the current time (`DEFAULT_WEBHOOK_TOLERANCE_SECS`). `BadTimestamp` covers a missing, unparseable, or out-of-window timestamp.
 
 `WebhookVerifyError`: `BadTimestamp` · `BadSignature`.

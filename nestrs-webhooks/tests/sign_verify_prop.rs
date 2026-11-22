@@ -5,13 +5,13 @@ use nestrs_webhooks::{sign_standard_webhook, verify_standard_webhook};
 #[test]
 fn roundtrip_random_bodies() {
     let secret = "whsec_dGVzdA=="; // base64("test")
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
     for i in 0..64u64 {
         let body = format!(r#"{{"n":{i},"msg":"hello-{i}"}}"#);
         let msg_id = format!("msg_{i}");
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_secs() as i64;
         let signed = sign_standard_webhook(secret, &msg_id, ts, body.as_bytes());
         verify_standard_webhook(
             secret,
@@ -31,8 +31,8 @@ fn rejects_tampered_body() {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
-        .as_secs() as i64;
-    let signed = sign_standard_webhook(secret, "msg_x", ts, body);
+        .as_secs();
+    let signed = sign_standard_webhook(secret, "msg_x", ts as i64, body);
     let err = verify_standard_webhook(
         secret,
         "msg_x",
@@ -49,8 +49,8 @@ fn rejects_wrong_secret() {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
-        .as_secs() as i64;
-    let signed = sign_standard_webhook("whsec_dGVzdA==", "msg_x", ts, body);
+        .as_secs();
+    let signed = sign_standard_webhook("whsec_dGVzdA==", "msg_x", ts as i64, body);
     let err = verify_standard_webhook(
         "whsec_b3RoZXI=",
         "msg_x",
@@ -62,16 +62,17 @@ fn rejects_wrong_secret() {
 }
 
 #[test]
-fn default_verifier_rejects_stale_timestamp() {
+fn rejects_replay_of_a_stale_signed_body() {
+    let secret = "whsec_dGVzdA==";
     let body = br#"{"ok":true}"#;
     let ts = 1_700_000_000_i64;
-    let signed = sign_standard_webhook("whsec_dGVzdA==", "msg_x", ts, body);
+    let signed = sign_standard_webhook(secret, "msg_old", ts, body);
     let err = verify_standard_webhook(
-        "whsec_dGVzdA==",
-        "msg_x",
+        secret,
+        "msg_old",
         &ts.to_string(),
         &signed.signature_header,
         body,
     );
-    assert!(err.is_err());
+    assert!(err.is_err(), "a years-old timestamp must not verify");
 }

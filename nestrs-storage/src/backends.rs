@@ -24,12 +24,12 @@ use crate::storage::{ListResult, ObjectMeta, Storage, StorageError};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LocalConfig {
     pub root: PathBuf,
-    /// Base URL for pre-signed URLs. The local backend doesn't
-    /// actually sign anything — it generates `format!("{base}/{key}")`
-    /// and stamps the URL with a `?expires=…` query param. The
-    /// framework's local presign resolver can then check the
-    /// expiry and serve the file. This is a development affordance
-    /// only; production uses S3 / GCS / Azure.
+    /// Base URL for pre-signed URLs. The local backend does not sign
+    /// the URL or embed an expiry in it — `expires_at_unix` on the
+    /// returned [`PresignedUrl`] is the only
+    /// expiry, and callers must enforce it. The key is percent-encoded
+    /// onto this base. Development affordance only; production uses
+    /// S3 / GCS / Azure.
     #[serde(default)]
     pub public_base: Option<String>,
 }
@@ -99,34 +99,139 @@ impl LocalStorage {
         &self.config
     }
 
-    /// Resolve a key to an absolute path on disk. The key is
-    /// appended to `root` after a single normalization step (no
-    /// `..` traversal allowed — `..` is rejected as a `BadRequest`).
+    /// Resolve a key to an absolute path on disk that cannot leave `root`.
+    ///
+    /// `..`, `.`, NUL, and `\` are rejected. Existing path components are
+    /// canonicalized, so a symlink planted inside the root that points
+    /// outside it is `BadRequest` rather than followed.
     fn resolve(&self, key: &str) -> Result<PathBuf, StorageError> {
-        let normalized = normalize_key(key);
-        let path = self.config.root.join(&normalized);
-        // Reject `..` segments that would escape the root.
-        for component in path.components() {
-            if matches!(component, std::path::Component::ParentDir) {
-                return Err(StorageError::BadRequest(format!(
-                    "key `{key}` contains `..`"
-                )));
-            }
+        let normalized = normalize_key(key)?;
+        if normalized.as_os_str().is_empty() {
+            return Err(StorageError::BadRequest(
+                "storage key must not be empty".into(),
+            ));
         }
-        Ok(path)
+        let root = self.canonical_root()?;
+        confine_under(&root, &normalized)
+    }
+
+    fn canonical_root(&self) -> Result<PathBuf, StorageError> {
+        self.config.root.canonicalize().map_err(|e| {
+            StorageError::Misconfigured(format!(
+                "canonicalize storage root {:?}: {e}",
+                self.config.root
+            ))
+        })
+    }
+
+    /// Directory `list` should walk. An empty prefix is the storage root.
+    fn resolve_prefix(&self, prefix: &str) -> Result<PathBuf, StorageError> {
+        let root = self.canonical_root()?;
+        let normalized = normalize_key(prefix)?;
+        if normalized.as_os_str().is_empty() {
+            Ok(root)
+        } else {
+            confine_under(&root, &normalized)
+        }
     }
 }
 
-/// Strip a leading `/` and replace any remaining `/` with the
-/// platform separator. Keys are slash-delimited, like S3.
-fn normalize_key(key: &str) -> PathBuf {
-    let trimmed = key.trim_start_matches('/');
-    let parts: Vec<&str> = trimmed.split('/').filter(|p| !p.is_empty()).collect();
-    let mut path = PathBuf::new();
-    for p in parts {
-        path.push(p);
+/// Slash-delimited object key → relative path. Rejects traversal and
+/// separator tricks (`..`, `\`, NUL; `:` on Windows, where it names an
+/// alternate data stream or a drive prefix).
+fn normalize_key(key: &str) -> Result<PathBuf, StorageError> {
+    if key.contains('\0') {
+        return Err(StorageError::BadRequest("storage key contains NUL".into()));
     }
-    path
+    if key.contains('\\') {
+        return Err(StorageError::BadRequest("storage key contains `\\`".into()));
+    }
+    if cfg!(windows) && key.contains(':') {
+        return Err(StorageError::BadRequest("storage key contains `:`".into()));
+    }
+    let trimmed = key.trim_start_matches('/');
+    let mut path = PathBuf::new();
+    for part in trimmed.split('/').filter(|part| !part.is_empty()) {
+        if part == ".." || part == "." {
+            return Err(StorageError::BadRequest(format!(
+                "storage key `{key}` contains `{part}`"
+            )));
+        }
+        path.push(part);
+    }
+    Ok(path)
+}
+
+/// Join `normalized` onto the canonical `root`. Follow a component only
+/// when its canonical path is still inside `root`.
+fn confine_under(root: &Path, normalized: &Path) -> Result<PathBuf, StorageError> {
+    let mut resolved = root.to_path_buf();
+    for component in normalized.components() {
+        let name = match component {
+            std::path::Component::Normal(name) => name,
+            _ => {
+                return Err(StorageError::BadRequest(
+                    "storage key contains a disallowed path component".into(),
+                ));
+            }
+        };
+        let next = resolved.join(name);
+        // `symlink_metadata` sees the link itself. A broken link still
+        // exists; `exists()` would report it missing and we would later
+        // open the lexical path, which follows the link.
+        if next.symlink_metadata().is_ok() {
+            let canon = next.canonicalize().map_err(|_| {
+                StorageError::BadRequest("storage key escapes the storage root".into())
+            })?;
+            if !canon.starts_with(root) {
+                return Err(StorageError::BadRequest(
+                    "storage key escapes the storage root".into(),
+                ));
+            }
+            resolved = canon;
+        } else {
+            resolved = next;
+        }
+    }
+    if !resolved.starts_with(root) {
+        return Err(StorageError::BadRequest(
+            "storage key escapes the storage root".into(),
+        ));
+    }
+    Ok(resolved)
+}
+
+/// Build a local presigned URL. The key is the same restricted object key
+/// as `put`/`get`, and each segment is percent-encoded so `?` / `#` cannot
+/// rewrite the URL.
+fn presigned_local_url(base: &str, key: &str) -> Result<String, StorageError> {
+    let normalized = normalize_key(key)?;
+    if normalized.as_os_str().is_empty() {
+        return Err(StorageError::BadRequest(
+            "storage key must not be empty".into(),
+        ));
+    }
+    let mut url = url::Url::parse(base).map_err(|e| {
+        StorageError::Misconfigured(format!("public_base `{base}` is not an absolute URL: {e}"))
+    })?;
+    {
+        let mut segments = url.path_segments_mut().map_err(|_| {
+            StorageError::Misconfigured(format!("public_base `{base}` cannot accept a path"))
+        })?;
+        segments.pop_if_empty();
+        for component in normalized.components() {
+            let std::path::Component::Normal(name) = component else {
+                return Err(StorageError::BadRequest(
+                    "storage key contains a disallowed path component".into(),
+                ));
+            };
+            let name = name
+                .to_str()
+                .ok_or_else(|| StorageError::BadRequest("storage key is not valid UTF-8".into()))?;
+            segments.push(name);
+        }
+    }
+    Ok(url.to_string())
 }
 
 #[async_trait]
@@ -194,7 +299,8 @@ impl Storage for LocalStorage {
     }
 
     async fn list(&self, prefix: &str) -> Result<ListResult, StorageError> {
-        let prefix_path = self.config.root.join(normalize_key(prefix));
+        let root = self.canonical_root()?;
+        let prefix_path = self.resolve_prefix(prefix)?;
         let mut out = Vec::new();
         let mut stack = vec![prefix_path];
         while let Some(dir) = stack.pop() {
@@ -219,7 +325,7 @@ impl Storage for LocalStorage {
                 } else if ft.is_file() {
                     let rel = entry
                         .path()
-                        .strip_prefix(&self.config.root)
+                        .strip_prefix(&root)
                         .map_err(|e| StorageError::Misconfigured(format!("strip_prefix: {e}")))?
                         .to_string_lossy()
                         .replace('\\', "/");
@@ -260,7 +366,7 @@ impl Storage for LocalStorage {
             .ok_or(StorageError::Misconfigured(
                 "LocalStorage presign requires public_base".into(),
             ))?;
-        let url = format!("{}/{}", base.trim_end_matches('/'), key);
+        let url = presigned_local_url(base, key)?;
         Ok(PresignedUrl {
             url,
             method: PresignMethod::Get,
@@ -281,7 +387,7 @@ impl Storage for LocalStorage {
             .ok_or(StorageError::Misconfigured(
                 "LocalStorage presign requires public_base".into(),
             ))?;
-        let url = format!("{}/{}", base.trim_end_matches('/'), key);
+        let url = presigned_local_url(base, key)?;
         Ok(PresignedUrl {
             url,
             method: PresignMethod::Put,

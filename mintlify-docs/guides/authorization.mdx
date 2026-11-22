@@ -480,15 +480,16 @@ let router: axum::Router = app
 What it does to a JSON response:
 
 - Looks for a top-level `"type": "Post"` string field — the subject marker. Any JSON object (at any nesting depth, including inside arrays) carrying it is treated as that subject type.
-- Asks `allowed_fields(Read, Subject::Type(name))` — the first matching rule's field allow-list. Fields not in the list are removed; the `"type"` field itself must be allow-listed to survive.
-- Recurses into nested objects and arrays of objects.
+- Asks whether the principal can `read` that subject, then `allowed_fields(Read, Subject::Type(name))` — the first matching rule's field allow-list. Fields not in the list are removed; the `"type"` field itself must be allow-listed to survive.
+- When no `read` rule matches that subject, every field except `"type"` is removed. `allowed_fields` returns `None` both for "no rule" and for "a grant with no field list"; only the second case leaves the object intact. An empty `Ability` therefore does not return a typed object's fields.
+- Recurses into nested objects and arrays of objects, so a nested `"type": "User"` is judged on its own.
 
 What passes through unchanged:
 
 - Responses with no ability on the request (authz middleware not installed) — never mask blindly.
 - Non-JSON responses (content-type check) and unparseable JSON.
 - Bodies without a `"type"` string marker — a no-op rather than a hard fail.
-- Bodies at or above the size cap: 1 MiB by default, configurable via `MaskingConfig::max_body_bytes` (over-cap bodies pass through unmasked with a `tracing` warning, so a hostile or accidental giant body can't OOM the server).
+- A body that fits in the size cap (1 MiB by default, `MaskingConfig::max_body_bytes`) and whose subject the principal can `read` with no field list. A body over the cap is withheld (empty), not returned unmasked, so a payload sized to skip buffering cannot skip field stripping.
 
 For transports that build payloads directly, the walker is public: `nestrs::mask_value(&mut value, &ability)` masks a `serde_json::Value` in place, and `nestrs::mask_response(response, &ability, cfg)` masks a constructed response. `nestrs::json_response(status, body)` builds a JSON response in one call.
 

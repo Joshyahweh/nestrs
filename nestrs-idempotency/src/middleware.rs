@@ -1,5 +1,5 @@
-use crate::options::IdempotencyOptions;
-use crate::store::IdempotencyRecord;
+use crate::options::{IdempotencyOptions, MAX_IDEMPOTENCY_KEY_BYTES};
+use crate::store::{IdempotencyClaim, IdempotencyRecord};
 use axum::body::{Body, Bytes};
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
@@ -11,11 +11,13 @@ use std::sync::Arc;
 /// Axum middleware: replay stored responses for repeated `Idempotency-Key` values.
 ///
 /// The store key is bound to [`IdempotencyOptions::scope`] (when set) and to a
-/// hash of the `Authorization` and `Cookie` headers, so one caller cannot read
-/// another caller's cached body by presenting the same key. A completed key is
-/// replayed only when method, path, query, and body match the original request;
-/// a reuse against a different request is **409** and does not return the
-/// stored body.
+/// hash of every `Authorization` and `Cookie` value, so one caller cannot read
+/// another caller's cached body by presenting the same key or by putting a
+/// decoy value in a second header. A completed key is replayed only when
+/// method, path, query, and body match the original request; a reuse against
+/// a different request is **409** and does not return the stored body. A body
+/// larger than [`IdempotencyOptions::max_body_bytes`] is **413** and the
+/// handler does not run.
 pub async fn idempotency_middleware(
     State(opts): State<Arc<IdempotencyOptions>>,
     req: axum::extract::Request,
@@ -41,11 +43,27 @@ pub async fn idempotency_middleware(
         }
         return next.run(req).await;
     };
+    if key.len() > MAX_IDEMPOTENCY_KEY_BYTES {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "Idempotency-Key is too long",
+            "Bad Request",
+            "IDEMPOTENCY_KEY_TOO_LONG",
+        );
+    }
 
     let (parts, body) = req.into_parts();
-    let bytes = match body.collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(_) => {
+    let bytes = match buffer_body(body, opts.max_body_bytes).await {
+        Ok(bytes) => bytes,
+        Err(BufferError::TooLarge) => {
+            return json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Request body exceeds the idempotency buffer cap",
+                "Payload Too Large",
+                "IDEMPOTENCY_BODY_TOO_LARGE",
+            );
+        }
+        Err(BufferError::Read) => {
             return json_error(
                 StatusCode::BAD_REQUEST,
                 "Could not read request body",
@@ -59,8 +77,8 @@ pub async fn idempotency_middleware(
     let scope_key = storage_key(opts.scope.as_deref(), &caller, &key);
     let req = axum::extract::Request::from_parts(parts, Body::from(bytes));
 
-    match opts.store.begin_or_get(&scope_key).await {
-        Ok(Some(rec)) => {
+    let token = match opts.store.begin_or_get(&scope_key).await {
+        Ok(IdempotencyClaim::Completed(rec)) => {
             if rec.fingerprint.is_empty() || rec.fingerprint != fingerprint {
                 return json_error(
                     StatusCode::CONFLICT,
@@ -89,8 +107,8 @@ pub async fn idempotency_middleware(
                 "IDEMPOTENCY_IN_FLIGHT",
             );
         }
-        Ok(None) => {}
-    }
+        Ok(IdempotencyClaim::Acquired { token }) => token,
+    };
 
     let response = next.run(req).await;
     let (parts, body) = response.into_parts();
@@ -111,9 +129,32 @@ pub async fn idempotency_middleware(
         content_type,
         fingerprint,
     };
-    opts.store.complete(&scope_key, record).await;
+    opts.store.complete(&scope_key, &token, record).await;
 
     Response::from_parts(parts, Body::from(bytes))
+}
+
+enum BufferError {
+    Read,
+    TooLarge,
+}
+
+/// Read `body` up to `max` bytes. Stops once the next chunk would pass the
+/// cap so the middleware does not keep the rest of an unbounded upload.
+async fn buffer_body(body: Body, max: usize) -> Result<Bytes, BufferError> {
+    let mut buf = Vec::new();
+    let mut body = std::pin::pin!(body);
+    while let Some(next) = body.as_mut().frame().await {
+        let frame = next.map_err(|_| BufferError::Read)?;
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        if buf.len().saturating_add(data.len()) > max {
+            return Err(BufferError::TooLarge);
+        }
+        buf.extend_from_slice(&data);
+    }
+    Ok(Bytes::from(buf))
 }
 
 fn json_error(status: StatusCode, message: &str, error: &str, code: &str) -> Response {
@@ -140,15 +181,23 @@ fn storage_key(scope: Option<&str>, caller: &str, idem_key: &str) -> String {
 
 fn caller_hash(headers: &HeaderMap) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"nestrs-idempotency-caller-v1");
-    hasher.update(header_bytes(headers, axum::http::header::AUTHORIZATION));
-    hasher.update([0xff]);
-    hasher.update(header_bytes(headers, axum::http::header::COOKIE));
+    // v2 length-prefixes every value. v1 hashed only the first of each
+    // header, so a leading `Cookie` left the session cookie out of the key
+    // and a second caller who repeated that leading value received the body.
+    hasher.update(b"nestrs-idempotency-caller-v2");
+    hash_header_values(&mut hasher, headers, axum::http::header::AUTHORIZATION);
+    hasher.update([0]);
+    hash_header_values(&mut hasher, headers, axum::http::header::COOKIE);
     hex_encode(&hasher.finalize())
 }
 
-fn header_bytes(headers: &HeaderMap, name: axum::http::HeaderName) -> &[u8] {
-    headers.get(name).map(|v| v.as_bytes()).unwrap_or(b"")
+fn hash_header_values(hasher: &mut Sha256, headers: &HeaderMap, name: axum::http::HeaderName) {
+    for value in headers.get_all(name) {
+        let bytes = value.as_bytes();
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(bytes);
+        hasher.update([0xff]);
+    }
 }
 
 fn request_fingerprint(method: &Method, uri: &Uri, body: &[u8], caller: &str) -> String {
@@ -178,7 +227,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{IdempotencyStore, InMemoryIdempotencyStore};
+    use crate::store::{IdempotencyClaim, IdempotencyStore, InMemoryIdempotencyStore};
     use axum::http::{Request, StatusCode};
     use axum::routing::post;
     use axum::Router;
@@ -189,10 +238,13 @@ mod tests {
     #[tokio::test]
     async fn store_replays_completed() {
         let store = InMemoryIdempotencyStore::new(Duration::from_secs(60));
-        assert!(store.begin_or_get("k").await.unwrap().is_none());
+        let IdempotencyClaim::Acquired { token } = store.begin_or_get("k").await.unwrap() else {
+            panic!("first writer");
+        };
         store
             .complete(
                 "k",
+                &token,
                 IdempotencyRecord {
                     status: 200,
                     body: b"ok".to_vec(),
@@ -201,7 +253,9 @@ mod tests {
                 },
             )
             .await;
-        let again = store.begin_or_get("k").await.unwrap().unwrap();
+        let IdempotencyClaim::Completed(again) = store.begin_or_get("k").await.unwrap() else {
+            panic!("replay");
+        };
         assert_eq!(again.body, b"ok");
         assert_eq!(again.fingerprint, "fp");
     }
@@ -220,7 +274,13 @@ mod tests {
                             .get(axum::http::header::AUTHORIZATION)
                             .and_then(|v| v.to_str().ok())
                             .unwrap_or("anon");
-                        format!("{n}|{who}|{}", String::from_utf8_lossy(&body))
+                        let cookies = headers
+                            .get_all(axum::http::header::COOKIE)
+                            .iter()
+                            .filter_map(|v| v.to_str().ok())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!("{n}|{who}|{}|{cookies}", String::from_utf8_lossy(&body))
                     }
                 }),
             )
@@ -311,5 +371,76 @@ mod tests {
         assert_eq!(mismatch.0, StatusCode::CONFLICT);
         assert!(!mismatch.2.contains("|one"));
         assert!(mismatch.2.contains("IDEMPOTENCY_KEY_MISMATCH"));
+    }
+
+    #[tokio::test]
+    async fn a_second_cookie_header_does_not_share_the_cached_body() {
+        let opts = Arc::new(IdempotencyOptions::in_memory(Duration::from_secs(60)));
+        let app = router(opts);
+        let first = send(
+            &app,
+            request_with_cookies(
+                "/who",
+                "k",
+                "Bearer a",
+                &["theme=dark", "session=alice"],
+                "payload",
+            ),
+        )
+        .await;
+        let second = send(
+            &app,
+            request_with_cookies(
+                "/who",
+                "k",
+                "Bearer a",
+                &["theme=dark", "session=bob"],
+                "payload",
+            ),
+        )
+        .await;
+        assert!(first.2.contains("session=alice"), "{}", first.2);
+        assert!(
+            second.2.contains("session=bob"),
+            "second cookie must be part of the caller partition, got {}",
+            second.2
+        );
+        assert!(!second.2.contains("session=alice"));
+        assert!(second.1.is_none());
+    }
+
+    #[tokio::test]
+    async fn oversized_body_does_not_run_the_handler() {
+        let mut opts = IdempotencyOptions::in_memory(Duration::from_secs(60));
+        opts.max_body_bytes = 4;
+        let app = router(Arc::new(opts));
+        let huge = send(&app, request("/who", "k", "Bearer a", "12345")).await;
+        assert_eq!(huge.0, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(huge.2.contains("IDEMPOTENCY_BODY_TOO_LARGE"));
+        assert!(!huge.2.contains("Bearer a"));
+        let next = send(&app, request("/who", "k", "Bearer a", "ok")).await;
+        assert!(
+            next.2.starts_with("0|Bearer a|ok"),
+            "the oversized request must not have consumed the handler, got {}",
+            next.2
+        );
+    }
+
+    fn request_with_cookies(
+        uri: &str,
+        key: &str,
+        authorization: &str,
+        cookies: &[&str],
+        body: &'static str,
+    ) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("idempotency-key", key)
+            .header("authorization", authorization);
+        for cookie in cookies {
+            builder = builder.header("cookie", *cookie);
+        }
+        builder.body(Body::from(body)).unwrap()
     }
 }

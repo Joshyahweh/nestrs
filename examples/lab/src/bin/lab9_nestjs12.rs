@@ -335,7 +335,7 @@ async fn run_smoke() -> bool {
 
     // Direct store race (Wave 5 property-style).
     {
-        use nestrs::idempotency::{IdempotencyStore, InMemoryIdempotencyStore};
+        use nestrs::idempotency::{IdempotencyClaim, IdempotencyStore, InMemoryIdempotencyStore};
         let store = Arc::new(InMemoryIdempotencyStore::new(Duration::from_secs(60)));
         let mut handles = Vec::new();
         for _ in 0..16 {
@@ -346,7 +346,10 @@ async fn run_smoke() -> bool {
         }
         let mut winners = 0usize;
         for h in handles {
-            if matches!(h.await.expect("join"), Ok(None)) {
+            if matches!(
+                h.await.expect("join"),
+                Ok(IdempotencyClaim::Acquired { .. })
+            ) {
                 winners += 1;
             }
         }

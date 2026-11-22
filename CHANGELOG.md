@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **`nestrs-webhooks`**: `verify_standard_webhook` now rejects timestamps outside a five-minute window (Standard Webhooks replay protection). `verify_standard_webhook_at` takes an explicit clock and tolerance. A captured, still-valid signature is no longer enough to replay the delivery.
+- **`nestrs-storage`**: `LocalStorage::list` used the raw prefix, so `..` walked out of the storage root and the returned keys named files outside it. `put` / `get` / `delete` / `head` / `list` now reject `..`, `\`, and NUL, and refuse a symlink whose target leaves the root. Local presign URLs percent-encode the key and refuse the same traversal keys.
+- **`nestrs-locks`**: Redis `release` compared the fencing token with `GET` and then called `DEL`. A lease that expired between the two commands could be deleted after another holder had acquired it. Release is now a single compare-and-delete script.
 - **`nestrs-mcp`**: require `rmcp` >= 3.9 so the lockfile can no longer resolve
   3.6.0. That release is RUSTSEC-2026-0457 (OAuth client SSRF: host strings
   were checked, resolved addresses were not) and RUSTSEC-2026-0462 (Streamable

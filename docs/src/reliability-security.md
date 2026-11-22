@@ -12,6 +12,7 @@ Threat-model notes for the reliability / integration / AI packages.
 
 - Secrets: prefer `whsec_` Standard Webhooks encoding; never log raw secrets (`Debug` should not print them in app code).
 - Verify on the **raw body** before JSON parse.
+- `verify_standard_webhook` rejects timestamps more than five minutes from the verifier's clock, so a captured delivery cannot be replayed. `verify_standard_webhook_at` takes an explicit clock when the receive time is already known.
 - Outbound URLs from user input are SSRF-sensitive — validate allowlists at the application layer before `dispatch`.
 
 ## Outbox (`nestrs-outbox`)

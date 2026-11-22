@@ -134,6 +134,77 @@ async fn local_rejects_dotdot_in_key() {
 }
 
 #[tokio::test]
+async fn local_list_rejects_parent_prefix() {
+    let s = fresh();
+    s.put("photos/a.jpg", Bytes::from_static(b"a"))
+        .await
+        .unwrap();
+    for prefix in ["..", "../", "photos/../../etc", "..\\..\\secret"] {
+        let err = s.list(prefix).await.unwrap_err();
+        assert!(
+            matches!(err, StorageError::BadRequest(_)),
+            "prefix {prefix:?} leaked: {err}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn local_rejects_symlink_that_leaves_the_root() {
+    let s = fresh();
+    let root = s.config().root.canonicalize().unwrap();
+    let outside = root.parent().unwrap().join(format!(
+        "nestrs-outside-{}-{}",
+        std::process::id(),
+        root.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("secret.txt"), b"secret").unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("linked")).unwrap();
+
+    let get_err = s.get("linked/secret.txt").await.unwrap_err();
+    assert!(
+        matches!(get_err, StorageError::BadRequest(_)),
+        "get followed a symlink: {get_err}"
+    );
+    let list_err = s.list("linked").await.unwrap_err();
+    assert!(
+        matches!(list_err, StorageError::BadRequest(_)),
+        "list followed a symlink: {list_err}"
+    );
+    let put_err = s
+        .put("linked/pwned.txt", Bytes::from_static(b"x"))
+        .await
+        .unwrap_err();
+    assert!(matches!(put_err, StorageError::BadRequest(_)));
+    assert!(
+        !outside.join("pwned.txt").exists(),
+        "put wrote through the symlink"
+    );
+
+    let _ = std::fs::remove_dir_all(&outside);
+}
+
+#[tokio::test]
+async fn local_presign_rejects_traversal_and_encodes_reserved_characters() {
+    let s = LocalStorage::new(
+        LocalConfig::new(std::env::temp_dir()).with_public_base("https://local.test/storage"),
+    )
+    .unwrap();
+    let err = s
+        .presign_get("../etc/passwd", Duration::from_secs(60))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)));
+    let url = s
+        .presign_get("a/b?.jpg", Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(url.url, "https://local.test/storage/a/b%3F.jpg");
+    assert!(!url.url.contains('?'));
+}
+
+#[tokio::test]
 async fn local_overwrite_replaces_contents() {
     let s = fresh();
     s.put("f.txt", Bytes::from_static(b"v1")).await.unwrap();

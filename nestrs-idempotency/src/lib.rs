@@ -4,14 +4,20 @@
 //! # Behavior
 //!
 //! 1. Missing key → pass through (or **400** if [`IdempotencyOptions::required`]).
-//! 2. Completed key → replay stored status/body with header `idempotency-replayed: true`.
-//! 3. In-flight key → **409** (`IDEMPOTENCY_IN_FLIGHT`).
-//! 4. First writer → run handler, then [`IdempotencyStore::complete`].
+//! 2. Completed key for the **same caller and same request** → replay stored status/body
+//!    with header `idempotency-replayed: true`.
+//! 3. Same key, different method, path, query, or body → **409** (`IDEMPOTENCY_KEY_MISMATCH`)
+//!    without the stored body.
+//! 4. In-flight key → **409** (`IDEMPOTENCY_IN_FLIGHT`).
+//! 5. First writer → run handler, then [`IdempotencyStore::complete`].
 //!
 //! # Security
 //!
-//! Always set [`IdempotencyOptions::scope`] to the authenticated principal so tenants cannot
-//! replay another user's response. Prefer Redis TTL in multi-instance deploys (`cache-redis`).
+//! The store key is bound to a hash of `Authorization` and `Cookie`, so a client-supplied
+//! key is not a global lookup. [`IdempotencyOptions::scope`] is an extra partition (tenant,
+//! route group). Prefer Redis TTL in multi-instance deploys (`cache-redis`). Redis
+//! claim-or-read is one `EVAL`, so a peer cannot run the handler again between a `GET` of
+//! the stored response and `SET NX` of the lock.
 //!
 //! # Middleware
 //!

@@ -13,6 +13,8 @@ re-parsing the macros on every turn.
 | **Introspection** (source + live registries) | `list_modules`, `get_module`, `list_controllers`, `get_controller`, `list_providers`, `get_provider`, `list_routes`, `get_route`, `list_dtos`, `get_dto`, `list_schedules`, `list_event_handlers`, `list_queue_processors` | nothing |
 | **Live runtime** | `get_app_health`, `get_app_routes`, `get_app_providers` | nestrs app with the `admin` feature on |
 | **Scaffolding** | `new_project`, `create_module`, `create_resource`, `create_dto`, `generate_crud` | write access to a target directory |
+
+Scaffolding rejects field names, types, attribute tokens, and Cargo feature names that are not plain identifiers, so a tool argument cannot close the generated item and insert further code.
 | **Docs search** | `search_docs`, `get_changelog`, `get_doc` | nothing (reads local repo files) |
 
 Introspection reads the workspace's `src/` tree via `syn` (mirroring the

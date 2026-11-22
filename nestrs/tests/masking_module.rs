@@ -4,12 +4,12 @@
 //! Covers Feature C (response masking across transports).
 
 use axum::body::Body;
-use axum::http::{Request as HttpRequest, StatusCode};
+use axum::http::{header, Request as HttpRequest, StatusCode};
 use axum::middleware::{from_fn, Next};
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
-use nestrs::{json_response, mask_response, Ability, Action, MaskingConfig};
+use nestrs::{json_response, mask_response, Ability, Action, Conditions, MaskingConfig};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tower::util::ServiceExt;
@@ -363,4 +363,242 @@ async fn masking_masks_runtime_built_type_names_without_leaking() {
         "runtime-built type name still masks"
     );
     assert_eq!(v.get("title").and_then(|t| t.as_str()), Some("hi"));
+}
+
+#[tokio::test]
+async fn masking_strips_an_instance_that_fails_its_condition() {
+    // A conditional grant matches `Subject::Type` for every instance.
+    // Judging the object as that type returned `ssn` for a hospital the
+    // principal cannot read.
+    let mut conds = Conditions::new();
+    conds.insert("org".into(), json!("hospital-a"));
+    let ability = Arc::new(
+        Ability::builder()
+            .can_with_conditions(Action::Read, "Patient", conds)
+            .build(),
+    );
+    let resp = json_response(
+        StatusCode::OK,
+        json!({
+            "type": "Patient",
+            "org": "hospital-b",
+            "ssn": "123-45-6789"
+        }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let v = response_json(masked).await;
+    assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("Patient"));
+    assert!(
+        v.get("ssn").is_none() && v.get("org").is_none(),
+        "a condition miss must not keep fields, got {v}"
+    );
+}
+
+#[tokio::test]
+async fn masking_keeps_fields_when_the_instance_matches_its_condition() {
+    let mut conds = Conditions::new();
+    conds.insert("org".into(), json!("hospital-a"));
+    let ability = Arc::new(
+        Ability::builder()
+            .can_with_conditions(Action::Read, "Patient", conds)
+            .build(),
+    );
+    let resp = json_response(
+        StatusCode::OK,
+        json!({
+            "type": "Patient",
+            "org": "hospital-a",
+            "ssn": "123-45-6789"
+        }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let v = response_json(masked).await;
+    assert_eq!(v.get("ssn").and_then(|s| s.as_str()), Some("123-45-6789"));
+    assert_eq!(v.get("org").and_then(|s| s.as_str()), Some("hospital-a"));
+}
+
+#[tokio::test]
+async fn masking_ignores_an_attributes_object_that_spoofs_the_condition() {
+    let mut conds = Conditions::new();
+    conds.insert("org".into(), json!("hospital-a"));
+    let ability = Arc::new(
+        Ability::builder()
+            .can_with_conditions(Action::Read, "Patient", conds)
+            .build(),
+    );
+    let resp = json_response(
+        StatusCode::OK,
+        json!({
+            "type": "Patient",
+            "org": "hospital-b",
+            "ssn": "123-45-6789",
+            "attributes": { "org": "hospital-a" }
+        }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let v = response_json(masked).await;
+    assert_eq!(v.as_object().map(|m| m.len()), Some(1));
+    assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("Patient"));
+    assert!(
+        v.get("ssn").is_none() && v.get("attributes").is_none(),
+        "a nested attributes object must not satisfy the condition, got {v}"
+    );
+}
+
+#[tokio::test]
+async fn masking_predicate_drops_fields_the_principal_does_not_own() {
+    let ability = Arc::new(
+        Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                Vec::new(),
+                |row: &Value, principal: &nestrs::policies::Principal| {
+                    row.get("author").and_then(|a| a.as_str()) == Some(principal.subject.as_str())
+                },
+            )
+            .build(),
+    );
+    let alice = Arc::new(nestrs::policies::Principal {
+        subject: "alice".into(),
+        roles: vec![],
+        claims: json!({}),
+    });
+    let ability_for_alice = ability.clone();
+    nestrs::with_principal(alice, async move {
+        let other = json_response(
+            StatusCode::OK,
+            json!({ "type": "Post", "author": "bob", "body": "secret" }),
+        );
+        let masked = mask_response(other, &ability_for_alice, MaskingConfig::default()).await;
+        let v = response_json(masked).await;
+        assert!(
+            v.get("body").is_none() && v.get("author").is_none(),
+            "a rejected predicate must not keep fields, got {v}"
+        );
+        assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("Post"));
+
+        let own = json_response(
+            StatusCode::OK,
+            json!({ "type": "Post", "author": "alice", "body": "hello" }),
+        );
+        let masked = mask_response(own, &ability_for_alice, MaskingConfig::default()).await;
+        let v = response_json(masked).await;
+        assert_eq!(v.get("body").and_then(|b| b.as_str()), Some("hello"));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn masking_predicate_drops_fields_when_no_principal_is_in_scope() {
+    let ability = Arc::new(
+        Ability::builder()
+            .can_with_predicate(
+                Action::Read,
+                "Post",
+                Vec::new(),
+                |row: &Value, principal: &nestrs::policies::Principal| {
+                    row.get("author").and_then(|a| a.as_str()) == Some(principal.subject.as_str())
+                },
+            )
+            .build(),
+    );
+    let resp = json_response(
+        StatusCode::OK,
+        json!({ "type": "Post", "author": "alice", "body": "secret" }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let v = response_json(masked).await;
+    assert_eq!(v.as_object().map(|m| m.len()), Some(1));
+    assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("Post"));
+}
+
+#[tokio::test]
+async fn masking_withholds_json_the_parser_rejects() {
+    // Trailing bytes fail `serde_json::from_slice`. Returning the original
+    // body skipped field stripping; the secret stayed in the payload.
+    let ability = ability_with_post_fields();
+    let raw = br#"{"type":"Post","id":1,"title":"hi","body":"secret"}x"#;
+    assert!(serde_json::from_slice::<Value>(raw).is_err());
+    let resp = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CONTENT_LENGTH, raw.len().to_string())
+        .body(Body::from(raw.to_vec()))
+        .unwrap();
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    assert_eq!(masked.status(), StatusCode::OK);
+    assert!(masked.headers().get(header::CONTENT_LENGTH).is_none());
+    let body = axum::body::to_bytes(masked.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(
+        body.is_empty(),
+        "unparseable JSON must be withheld, got {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[tokio::test]
+async fn masking_withholds_json_deeper_than_the_parser_accepts() {
+    // `from_slice` stops at 128 levels. A sibling field on a deeper
+    // document used to be returned intact. The fixture is built as text
+    // so constructing it does not recurse.
+    let ability = ability_with_post_fields();
+    let mut tree = "\"leaf\"".to_string();
+    for _ in 0..200 {
+        tree = format!("[{tree}]");
+    }
+    let raw = format!(r#"{{"type":"Post","title":"hi","body":"secret-body","tree":{tree}}}"#)
+        .into_bytes();
+    assert!(
+        serde_json::from_slice::<Value>(&raw).is_err(),
+        "the fixture must exceed the parser depth limit"
+    );
+    let resp = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CONTENT_LENGTH, raw.len().to_string())
+        .body(Body::from(raw))
+        .unwrap();
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    assert!(masked.headers().get(header::CONTENT_LENGTH).is_none());
+    let body = axum::body::to_bytes(masked.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(
+        !body
+            .windows(b"secret-body".len())
+            .any(|w| w == b"secret-body"),
+        "a body past the parser depth limit must not be returned unmasked"
+    );
+    assert!(body.is_empty());
+}
+
+#[tokio::test]
+async fn masking_matches_json_content_type_case_insensitively() {
+    let ability = ability_with_post_fields();
+    let raw = serde_json::to_vec(&json!({
+        "type": "Post",
+        "id": 1,
+        "title": "hi",
+        "body": "secret"
+    }))
+    .unwrap();
+    let resp = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "Application/JSON; charset=utf-8")
+        .body(Body::from(raw))
+        .unwrap();
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let v = response_json(masked).await;
+    assert!(v.get("body").is_none(), "got {v}");
+    assert_eq!(v.get("title").and_then(|t| t.as_str()), Some("hi"));
+}
+
+async fn response_json(response: Response) -> Value {
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice(&body).unwrap()
 }

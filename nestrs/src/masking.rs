@@ -12,14 +12,16 @@
 //! ## Subject detection
 //!
 //! Best-effort: looks for a `"type": "Post"` string on each JSON object.
-//! When present, the principal must be able to `read` that subject.
-//! `Ability::allowed_fields` then supplies the field allow-list and any
-//! other field is removed. `None` from `allowed_fields` means two
-//! different things: no rule matched, or a matching grant has no field
-//! list. Only the second case leaves the object intact. An object whose
-//! type the principal cannot `read` keeps the `type` marker and drops
-//! every other field, so a payload tagged with an unreadable subject
-//! cannot skip stripping. Nested objects and arrays are walked the same
+//! When present, the principal must be able to `read` **that object**.
+//! Conditions and row predicates are checked against the object's own
+//! fields. A nested `"attributes"` object is ignored for that check, so it
+//! cannot spoof a condition. `Ability::allowed_fields` then supplies the
+//! field allow-list and any other field is removed. `None` from
+//! `allowed_fields` means two different things: no rule matched, or a
+//! matching grant has no field list. Only the second case leaves the
+//! object intact. An object the principal cannot `read` — no grant, a
+//! condition miss, or a predicate rejection — keeps the `type` marker and
+//! drops every other field. Nested objects and arrays are walked the same
 //! way. Responses with no `"type"` marker are passed through unchanged —
 //! a no-op rather than a hard fail.
 //!
@@ -28,7 +30,12 @@
 //! Bodies larger than [`MaskingConfig::max_body_bytes`] (default 1 MiB) are
 //! not returned unmasked. Buffering stops at the cap and the response body
 //! is replaced with an empty one, so a payload sized to the cap cannot skip
-//! field stripping. The original status is kept.
+//! field stripping. The same withhold applies when the bytes are not JSON
+//! `serde_json` can parse (trailing data, or nesting deeper than the
+//! parser accepts): returning them would skip field stripping, and a client
+//! with a deeper parser would still read the fields. The original status
+//! is kept. `Content-Length` is dropped so the empty body is not framed
+//! with the withheld payload's length.
 //!
 //! ## Test
 //!
@@ -38,10 +45,11 @@ use crate::interceptor::Interceptor;
 use crate::policies::{Ability, Action, Subject};
 use axum::body::{to_bytes, Body};
 use axum::extract::Request;
-use axum::http::{header, StatusCode};
+use axum::http::response::Parts;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// Hard cap for the response body we'll read into memory before masking.
 /// A larger body is replaced with an empty one so it cannot skip field
@@ -88,13 +96,14 @@ impl Interceptor for PolicyMaskingInterceptor {
 /// router. Body cap and the pass-through-when-no-`type`-marker rules from the
 /// module docs apply here too.
 pub async fn mask_response(response: Response, ability: &Ability, cfg: MaskingConfig) -> Response {
-    // Only mask JSON responses.
+    // Only mask JSON responses. The media type is compared case-insensitively
+    // so `Application/JSON` cannot skip field stripping. Parameters such as
+    // `charset` are ignored. Suffix types (`application/problem+json`) are
+    // not JSON responses of this interceptor.
     let is_json = response
         .headers()
         .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.starts_with("application/json"))
-        .unwrap_or(false);
+        .is_some_and(is_json_content_type);
     if !is_json {
         return response;
     }
@@ -111,7 +120,7 @@ pub async fn mask_response(response: Response, ability: &Ability, cfg: MaskingCo
                 target: "nestrs::masking",
                 "response body exceeds cap; withholding body instead of skipping masking"
             );
-            return Response::from_parts(parts, Body::empty());
+            return withheld(parts);
         }
     };
     // A body that fills the cap was fully read (`to_bytes` only returns
@@ -120,31 +129,61 @@ pub async fn mask_response(response: Response, ability: &Ability, cfg: MaskingCo
 
     let mut value: Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
-        Err(_) => return Response::from_parts(parts, Body::from(bytes)),
+        Err(_) => {
+            // Trailing bytes and nesting past serde_json's depth limit
+            // fail here. The original bytes are still valid for a parser
+            // with a higher limit, so returning them skips field stripping.
+            tracing::warn!(
+                target: "nestrs::masking",
+                "response body is not JSON this parser accepts; withholding body instead of skipping masking"
+            );
+            return withheld(parts);
+        }
     };
     mask_value(&mut value, ability);
     let new_bytes = match serde_json::to_vec(&value) {
         Ok(b) => b,
-        Err(_) => return Response::from_parts(parts, Body::from(bytes)),
+        Err(_) => return withheld(parts),
     };
     let mut new_parts = parts;
     new_parts.headers.remove(header::CONTENT_LENGTH);
+    new_parts.headers.remove(header::TRANSFER_ENCODING);
     new_parts.headers.insert(
         header::CONTENT_TYPE,
-        header::HeaderValue::from_static("application/json"),
+        HeaderValue::from_static("application/json"),
     );
     Response::from_parts(new_parts, Body::from(new_bytes))
+}
+
+/// `application/json`, ignoring parameters and ASCII case.
+fn is_json_content_type(value: &HeaderValue) -> bool {
+    let Ok(raw) = value.to_str() else {
+        return false;
+    };
+    let media_type = raw.split(';').next().unwrap_or(raw).trim();
+    media_type.eq_ignore_ascii_case("application/json")
+}
+
+/// Replace the body with an empty one and drop framing headers that still
+/// describe the withheld payload. A stale `Content-Length` would make a
+/// keep-alive peer read the next response as the rest of this body.
+fn withheld(mut parts: Parts) -> Response {
+    parts.headers.remove(header::CONTENT_LENGTH);
+    parts.headers.remove(header::TRANSFER_ENCODING);
+    Response::from_parts(parts, Body::empty())
 }
 
 /// Recursive masker. Top-level value: detect `type`; recurse on objects and
 /// arrays. For each detected subject, drop fields the principal cannot read.
 ///
-/// A matching `read` grant with no field list leaves the object intact.
-/// A matching grant with a field list keeps only those fields. No matching
-/// `read` grant keeps `type` and drops every other field: `allowed_fields`
-/// returns `None` in both the "no rule" and "no field list" cases, and
-/// treating both as "show everything" returned an unreadable subject in
-/// full.
+/// The object is judged as a [`Subject::Instance`], not a bare type. A
+/// grant with conditions or a row predicate matches only when that object
+/// satisfies them. A matching `read` grant with no field list leaves the
+/// object intact. A matching grant with a field list keeps only those
+/// fields. No matching `read` grant keeps `type` and drops every other
+/// field: `allowed_fields` returns `None` in both the "no rule" and "no
+/// field list" cases, and treating a type-level match as "show everything"
+/// returned instances the conditions rejected.
 ///
 /// `pub` so transport crates (WS, GraphQL, MCP) can re-use the same walker
 /// on `serde_json::Value` payloads they produce directly, without going
@@ -152,16 +191,14 @@ pub async fn mask_response(response: Response, ability: &Ability, cfg: MaskingCo
 pub fn mask_value(value: &mut Value, ability: &Ability) {
     match value {
         Value::Object(map) => {
-            // Own the name before mutating `map`. `Subject::Type` owns its
-            // string: the response's type field is untrusted, potentially
-            // unique per object, and freed with the subject (pre-fix:
-            // `Box::leak` per masked object per response).
+            // Own the name before mutating `map`. The response's type field
+            // is untrusted and potentially unique per object.
             let type_name = map
                 .get("type")
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned);
             if let Some(type_name) = type_name {
-                let subject = Subject::Type(type_name);
+                let subject = read_subject(&type_name, map);
                 if !ability.can(&Action::Read, &subject) {
                     map.retain(|k, _| k == "type");
                 } else if let Some(allowed) = ability.allowed_fields(&Action::Read, &subject) {
@@ -181,6 +218,23 @@ pub fn mask_value(value: &mut Value, ability: &Ability) {
         }
         _ => {}
     }
+}
+
+/// Instance view of a response object for `can` / `allowed_fields`.
+///
+/// Conditions and predicates read `attributes` (see [`crate::policies`]).
+/// The object's own fields are copied there, and a nested `attributes`
+/// value is dropped first so it cannot hide those fields or satisfy a
+/// condition on its own. The outer `type` is the object's marker, which
+/// selects the grant; the stored `type` field stays in the columns so a
+/// predicate can still see it.
+fn read_subject(type_name: &str, map: &Map<String, Value>) -> Subject {
+    let mut columns = map.clone();
+    columns.remove("attributes");
+    Subject::Instance(serde_json::json!({
+        "type": type_name,
+        "attributes": columns,
+    }))
 }
 
 /// Convenience: a 200 response with a JSON body. Used by tests and the

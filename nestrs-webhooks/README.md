@@ -37,22 +37,27 @@ use nestrs_webhooks::{sign_standard_webhook, verify_standard_webhook, WebhooksSe
 use std::sync::Arc;
 
 fn roundtrip(svc: &WebhooksService, body: &[u8]) {
-    let signed = svc.sign("msg_01", 1_700_000_000, body);
-    svc.verify(
-        "msg_01",
-        "1700000000",
-        &signed.signature_header,
-        body,
-    )
-    .expect("valid");
+    // `verify` rejects timestamps outside a 5-minute window (replay protection).
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let signed = svc.sign("msg_01", ts, body);
+    svc.verify("msg_01", &ts.to_string(), &signed.signature_header, body)
+        .expect("valid");
 }
 
-// Or free functions:
-let signed = sign_standard_webhook("whsec_…", "msg_01", 1_700_000_000, body);
+// Or free functions. The timestamp must be within 5 minutes of now;
+// `verify_standard_webhook_within` takes an explicit clock and tolerance.
+let ts = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap()
+    .as_secs() as i64;
+let signed = sign_standard_webhook("whsec_…", "msg_01", ts, body);
 verify_standard_webhook(
     "whsec_…",
     "msg_01",
-    "1700000000",
+    &ts.to_string(),
     &signed.signature_header,
     body,
 )
@@ -65,7 +70,7 @@ verify_standard_webhook(
 
 - `WebhooksModule` / `WebhooksOptions` / `WebhooksService`
 - `sign_standard_webhook` / `SignedWebhook`
-- `verify_standard_webhook` / `WebhookVerifyError`
+- `verify_standard_webhook` / `verify_standard_webhook_within` / `WebhookVerifyError`
 
 ## Docs
 

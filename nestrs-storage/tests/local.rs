@@ -131,6 +131,75 @@ async fn local_rejects_dotdot_in_key() {
         .await
         .unwrap_err();
     assert!(matches!(err, StorageError::BadRequest(_)));
+    let err = s.get("foo/../../etc/passwd").await.unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)));
+}
+
+#[tokio::test]
+async fn local_list_rejects_parent_traversal() {
+    let s = fresh();
+    s.put("inside.txt", Bytes::from_static(b"ok"))
+        .await
+        .unwrap();
+    // `list` used to join `..` without the ParentDir check `put`/`get` had,
+    // so a caller-supplied prefix could read the parent directory.
+    let err = s.list("..").await.unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)));
+    let err = s.list("photos/../../outside").await.unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)));
+    let listing = s.list("").await.unwrap();
+    assert!(listing
+        .objects
+        .iter()
+        .any(|o| o.key.ends_with("inside.txt")));
+}
+
+#[tokio::test]
+async fn local_presign_rejects_traversal_and_encodes_metacharacters() {
+    let s = LocalStorage::new(
+        LocalConfig::new(std::env::temp_dir()).with_public_base("https://local.test/storage"),
+    )
+    .unwrap();
+    let err = s
+        .presign_get("../secret", Duration::from_secs(60))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)));
+    let url = s
+        .presign_put("photos/a b?.jpg", Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(url.url, "https://local.test/storage/photos/a%20b%3F.jpg");
+    assert!(!url.url.contains(' ') && !url.url.contains('?'));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn local_rejects_symlink_escape() {
+    let s = fresh();
+    let root = s.config().root.clone();
+    let outside = tempfile::tempdir().expect("outside");
+    let secret = outside.path().join("secret.txt");
+    std::fs::write(&secret, b"topsecret").unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.join("link")).unwrap();
+    let planted = outside.path().join("planted.txt");
+    std::os::unix::fs::symlink(&planted, root.join("dangling")).unwrap();
+
+    let err = s.get("link/secret.txt").await.unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)), "{err}");
+    let err = s.list("link").await.unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)), "{err}");
+    let err = s
+        .put("link/planted.txt", Bytes::from_static(b"x"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)), "{err}");
+    let err = s
+        .put("dangling", Bytes::from_static(b"x"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StorageError::BadRequest(_)), "{err}");
+    assert!(!planted.exists(), "put must not create the symlink target");
 }
 
 #[tokio::test]

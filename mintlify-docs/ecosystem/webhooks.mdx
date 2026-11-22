@@ -81,6 +81,7 @@ verify_standard_webhook(
 ## Security
 
 - Prefer `whsec_`-encoded secrets; never log them.
+- `verify` / `verify_standard_webhook` reject timestamps more than 5 minutes from now, so a captured delivery cannot be replayed later. Use `verify_standard_webhook_within` only when you intentionally supply a wider window.
 - Allowlist outbound URLs (SSRF).
 - Property tests live in `nestrs-webhooks/tests/sign_verify_prop.rs`.
 

@@ -11,11 +11,16 @@
 //!
 //! ## Subject detection
 //!
-//! Best-effort: looks for a top-level `"type": "Post"` field in the JSON
-//! response. When present, `Ability::allowed_fields(Read, Subject::Type("Post"))`
-//! returns the field allow-list; any top-level field not in that list is
-//! removed. Nested objects are recursed one level. Arrays of objects are
-//! recursed. Responses with no `"type"` marker are passed through unchanged —
+//! Best-effort: looks for a `"type": "Post"` string on each JSON object.
+//! When present, the principal must be able to `read` that subject.
+//! `Ability::allowed_fields` then supplies the field allow-list and any
+//! other field is removed. `None` from `allowed_fields` means two
+//! different things: no rule matched, or a matching grant has no field
+//! list. Only the second case leaves the object intact. An object whose
+//! type the principal cannot `read` keeps the `type` marker and drops
+//! every other field, so a payload tagged with an unreadable subject
+//! cannot skip stripping. Nested objects and arrays are walked the same
+//! way. Responses with no `"type"` marker are passed through unchanged —
 //! a no-op rather than a hard fail.
 //!
 //! ## Body size cap
@@ -39,7 +44,8 @@ use axum::response::{IntoResponse, Response};
 use serde_json::Value;
 
 /// Hard cap for the response body we'll read into memory before masking.
-/// Beyond this, the body is passed through unmasked.
+/// A larger body is replaced with an empty one so it cannot skip field
+/// stripping.
 pub const DEFAULT_MAX_BODY_BYTES: usize = 1024 * 1024;
 
 /// Tunables for [`PolicyMaskingInterceptor`].
@@ -131,7 +137,14 @@ pub async fn mask_response(response: Response, ability: &Ability, cfg: MaskingCo
 }
 
 /// Recursive masker. Top-level value: detect `type`; recurse on objects and
-/// arrays. For each detected subject, drop fields not in the allow-list.
+/// arrays. For each detected subject, drop fields the principal cannot read.
+///
+/// A matching `read` grant with no field list leaves the object intact.
+/// A matching grant with a field list keeps only those fields. No matching
+/// `read` grant keeps `type` and drops every other field: `allowed_fields`
+/// returns `None` in both the "no rule" and "no field list" cases, and
+/// treating both as "show everything" returned an unreadable subject in
+/// full.
 ///
 /// `pub` so transport crates (WS, GraphQL, MCP) can re-use the same walker
 /// on `serde_json::Value` payloads they produce directly, without going
@@ -139,12 +152,19 @@ pub async fn mask_response(response: Response, ability: &Ability, cfg: MaskingCo
 pub fn mask_value(value: &mut Value, ability: &Ability) {
     match value {
         Value::Object(map) => {
-            if let Some(Value::String(type_name)) = map.get("type") {
-                // `Subject::Type` owns its name: the response's type field is
-                // untrusted, potentially unique per object, and freed with the
-                // subject (pre-fix: `Box::leak` per masked object per response).
-                let subject = Subject::Type(type_name.clone());
-                if let Some(allowed) = ability.allowed_fields(&Action::Read, &subject) {
+            // Own the name before mutating `map`. `Subject::Type` owns its
+            // string: the response's type field is untrusted, potentially
+            // unique per object, and freed with the subject (pre-fix:
+            // `Box::leak` per masked object per response).
+            let type_name = map
+                .get("type")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            if let Some(type_name) = type_name {
+                let subject = Subject::Type(type_name);
+                if !ability.can(&Action::Read, &subject) {
+                    map.retain(|k, _| k == "type");
+                } else if let Some(allowed) = ability.allowed_fields(&Action::Read, &subject) {
                     let allowed: std::collections::HashSet<&str> =
                         allowed.iter().map(|s| s.as_str()).collect();
                     map.retain(|k, _| allowed.contains(k.as_str()));

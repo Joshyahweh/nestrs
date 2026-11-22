@@ -21,10 +21,12 @@
 //! matching grant has no field list. Only the second case leaves the
 //! object intact. An object the principal cannot `read` — no grant, a
 //! condition miss, or a predicate rejection — keeps the `type` marker and
-//! drops its other scalar fields. Arrays on that object are kept and
-//! walked, so a list wrapper the caller cannot read still field-masks the
-//! subjects inside it. Nested objects and arrays are walked the same
-//! way. Responses with no `"type"` marker are passed through unchanged —
+//! drops its other scalar fields. Arrays are kept only when they hold a
+//! nested subject, so a list wrapper the caller cannot read still
+//! field-masks the subjects inside it. Scalar elements of those arrays
+//! are removed, and an object in that array with no `type` marker loses
+//! its scalar fields too. A scalar array on the denied object is removed.
+//! Responses with no `"type"` marker are passed through unchanged —
 //! a no-op rather than a hard fail.
 //!
 //! ## Body size cap
@@ -182,48 +184,118 @@ fn withheld(mut parts: Parts) -> Response {
 /// grant with conditions or a row predicate matches only when that object
 /// satisfies them. A matching `read` grant with no field list leaves the
 /// object intact. A matching grant with a field list keeps only those
-/// fields. No matching `read` grant keeps `type`, drops every other scalar
-/// field, and keeps arrays so the walk can still mask the subjects inside
-/// them. `allowed_fields` returns `None` in both the "no rule" and "no
-/// field list" cases, and treating a type-level match as "show everything"
-/// returned instances the conditions rejected.
+/// fields. No matching `read` grant keeps `type` and drops every other
+/// scalar field. Arrays stay only when they contain a subject the walk can
+/// still mask; scalar elements, scalar arrays, and scalar fields of an
+/// untyped object inside those arrays are removed. Leaving them in place
+/// returned emails, tokens, and untyped blobs from a subject the principal
+/// cannot read. `allowed_fields` returns `None` in both the "no rule" and
+/// "no field list" cases, and treating a type-level match as "show
+/// everything" returned instances the conditions rejected.
 ///
 /// `pub` so transport crates (WS, GraphQL, MCP) can re-use the same walker
 /// on `serde_json::Value` payloads they produce directly, without going
 /// through the HTTP [`mask_response`] path.
 pub fn mask_value(value: &mut Value, ability: &Ability) {
+    mask_value_in(value, ability, false);
+}
+
+/// `sealed` is set when this value was kept only so a nested subject can be
+/// judged. The denied ancestor's own scalars must not survive that walk.
+fn mask_value_in(value: &mut Value, ability: &Ability, sealed: bool) {
     match value {
-        Value::Object(map) => {
-            // Own the name before mutating `map`. The response's type field
-            // is untrusted and potentially unique per object.
-            let type_name = map
-                .get("type")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned);
-            if let Some(type_name) = type_name {
-                let subject = read_subject(&type_name, map);
-                if !ability.can(&Action::Read, &subject) {
-                    // Scalars are this instance's own fields. Arrays are
-                    // containers: a `PostList` the caller cannot read still
-                    // holds `Post` objects that have their own grants.
-                    map.retain(|k, v| k == "type" || v.is_array());
-                } else if let Some(allowed) = ability.allowed_fields(&Action::Read, &subject) {
-                    let allowed: std::collections::HashSet<&str> =
-                        allowed.iter().map(|s| s.as_str()).collect();
-                    map.retain(|k, _| allowed.contains(k.as_str()));
-                }
-            }
-            for v in map.values_mut() {
-                mask_value(v, ability);
-            }
-        }
+        Value::Object(map) => mask_object(map, ability, sealed),
         Value::Array(items) => {
-            for v in items {
-                mask_value(v, ability);
+            if sealed {
+                retain_subject_containers(items);
+            }
+            for item in items {
+                mask_value_in(item, ability, sealed);
             }
         }
         _ => {}
     }
+}
+
+fn mask_object(map: &mut Map<String, Value>, ability: &Ability, sealed: bool) {
+    // Own the name before mutating `map`. The response's type field is
+    // untrusted and potentially unique per object.
+    let type_name = map
+        .get("type")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let child_sealed = if let Some(type_name) = type_name {
+        let subject = read_subject(&type_name, map);
+        if !ability.can(&Action::Read, &subject) {
+            // Scalars are this instance's own fields. Arrays stay only when
+            // they hold a subject: a `PostList` the caller cannot read still
+            // contains `Post` objects that have their own grants. A scalar
+            // array (`emails`, `recovery_codes`) is the denied object's data.
+            seal_unreadable(map);
+            true
+        } else if let Some(allowed) = ability.allowed_fields(&Action::Read, &subject) {
+            let allowed: std::collections::HashSet<&str> =
+                allowed.iter().map(String::as_str).collect();
+            map.retain(|k, _| allowed.contains(k.as_str()));
+            // This object is readable. Nested values are judged on their own
+            // markers, including scalar arrays the grant named.
+            false
+        } else {
+            false
+        }
+    } else if sealed {
+        // No type marker. This object rode along inside a denied subject's
+        // array, so its scalars are that subject's data.
+        seal_untyped(map);
+        true
+    } else {
+        false
+    };
+    for child in map.values_mut() {
+        mask_value_in(child, ability, child_sealed);
+    }
+}
+
+/// Denied typed object: keep `type` and arrays that lead to a subject.
+fn seal_unreadable(map: &mut Map<String, Value>) {
+    map.retain(|k, v| k == "type" || array_holds_subject(v));
+    scrub_sealed_arrays(map);
+}
+
+/// Untyped object reached through a denied subject. Keep nested containers
+/// so a typed descendant can still be judged, and drop scalars.
+fn seal_untyped(map: &mut Map<String, Value>) {
+    map.retain(|_, v| v.is_object() || array_holds_subject(v));
+    scrub_sealed_arrays(map);
+}
+
+fn scrub_sealed_arrays(map: &mut Map<String, Value>) {
+    for value in map.values_mut() {
+        if let Value::Array(items) = value {
+            retain_subject_containers(items);
+        }
+    }
+}
+
+fn array_holds_subject(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(is_subject_container),
+        _ => false,
+    }
+}
+
+/// An object, or an array that eventually holds an object. Scalars and
+/// arrays of only scalars cannot be field-masked.
+fn is_subject_container(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => true,
+        Value::Array(items) => items.iter().any(is_subject_container),
+        _ => false,
+    }
+}
+
+fn retain_subject_containers(items: &mut Vec<Value>) {
+    items.retain(is_subject_container);
 }
 
 /// Instance view of a response object for `can` / `allowed_fields`.

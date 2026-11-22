@@ -315,3 +315,93 @@ async fn policies_guard_returns_403_when_principal_lacks_conditions() {
         .expect("serve");
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
+
+fn router_with(ability: Ability) -> axum::Router {
+    let jwt_svc: Arc<JwtService> = nestrs::build_jwt_service(&test_options());
+    let ability = Arc::new(ability);
+    let app = NestFactory::create::<AppModule>();
+    let router: axum::Router = app.into_router();
+    router
+        .layer(middleware::from_fn_with_state(
+            jwt_svc,
+            install_authn_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            ability,
+            install_policies_middleware,
+        ))
+}
+
+async fn status_for(router: axum::Router, uri: &str, claims: serde_json::Value) -> StatusCode {
+    let token = mint_token(claims);
+    let res = router
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("serve");
+    res.status()
+}
+
+#[tokio::test]
+async fn policies_guard_read_grant_does_not_satisfy_manage() {
+    let ability = Ability::builder().can(Action::Read, "Org").build();
+    let status = status_for(
+        router_with(ability),
+        "/p/admin",
+        json!({
+            "sub": "user-1",
+            "roles": ["user"],
+            "exp": now() + 600,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn policies_guard_user_grant_does_not_bypass_subject_conditions() {
+    let mut conds = Conditions::new();
+    conds.insert("sub".into(), json!("alice"));
+    let ability = Ability::builder()
+        .can_with_conditions(Action::Read, "Post", conds)
+        .can(Action::Read, "User")
+        .build();
+    let bob = status_for(
+        router_with(ability),
+        "/p/read-post",
+        json!({
+            "sub": "bob",
+            "roles": ["user"],
+            "exp": now() + 600,
+        }),
+    )
+    .await;
+    assert_eq!(bob, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn policies_guard_allows_principal_who_satisfies_conditions() {
+    let mut conds = Conditions::new();
+    conds.insert("sub".into(), json!("alice"));
+    let ability = Ability::builder()
+        .can_with_conditions(Action::Read, "Post", conds)
+        .can(Action::Read, "User")
+        .build();
+    let alice = status_for(
+        router_with(ability),
+        "/p/read-post",
+        json!({
+            "sub": "alice",
+            "roles": ["user"],
+            "tenant_id": 7,
+            "exp": now() + 600,
+        }),
+    )
+    .await;
+    assert_eq!(alice, StatusCode::OK);
+}

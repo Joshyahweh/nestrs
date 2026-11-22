@@ -703,8 +703,15 @@ pub async fn install_policies_middleware(
 ///
 /// When `json_column` is provided, each `<col>` is rendered as
 /// `json_extract(<json_column>, '$.<col>')` so the predicate operates on the
-/// entity's JSON blob. Pass `None` to treat the keys as raw SQL column names.
+/// entity's JSON blob. Pass `None` to treat the keys as SQL column names.
 /// Multiple conditions are joined with `AND`.
+///
+/// Column names and `json_column` are interpolated into the statement, so
+/// both must be plain ASCII identifiers (`[A-Za-z_][A-Za-z0-9_]*`, at most
+/// 64 characters). Anything else — a quote, a comment, a dotted path — is
+/// refused: the returned fragment is `0 = 1` and no binds are emitted, so
+/// the surrounding authorized query fails closed instead of executing
+/// attacker-controlled SQL. Values are always bound parameters.
 ///
 /// The first bind index is `start_at` (typically the count of preceding
 /// `?` placeholders already in the surrounding query).
@@ -713,13 +720,29 @@ pub fn conditions_to_sql(
     start_at: usize,
     json_column: Option<&str>,
 ) -> (String, Vec<serde_json::Value>) {
+    if let Some(jc) = json_column {
+        if !is_safe_sql_ident(jc) {
+            tracing::warn!(
+                target: "nestrs::policies",
+                "refusing SQL condition: json column is not a safe identifier; query fails closed"
+            );
+            return ("0 = 1".to_string(), Vec::new());
+        }
+    }
     let mut parts: Vec<String> = Vec::new();
     let mut binds: Vec<serde_json::Value> = Vec::new();
     let mut idx = start_at;
     for (col, val) in conds.iter() {
+        if !is_safe_sql_ident(col) {
+            tracing::warn!(
+                target: "nestrs::policies",
+                "refusing SQL condition: key is not a safe identifier; query fails closed"
+            );
+            return ("0 = 1".to_string(), Vec::new());
+        }
         let col_ref = match json_column {
-            Some(jc) => format!("json_extract({}, '$.{}')", jc, col),
-            None => col.clone(),
+            Some(jc) => format!("json_extract({jc}, '$.{col}')"),
+            None => format!("\"{col}\""),
         };
         match val {
             serde_json::Value::Array(arr) if !arr.is_empty() => {
@@ -742,6 +765,19 @@ pub fn conditions_to_sql(
         }
     }
     (parts.join(" AND "), binds)
+}
+
+/// Identifier safe to interpolate into SQL text. Values never go through
+/// this path — they are bound. The allowlist is deliberately narrower
+/// than "looks like a word": quotes, comments, dots, and whitespace are
+/// how a condition key becomes a predicate bypass.
+fn is_safe_sql_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    name.len() <= 64 && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // ---------------------------------------------------------------------------
@@ -865,6 +901,42 @@ mod tests {
             update_fields.is_none(),
             "no field restriction => all fields"
         );
+    }
+
+    #[test]
+    fn conditions_to_sql_binds_values_and_keeps_safe_identifiers() {
+        let mut conds = Conditions::new();
+        conds.insert("tenant_id".into(), json!(7));
+        let (sql, binds) = conditions_to_sql(&conds, 1, Some("data"));
+        assert_eq!(sql, "json_extract(data, '$.tenant_id') = $1");
+        assert_eq!(binds, vec![json!(7)]);
+    }
+
+    #[test]
+    fn conditions_to_sql_fails_closed_on_identifier_injection() {
+        let mut conds = Conditions::new();
+        conds.insert("author') = 'x' OR '1'='1".into(), json!("alice"));
+        let (sql, binds) = conditions_to_sql(&conds, 1, Some("data"));
+        assert_eq!(sql, "0 = 1");
+        assert!(
+            binds.is_empty(),
+            "injected key must not be interpolated or bound as SQL"
+        );
+
+        let mut conds = Conditions::new();
+        conds.insert("owner".into(), json!("alice"));
+        let (sql, binds) = conditions_to_sql(&conds, 1, Some("data'; drop table posts; --"));
+        assert_eq!(sql, "0 = 1");
+        assert!(binds.is_empty());
+    }
+
+    #[test]
+    fn conditions_to_sql_quotes_raw_column_identifiers() {
+        let mut conds = Conditions::new();
+        conds.insert("owner".into(), json!("alice"));
+        let (sql, binds) = conditions_to_sql(&conds, 3, None);
+        assert_eq!(sql, "\"owner\" = $3");
+        assert_eq!(binds, vec![json!("alice")]);
     }
 
     #[test]

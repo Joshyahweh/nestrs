@@ -102,31 +102,135 @@ impl LocalStorage {
     /// Resolve a key to an absolute path on disk. The key is
     /// appended to `root` after a single normalization step (no
     /// `..` traversal allowed — `..` is rejected as a `BadRequest`).
+    /// Existing symlinks are resolved and must stay inside `root`,
+    /// including dangling links (those are rejected rather than
+    /// followed into a create outside the root).
     fn resolve(&self, key: &str) -> Result<PathBuf, StorageError> {
-        let normalized = normalize_key(key);
-        let path = self.config.root.join(&normalized);
-        // Reject `..` segments that would escape the root.
-        for component in path.components() {
-            if matches!(component, std::path::Component::ParentDir) {
-                return Err(StorageError::BadRequest(format!(
-                    "key `{key}` contains `..`"
-                )));
-            }
-        }
+        let normalized = relative_key(key)?;
+        let path = if normalized.as_os_str().is_empty() {
+            self.config.root.clone()
+        } else {
+            self.config.root.join(&normalized)
+        };
+        ensure_contained(&self.config.root, &path)?;
         Ok(path)
     }
 }
 
-/// Strip a leading `/` and replace any remaining `/` with the
-/// platform separator. Keys are slash-delimited, like S3.
-fn normalize_key(key: &str) -> PathBuf {
-    let trimmed = key.trim_start_matches('/');
-    let parts: Vec<&str> = trimmed.split('/').filter(|p| !p.is_empty()).collect();
-    let mut path = PathBuf::new();
-    for p in parts {
-        path.push(p);
+/// Slash-delimited object key → relative path. Rejects traversal,
+/// absolute segments, NUL, and Windows prefix/separator tricks
+/// (`\`, `:`) so `list`/`get`/`put` cannot leave `root`.
+fn relative_key(key: &str) -> Result<PathBuf, StorageError> {
+    if key.contains('\0') || key.contains('\\') || key.contains(':') {
+        return Err(StorageError::BadRequest(
+            "key contains a forbidden character".into(),
+        ));
     }
-    path
+    let trimmed = key.trim_start_matches('/');
+    let mut path = PathBuf::new();
+    if trimmed.is_empty() {
+        return Ok(path);
+    }
+    for seg in trimmed.split('/') {
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            return Err(StorageError::BadRequest("key contains `..`".into()));
+        }
+        path.push(seg);
+        if !matches!(
+            path.components().next_back(),
+            Some(std::path::Component::Normal(_))
+        ) {
+            return Err(StorageError::BadRequest(
+                "key contains an unsafe path segment".into(),
+            ));
+        }
+    }
+    Ok(path)
+}
+
+/// Walk `candidate` from `root`. Every existing symlink (including a
+/// dangling one) must canonicalize to a path still inside `root`.
+/// A missing suffix is allowed — callers create it, and no earlier
+/// component was a link that left the root.
+fn ensure_contained(root: &Path, candidate: &Path) -> Result<(), StorageError> {
+    let canon_root = std::fs::canonicalize(root).map_err(|e| {
+        StorageError::Misconfigured(format!("canonicalize storage root failed: {e}"))
+    })?;
+    let rel = candidate
+        .strip_prefix(root)
+        .map_err(|_| StorageError::BadRequest("key escapes storage root".into()))?;
+    let mut current = canon_root.clone();
+    for comp in rel.components() {
+        let std::path::Component::Normal(seg) = comp else {
+            return Err(StorageError::BadRequest(
+                "key contains an unsafe path segment".into(),
+            ));
+        };
+        let next = current.join(seg);
+        match std::fs::symlink_metadata(&next) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let resolved = std::fs::canonicalize(&next).map_err(|_| {
+                    StorageError::BadRequest("key escapes storage root via symlink".into())
+                })?;
+                if !resolved.starts_with(&canon_root) {
+                    return Err(StorageError::BadRequest(
+                        "key escapes storage root via symlink".into(),
+                    ));
+                }
+                current = resolved;
+            }
+            Ok(_) => current = next,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                return Err(StorageError::Transport(format!(
+                    "stat key segment failed: {e}"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Percent-encode a key for a URL path. Unreserved characters
+/// (RFC 3986) are left as-is so ordinary keys like `photos/cat.jpg`
+/// stay readable; `?`, `#`, spaces, and newlines cannot inject a
+/// query, fragment, or header.
+fn encode_key_for_url(key: &str) -> Result<String, StorageError> {
+    let rel = relative_key(key)?;
+    if rel.as_os_str().is_empty() {
+        return Err(StorageError::BadRequest("empty key".into()));
+    }
+    let mut parts = Vec::new();
+    for comp in rel.components() {
+        let std::path::Component::Normal(seg) = comp else {
+            return Err(StorageError::BadRequest(
+                "key contains an unsafe path segment".into(),
+            ));
+        };
+        let seg = seg
+            .to_str()
+            .ok_or_else(|| StorageError::BadRequest("key is not valid UTF-8".into()))?;
+        parts.push(percent_encode_segment(seg));
+    }
+    Ok(parts.join("/"))
+}
+
+fn percent_encode_segment(seg: &str) -> String {
+    let mut out = String::with_capacity(seg.len());
+    for b in seg.bytes() {
+        if matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            const HEX: &[u8; 16] = b"0123456789ABCDEF";
+            out.push('%');
+            out.push(HEX[(b >> 4) as usize] as char);
+            out.push(HEX[(b & 0x0f) as usize] as char);
+        }
+    }
+    out
 }
 
 #[async_trait]
@@ -194,7 +298,9 @@ impl Storage for LocalStorage {
     }
 
     async fn list(&self, prefix: &str) -> Result<ListResult, StorageError> {
-        let prefix_path = self.config.root.join(normalize_key(prefix));
+        // Same containment rules as get/put. `normalize`-only joining
+        // used to honour `..` and read directories outside `root`.
+        let prefix_path = self.resolve(prefix)?;
         let mut out = Vec::new();
         let mut stack = vec![prefix_path];
         while let Some(dir) = stack.pop() {
@@ -260,7 +366,11 @@ impl Storage for LocalStorage {
             .ok_or(StorageError::Misconfigured(
                 "LocalStorage presign requires public_base".into(),
             ))?;
-        let url = format!("{}/{}", base.trim_end_matches('/'), key);
+        let url = format!(
+            "{}/{}",
+            base.trim_end_matches('/'),
+            encode_key_for_url(key)?
+        );
         Ok(PresignedUrl {
             url,
             method: PresignMethod::Get,
@@ -281,7 +391,11 @@ impl Storage for LocalStorage {
             .ok_or(StorageError::Misconfigured(
                 "LocalStorage presign requires public_base".into(),
             ))?;
-        let url = format!("{}/{}", base.trim_end_matches('/'), key);
+        let url = format!(
+            "{}/{}",
+            base.trim_end_matches('/'),
+            encode_key_for_url(key)?
+        );
         Ok(PresignedUrl {
             url,
             method: PresignMethod::Put,

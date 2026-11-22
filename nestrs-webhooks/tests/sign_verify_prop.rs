@@ -8,7 +8,10 @@ fn roundtrip_random_bodies() {
     for i in 0..64u64 {
         let body = format!(r#"{{"n":{i},"msg":"hello-{i}"}}"#);
         let msg_id = format!("msg_{i}");
-        let ts = 1_700_000_000 + i as i64;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs() as i64;
         let signed = sign_standard_webhook(secret, &msg_id, ts, body.as_bytes());
         verify_standard_webhook(
             secret,
@@ -25,11 +28,15 @@ fn roundtrip_random_bodies() {
 fn rejects_tampered_body() {
     let secret = "whsec_dGVzdA==";
     let body = br#"{"ok":true}"#;
-    let signed = sign_standard_webhook(secret, "msg_x", 1_700_000_000, body);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
+    let signed = sign_standard_webhook(secret, "msg_x", ts, body);
     let err = verify_standard_webhook(
         secret,
         "msg_x",
-        "1700000000",
+        &ts.to_string(),
         &signed.signature_header,
         br#"{"ok":false}"#,
     );
@@ -39,11 +46,30 @@ fn rejects_tampered_body() {
 #[test]
 fn rejects_wrong_secret() {
     let body = br#"{"ok":true}"#;
-    let signed = sign_standard_webhook("whsec_dGVzdA==", "msg_x", 1_700_000_000, body);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
+    let signed = sign_standard_webhook("whsec_dGVzdA==", "msg_x", ts, body);
     let err = verify_standard_webhook(
         "whsec_b3RoZXI=",
         "msg_x",
-        "1700000000",
+        &ts.to_string(),
+        &signed.signature_header,
+        body,
+    );
+    assert!(err.is_err());
+}
+
+#[test]
+fn default_verifier_rejects_stale_timestamp() {
+    let body = br#"{"ok":true}"#;
+    let ts = 1_700_000_000_i64;
+    let signed = sign_standard_webhook("whsec_dGVzdA==", "msg_x", ts, body);
+    let err = verify_standard_webhook(
+        "whsec_dGVzdA==",
+        "msg_x",
+        &ts.to_string(),
         &signed.signature_header,
         body,
     );

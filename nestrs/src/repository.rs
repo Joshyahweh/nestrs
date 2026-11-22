@@ -448,6 +448,10 @@ pub struct FindManyParams {
     pub offset: Option<i64>,
     /// Raw extra `WHERE` fragment (no leading keyword), placeholders numbered
     /// from `$1`. Injected first, ANDed with the policy pushdown.
+    ///
+    /// This string is SQL text, not a value. Pass a trusted literal and put
+    /// every request-derived value in `extra_binds`. Interpolating
+    /// query parameters here is SQL injection.
     pub extra_where: Option<String>,
     /// Bind values for `extra_where`, in `$1..$k` order.
     pub extra_binds: Vec<serde_json::Value>,

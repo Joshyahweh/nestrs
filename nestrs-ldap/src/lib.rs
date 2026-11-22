@@ -19,10 +19,13 @@ pub struct LdapAuthOptions {
 /// Errors from connect/bind.
 #[derive(Debug, thiserror::Error)]
 pub enum LdapAuthError {
-    /// Username or password was empty. An empty password is not sent to the
-    /// directory: many servers treat that as an unauthenticated bind and
-    /// return success without checking a credential.
-    #[error("LDAP simple bind requires a non-empty username and password")]
+    /// Username or password was empty, or the password contained a NUL byte.
+    /// An empty password is not sent to the directory: many servers treat
+    /// that as an unauthenticated bind and return success without checking a
+    /// credential. A password that contains NUL is rejected for the same
+    /// reason: directories that truncate at the first NUL turn `"\0…"` into
+    /// that empty password.
+    #[error("LDAP simple bind requires a non-empty username and a password with no NUL byte")]
     EmptyCredentials,
     /// Underlying ldap3 error.
     #[error(transparent)]
@@ -49,11 +52,11 @@ impl LdapAuthenticator {
 
     /// Bind as `username` / `password`. `Ok(())` means the directory accepted the bind.
     ///
-    /// Empty username or password is rejected before any network call.
-    /// `username` is escaped as one RDN value (commas and other DN specials
-    /// cannot add another RDN).
+    /// Empty username or password is rejected before any network call, as is
+    /// a password containing NUL. `username` is escaped as one RDN value
+    /// (commas and other DN specials cannot add another RDN).
     pub async fn authenticate(&self, username: &str, password: &str) -> Result<(), LdapAuthError> {
-        if username.is_empty() || password.is_empty() {
+        if username.is_empty() || password.is_empty() || password.as_bytes().contains(&0) {
             return Err(LdapAuthError::EmptyCredentials);
         }
         let (conn, mut ldap) = LdapConnAsync::new(&self.options.url).await?;
@@ -151,5 +154,20 @@ mod tests {
         });
         let err = auth.authenticate("", &test_password).await.unwrap_err();
         assert!(matches!(err, LdapAuthError::EmptyCredentials));
+    }
+
+    #[tokio::test]
+    async fn rejects_nul_password_without_contacting_the_directory() {
+        let auth = LdapAuthenticator::new(LdapAuthOptions {
+            url: "ldap://127.0.0.1:1".into(),
+            bind_dn_template: "cn={username},ou=people,dc=example,dc=com".into(),
+        });
+        for password in ["\0", "\0secret", "secret\0"] {
+            let err = auth.authenticate("ada", password).await.unwrap_err();
+            assert!(
+                matches!(err, LdapAuthError::EmptyCredentials),
+                "{password:?} -> {err:?}"
+            );
+        }
     }
 }

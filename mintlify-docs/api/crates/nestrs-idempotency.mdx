@@ -21,6 +21,7 @@ Exports `IdempotencyOptions` (`TypeId`).
 | `header_name` | `String` | Default `idempotency-key` |
 | `required` | `bool` | Missing key → 400 |
 | `scope` | `Option<String>` | Prefixed into store key |
+| `max_body_bytes` | `usize` | Default 2 MiB. Over the cap → **413** |
 
 Helpers: `IdempotencyOptions::default()`, `::in_memory(ttl)`.
 
@@ -40,8 +41,8 @@ Replay header: `idempotency-replayed: true`. In-flight: **409** `IDEMPOTENCY_IN_
 
 ```rust
 async fn begin_or_get(&self, scope_key: &str)
-    -> Result<Option<IdempotencyRecord>, IdempotencyBusy>;
-async fn complete(&self, scope_key: &str, record: IdempotencyRecord);
+    -> Result<IdempotencyClaim, IdempotencyBusy>;
+async fn complete(&self, scope_key: &str, token: &str, record: IdempotencyRecord);
 ```
 
-`IdempotencyRecord { status, body, content_type }`.
+`IdempotencyClaim::Acquired { token }` is the first writer. `complete` publishes only while that token still owns the lock. `IdempotencyRecord { status, body, content_type, fingerprint }`.

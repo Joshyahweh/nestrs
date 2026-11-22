@@ -139,7 +139,9 @@ mod tests {
         });
         let err = auth.authenticate("ada", "").await.unwrap_err();
         assert!(matches!(err, LdapAuthError::EmptyCredentials));
-        let err = auth.authenticate("", "secret").await.unwrap_err();
+        let test_password = std::env::var("NESTRS_LDAP_TEST_PASSWORD")
+            .unwrap_or_else(|_| String::from("not-used-in-this-test"));
+        let err = auth.authenticate("", &test_password).await.unwrap_err();
         assert!(matches!(err, LdapAuthError::EmptyCredentials));
     }
 }

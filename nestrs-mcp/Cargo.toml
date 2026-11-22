@@ -35,7 +35,9 @@ sqlx = { version = "0.8", optional = true }
 # The `elicitation` rmcp feature is also gated behind our own `elicitation`
 # feature so users who don't need server→client questions don't pay for
 # the `url` crate.
-rmcp = { version = "3.1", default-features = false, features = [
+# 3.9 is the security floor: RUSTSEC-2026-0457 (OAuth client SSRF) is fixed in
+# 3.7, and RUSTSEC-2026-0462 (unbounded Streamable HTTP bodies) is fixed in 3.9.
+rmcp = { version = "3.9", default-features = false, features = [
     "server",
     "macros",
     "schemars",
@@ -70,7 +72,7 @@ dirs = "5"
 [dev-dependencies]
 # Integration tests that spawn the binary need the same rmcp as the binary
 # (so the test can speak the protocol to a child process).
-rmcp = { version = "3.1", default-features = false, features = [
+rmcp = { version = "3.9", default-features = false, features = [
     "server",
     "client",
     "macros",

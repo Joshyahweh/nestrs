@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **`nestrs-mcp`**: require `rmcp` >= 3.9 so the lockfile can no longer resolve
+  3.6.0. That release is RUSTSEC-2026-0457 (OAuth client SSRF: host strings
+  were checked, resolved addresses were not) and RUSTSEC-2026-0462 (Streamable
+  HTTP clients buffered response bodies with no limit). Locked at 3.11.0.
+- Lock `url` 2.5.9 (RUSTSEC-2026-0592). `Url::origin()` could overflow the
+  stack on nested `blob:` URLs; 2.5.8 was the version in the tree.
+- `cargo audit` ignores RUSTSEC-2026-0459 (`libsqlite3-sys` 0.30.1 via
+  SQLx 0.8.6). The `sqlite` feature compiles bundled SQLite, and the patched
+  crate (>= 0.39) first fits in `sqlx` 0.9.1 (`rust-version` 1.94). `sea-orm`
+  1.1 cannot follow that line; `sea-orm` 2.0 also requires Rust 1.94, above
+  the workspace MSRV of 1.89.
+
 ## [1.7.1] - 2026-11-07
 
 ### Docs

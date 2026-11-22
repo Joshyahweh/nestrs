@@ -10,6 +10,13 @@ pub struct IdempotencyRecord {
     pub status: u16,
     pub body: Vec<u8>,
     pub content_type: String,
+    /// SHA-256 fingerprint of method, target, body, and caller credentials.
+    ///
+    /// Empty on records written before fingerprinting. The middleware refuses
+    /// to replay those: a missing fingerprint is not proof the new request
+    /// matches the one that produced the body.
+    #[serde(default)]
+    pub fingerprint: String,
 }
 
 #[async_trait]
@@ -122,7 +129,6 @@ impl IdempotencyStore for RedisIdempotencyStore {
         &self,
         scope_key: &str,
     ) -> Result<Option<IdempotencyRecord>, IdempotencyBusy> {
-        use redis::AsyncCommands;
         let mut conn = self
             .client
             .get_multiplexed_async_connection()
@@ -130,25 +136,34 @@ impl IdempotencyStore for RedisIdempotencyStore {
             .map_err(|_| IdempotencyBusy)?;
         let key = format!("{}{}", self.prefix, scope_key);
         let lock_key = format!("{key}:lock");
-        let done: Option<String> = conn.get(&key).await.unwrap_or(None);
-        if let Some(raw) = done {
-            if let Ok(rec) = serde_json::from_str(&raw) {
-                return Ok(Some(rec));
-            }
-        }
-        let set: bool = redis::cmd("SET")
+        // GET then SET NX is not atomic: a peer can finish, store the
+        // response, and delete the lock between the two commands, and this
+        // caller would run the handler again. Claim-or-read in one script.
+        let reply: redis::RedisResult<(i64, String)> = redis::cmd("EVAL")
+            .arg(
+                r#"local existing = redis.call("GET", KEYS[1])
+if existing then
+  return {1, existing}
+end
+if redis.call("SET", KEYS[2], "1", "NX", "EX", ARGV[1]) then
+  return {0, ""}
+end
+return {2, ""}"#,
+            )
+            .arg(2)
+            .arg(&key)
             .arg(&lock_key)
-            .arg("1")
-            .arg("NX")
-            .arg("EX")
             .arg(self.ttl_secs)
             .query_async(&mut conn)
-            .await
-            .unwrap_or(false);
-        if !set {
-            return Err(IdempotencyBusy);
+            .await;
+        let (status, payload) = reply.map_err(|_| IdempotencyBusy)?;
+        match status {
+            0 => Ok(None),
+            1 => serde_json::from_str(&payload)
+                .map(Some)
+                .map_err(|_| IdempotencyBusy),
+            _ => Err(IdempotencyBusy),
         }
-        Ok(None)
     }
 
     async fn complete(&self, scope_key: &str, record: IdempotencyRecord) {
@@ -157,9 +172,17 @@ impl IdempotencyStore for RedisIdempotencyStore {
             let key = format!("{}{}", self.prefix, scope_key);
             let lock_key = format!("{key}:lock");
             if let Ok(raw) = serde_json::to_string(&record) {
-                let _: Result<(), _> = conn.set_ex(&key, raw, self.ttl_secs).await;
+                // Drop the lock only after the body is stored. Deleting it
+                // first, or deleting it when the write failed, lets another
+                // caller run the handler again.
+                if conn
+                    .set_ex::<_, _, ()>(&key, raw, self.ttl_secs)
+                    .await
+                    .is_ok()
+                {
+                    let _: Result<(), _> = conn.del(lock_key).await;
+                }
             }
-            let _: Result<(), _> = conn.del(lock_key).await;
         }
     }
 }
@@ -187,6 +210,7 @@ mod tests {
                     status: 201,
                     body: b"{\"ok\":true}".to_vec(),
                     content_type: "application/json".into(),
+                    fingerprint: String::new(),
                 },
             )
             .await;

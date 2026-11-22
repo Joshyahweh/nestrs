@@ -3,7 +3,7 @@ title: "Idempotency — `nestrs-idempotency`"
 description: "Idempotency-Key request deduplication with in-memory or Redis stores — NestJS @nestjs/idempotency analogue."
 ---
 
-`nestrs-idempotency` deduplicates mutating requests by `Idempotency-Key` (configurable header). First writer executes the handler and stores status + body; replays return the cached response with `idempotency-replayed: true`. In-flight collisions return **409**.
+`nestrs-idempotency` deduplicates mutating requests by `Idempotency-Key` (configurable header). The first writer executes the handler and stores status + body. A replay requires the same caller (`Authorization` and `Cookie`) and the same method, path, query, and body, and returns the cached response with `idempotency-replayed: true`. A different request with that key is **409** `IDEMPOTENCY_KEY_MISMATCH` and does not include the stored body. In-flight collisions return **409**.
 
 ## Install
 
@@ -22,7 +22,7 @@ use std::time::Duration;
 
 let opts = IdempotencyOptions {
     // InMemoryIdempotencyStore with 24h TTL by default
-    scope: Some("user:42".into()), // ALWAYS scope by principal in multi-tenant APIs
+    scope: Some("tenant:42".into()), // extra partition; credentials are always bound
     required: false,               // true → 400 when header missing
     header_name: "idempotency-key".into(),
     ..IdempotencyOptions::in_memory(Duration::from_secs(24 * 3600))
@@ -34,7 +34,7 @@ let opts = IdempotencyOptions {
 | `store` | `Arc<dyn IdempotencyStore>` — memory or Redis |
 | `header_name` | Looked up case-insensitively; also accepts `Idempotency-Key` |
 | `required` | Reject requests without a key |
-| `scope` | Prefixed to the key (`{scope}:{key}`) |
+| `scope` | Extra prefix. The storage key also includes a hash of `Authorization` and `Cookie`. |
 
 ## Middleware
 
@@ -52,9 +52,10 @@ Or via `MiddlewareConsumer` with a thin wrapper that holds the `Arc<IdempotencyO
 ### Behavior
 
 1. **No key** → pass through (or 400 if `required`)
-2. **Completed key** → replay body/status + `idempotency-replayed: true`
-3. **In flight** → **409** `{ "errorCode": "IDEMPOTENCY_IN_FLIGHT" }`
-4. **First writer** → run handler, then `complete` with status/body/content-type
+2. **Same caller, same request** → replay body/status + `idempotency-replayed: true`
+3. **Same key, different method, path, query, or body** → **409** `{ "errorCode": "IDEMPOTENCY_KEY_MISMATCH" }` (stored body withheld)
+4. **In flight** → **409** `{ "errorCode": "IDEMPOTENCY_IN_FLIGHT" }`
+5. **First writer** → run handler, then `complete` with status/body/content-type and a request fingerprint
 
 ## Store trait
 
@@ -74,8 +75,9 @@ Exactly one concurrent `begin_or_get` wins (`Ok(None)`); others get `Idempotency
 
 ## Security
 
-- Scope by authenticated user/tenant — never share a global key namespace.
-- Prefer Redis TTL in multi-instance deploys.
+- The middleware binds the key to `Authorization` and `Cookie`. `scope` is an extra tenant or route partition.
+- Prefer Redis TTL in multi-instance deploys. Redis claim-or-read is a single `EVAL`.
+- Upgrading changes the storage key, so an in-flight retry from an older build runs the handler once instead of replaying the old body.
 - Details: [security notes](/guides/reliability-security#idempotency-nestrs-idempotency).
 
 ## See also

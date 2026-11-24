@@ -450,3 +450,42 @@ async fn mcp_mask_walks_array_of_objects_in_tool_output() {
         );
     }
 }
+
+#[tokio::test]
+async fn mcp_mask_withholds_json_text_the_parser_rejects() {
+    // Trailing bytes fail `from_str`. Returning the original text skipped
+    // field stripping and left `body` in the tool result.
+    let ability = ability_with_post_fields();
+    let mut response: CallToolResponse = CallToolResult::success(vec![ContentBlock::text(
+        r#"{"type":"Post","id":1,"title":"hi","body":"secret"}x"#,
+    )])
+    .into();
+    mask_response(&mut response, &ability);
+    let text = match &response {
+        CallToolResponse::Complete(r) => match r.content.first() {
+            Some(ContentBlock::Text(t)) => t.text.clone(),
+            other => panic!("expected text, got {other:?}"),
+        },
+        other => panic!("expected Complete, got {other:?}"),
+    };
+    assert!(
+        !text.contains("secret"),
+        "unparseable JSON text must be withheld, got {text}"
+    );
+    assert!(text.is_empty(), "got {text}");
+}
+
+#[tokio::test]
+async fn mcp_mask_leaves_prose_tool_text() {
+    let ability = ability_with_post_fields();
+    let mut response: CallToolResponse =
+        CallToolResult::success(vec![ContentBlock::text("body is a word in prose")]).into();
+    mask_response(&mut response, &ability);
+    match &response {
+        CallToolResponse::Complete(r) => match r.content.first() {
+            Some(ContentBlock::Text(t)) => assert_eq!(t.text, "body is a word in prose"),
+            other => panic!("expected text, got {other:?}"),
+        },
+        other => panic!("expected Complete, got {other:?}"),
+    }
+}

@@ -95,6 +95,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # stable
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Rustfmt
@@ -134,6 +135,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # stable
+        with:
+          toolchain: stable
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked

@@ -9,6 +9,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- Lock `cookie` 0.18.3 (RUSTSEC-2026-0594). Private-cookie nonces drawn from
+  `rand::thread_rng()` can repeat after `fork()` and break AES-GCM sealing;
+  0.18.2 was the version in the tree. `tower-cookies` 0.10 allows `^0.18`, and
+  0.18.3 sets `rust-version` 1.56.
+- **`nestrs` response masking**: an object the principal cannot `read` kept every array, so `emails`, session tokens, and untyped objects nested in a denied list were returned intact. Arrays stay only when they hold a nested subject. Scalar elements and scalar fields of an untyped object in those arrays are removed. A scalar array on the denied object is removed. A grant that names a scalar array still returns it.
+- **`nestrs-mcp`**: a tool text block that looked like a JSON object or array but that `serde_json` could not parse (trailing bytes, or nesting past the depth limit) was returned with its fields intact. That text is withheld. Prose that does not start with `{` or `[` is unchanged.
 - **`nestrs` authorization**: `Action::matches` no longer treats a narrower grant as `Manage`. `#[check_policies("manage:…")]` and `can(&Action::Manage, …)` require a `Manage` grant. `PoliciesGuard` evaluates conditions against the route subject and the verified principal, so a grant on `"User"` cannot satisfy another subject's conditions. `AbilityAuthz::allows_row` selects the grant from the caller-supplied subject and ignores a forged `attributes` object. The stored `type` column stays visible to conditions and predicates.
 - **`nestrs` response masking**: a JSON body whose size equalled `MaskingConfig::max_body_bytes` was returned with every field intact. Bodies that fit in the cap are masked. A body over the cap is withheld (empty) instead of being returned unmasked.
 - **`nestrs` response masking**: an object whose `"type"` matched no `read` grant was returned intact, because `allowed_fields` is `None` both when no rule matches and when a grant has no field list. A typed object the principal cannot `read` now keeps only `"type"`. A matching grant with no field list still returns every field. Objects with no `"type"` marker are unchanged.

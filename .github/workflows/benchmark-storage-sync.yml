@@ -71,7 +71,7 @@ jobs:
 
       - name: Setup gcloud SDK
         if: inputs.provider == 'gcs'
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Sync reports to GCS
         if: inputs.provider == 'gcs'

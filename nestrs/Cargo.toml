@@ -256,7 +256,7 @@ nestrs-oauth2 = { version = "1.7.1", path = "../nestrs-oauth2", optional = true,
 async-graphql = "=7.0.18"
 flate2 = "1"
 tower = { version = "0.5", features = ["util"] }
-serial_test = "3"
+serial_test = "4"
 criterion = { version = "0.5", features = ["async_tokio"] }
 futures-util = "0.3"
 # Test-only tokio features (paused clock for timeout tests). Merges with the

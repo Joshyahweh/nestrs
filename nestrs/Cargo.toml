@@ -264,7 +264,7 @@ futures-util = "0.3"
 tokio = { workspace = true, features = ["test-util"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "std", "rand_core"] }
 ed25519 = { version = "2", features = ["pkcs8", "pem"] }
-rand = "0.8"
+rand = "0.10"
 pkcs8 = { version = "0.10", features = ["pem"] }
 chrono = "0.4"
 http-body-util = "0.1"

@@ -29,8 +29,12 @@ fn test_keys() -> &'static TestKeys {
     static KEYS: OnceLock<TestKeys> = OnceLock::new();
     KEYS.get_or_init(|| {
         use pkcs8::{EncodePrivateKey, LineEnding};
-        let mut csprng = rand::rngs::OsRng;
-        let kp = ed25519_dalek::SigningKey::generate(&mut csprng);
+        use rand::Rng as _;
+        // `SigningKey::generate` needs rand_core 0.6. rand 0.10's OS RNG is
+        // `SysRng`; filling 32 bytes matches what `generate` does.
+        let mut secret = [0u8; 32];
+        rand::rand_core::UnwrapErr(rand::rngs::SysRng).fill_bytes(&mut secret);
+        let kp = ed25519_dalek::SigningKey::from_bytes(&secret);
         let private_pem = kp.to_pkcs8_pem(LineEnding::LF).expect("encode private pem");
         let public_pem = build_ed25519_public_pem(kp.verifying_key().to_bytes());
         let encoding = EncodingKey::from_ed_pem(private_pem.as_bytes()).expect("encoding key");

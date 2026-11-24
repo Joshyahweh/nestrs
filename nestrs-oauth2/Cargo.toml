@@ -23,7 +23,7 @@ async-trait = "0.1"
 thiserror = "1"
 tracing = "0.1"
 base64 = "0.22"
-rand = "0.8"
+rand = "0.10"
 arc-swap = "1"
 parking_lot = "0.12"
 url = "2"
@@ -43,7 +43,7 @@ ed25519-dalek = { version = "2", features = ["pem"] }
 pkcs8 = { version = "0.10", features = ["pem"] }
 josekit = "0.10"
 sha2 = "0.10"
-rand = "0.8"
+rand = "0.10"
 
 [features]
 default = []

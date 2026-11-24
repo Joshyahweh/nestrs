@@ -308,7 +308,7 @@ async fn masking_drops_scalar_payloads_inside_an_unreadable_subject() {
     ] {
         assert!(
             !rendered.contains(secret),
-            "{secret} leaked from an unreadable subject, got {v}"
+            "sensitive value leaked from an unreadable subject"
         );
     }
     assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("User"));

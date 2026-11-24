@@ -217,7 +217,11 @@ pub fn install_tx_slot_in_scope(slot: Arc<TransactionSlot>) {
 /// hide the diagnostic the caller is supposed to read.
 ///
 /// The walker is the same `mask_value` HTTP/WS/GraphQL use, so the
-/// "what gets stripped" rules are identical across transports.
+/// "what gets stripped" rules are identical across transports. A text
+/// block that looks like a JSON object or array but that `serde_json`
+/// cannot parse is cleared. Returning those bytes skipped field
+/// stripping, including documents nested past the parser depth limit.
+/// Prose that does not start with `{` or `[` is left as the tool wrote it.
 pub fn mask_response(resp: &mut CallToolResponse, ability: &Ability) {
     if let CallToolResponse::Complete(result) = resp {
         // InputRequired / Task variants are routing payloads, not
@@ -236,16 +240,41 @@ fn mask_result(result: &mut CallToolResult, ability: &Ability) {
     }
     for block in &mut result.content {
         if let ContentBlock::Text(text) = block {
-            if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text.text) {
-                nestrs::mask_value(&mut value, ability);
-                if let Ok(serialized) = serde_json::to_string(&value) {
-                    text.text = serialized;
-                }
-            }
+            mask_text_payload(&mut text.text, ability);
         }
     }
     if let Some(value) = result.structured_content.as_mut() {
         nestrs::mask_value(value, ability);
+    }
+}
+
+/// Mask a tool text block when it is a JSON object or array.
+///
+/// `serde_json` rejects trailing bytes and nesting past its depth limit.
+/// Those payloads are still JSON to a client with a looser parser, so
+/// leaving the original text in place skips field stripping. Prose and
+/// JSON primitives are not objects with fields; they stay.
+fn mask_text_payload(text: &mut String, ability: &Ability) {
+    let source = text.trim_start_matches('\u{feff}');
+    let looks_like_json = matches!(source.trim_start().as_bytes().first(), Some(b'{' | b'['));
+    if !looks_like_json {
+        return;
+    }
+    match serde_json::from_str::<serde_json::Value>(source) {
+        Ok(mut value) => {
+            nestrs::mask_value(&mut value, ability);
+            match serde_json::to_string(&value) {
+                Ok(serialized) => *text = serialized,
+                Err(_) => text.clear(),
+            }
+        }
+        Err(_) => {
+            tracing::warn!(
+                target: "nestrs_mcp::masking",
+                "tool text looks like JSON this parser rejects; withholding it instead of skipping masking"
+            );
+            text.clear();
+        }
     }
 }
 

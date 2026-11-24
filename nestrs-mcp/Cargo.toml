@@ -67,7 +67,7 @@ toml = "0.8"
 axum = { workspace = true }
 # Cross-platform home-dir resolution for the `init`/`setup` wizard
 # (e.g. `~/.cursor/mcp.json` on Unix, `%USERPROFILE%\.cursor\mcp.json` on Windows).
-dirs = "5"
+dirs = "7"
 
 [dev-dependencies]
 # Integration tests that spawn the binary need the same rmcp as the binary

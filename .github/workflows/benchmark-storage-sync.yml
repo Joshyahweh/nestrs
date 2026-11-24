@@ -71,7 +71,7 @@ jobs:
 
       - name: Setup gcloud SDK
         if: inputs.provider == 'gcs'
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Sync reports to GCS
         if: inputs.provider == 'gcs'
@@ -82,7 +82,7 @@ jobs:
 
       - name: Azure login
         if: inputs.provider == 'azure'
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}

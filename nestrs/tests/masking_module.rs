@@ -271,6 +271,102 @@ async fn masking_walks_items_inside_an_unreadable_list_wrapper() {
 }
 
 #[tokio::test]
+async fn masking_drops_scalar_payloads_inside_an_unreadable_subject() {
+    // Keeping every array on a denied object returned emails, session
+    // tokens, and untyped blobs. Arrays stay only when they hold a subject
+    // the walk can field-mask. A readable Post nested in that array still
+    // loses `body`.
+    let ability = ability_with_post_fields();
+    let resp = json_response(
+        StatusCode::OK,
+        json!({
+            "type": "User",
+            "ssn": "123-45-6789",
+            "emails": ["ada@example.com", "ada@secret.test"],
+            "sessions": [{ "token": "session-secret" }],
+            "items": [
+                "loose-secret",
+                { "type": "Post", "id": 1, "title": "a", "body": "post-secret" },
+                { "note": "untyped-secret", "nested": { "type": "Post", "id": 2, "title": "b", "body": "nested-secret" } },
+                [["nested-array-secret"]]
+            ]
+        }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let v = response_json(masked).await;
+    let rendered = v.to_string();
+    for secret in [
+        "123-45-6789",
+        "ada@example.com",
+        "ada@secret.test",
+        "session-secret",
+        "loose-secret",
+        "post-secret",
+        "untyped-secret",
+        "nested-secret",
+        "nested-array-secret",
+    ] {
+        assert!(
+            !rendered.contains(secret),
+            "sensitive value leaked from an unreadable subject"
+        );
+    }
+    assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("User"));
+    assert!(
+        v.get("emails").is_none(),
+        "scalar arrays are dropped, got {v}"
+    );
+    assert!(v.get("ssn").is_none(), "scalar fields are dropped, got {v}");
+    let items = v
+        .get("items")
+        .and_then(|value| value.as_array())
+        .expect("items that hold a subject stay");
+    let post = items
+        .iter()
+        .find(|item| item.get("title").and_then(|t| t.as_str()) == Some("a"))
+        .expect("readable nested post");
+    assert!(
+        post.get("body").is_none(),
+        "nested post is field-masked, got {post}"
+    );
+    assert_eq!(post.get("id").and_then(|i| i.as_i64()), Some(1));
+    let nested = rendered.contains("\"title\":\"b\"") || rendered.contains("\"title\": \"b\"");
+    assert!(
+        nested,
+        "a typed subject inside an untyped wrapper is still masked, got {v}"
+    );
+}
+
+#[tokio::test]
+async fn masking_keeps_scalar_arrays_the_grant_allows() {
+    let ability = Arc::new(
+        Ability::builder()
+            .can_on_fields(Action::Read, "Post", vec!["title".into(), "tags".into()])
+            .build(),
+    );
+    let resp = json_response(
+        StatusCode::OK,
+        json!({
+            "type": "Post",
+            "title": "hi",
+            "body": "secret",
+            "tags": ["public", "listed"]
+        }),
+    );
+    let masked = mask_response(resp, &ability, MaskingConfig::default()).await;
+    let v = response_json(masked).await;
+    assert!(
+        v.get("body").is_none(),
+        "body is not in the allow-list, got {v}"
+    );
+    assert_eq!(
+        v.get("tags").and_then(|t| t.as_array()).map(|a| a.len()),
+        Some(2),
+        "a scalar array named by the grant stays, got {v}"
+    );
+}
+
+#[tokio::test]
 async fn masking_still_strips_fields_when_body_is_exactly_the_cap() {
     let ability = ability_with_post_fields();
     let resp = json_response(

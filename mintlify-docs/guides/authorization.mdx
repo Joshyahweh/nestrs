@@ -481,7 +481,7 @@ What it does to a JSON response:
 
 - Looks for a `"type": "Post"` string field — the subject marker. Any JSON object (at any nesting depth, including inside arrays) carrying it is judged as that subject.
 - Asks whether the principal can `read` **that object**. Conditions and row predicates see the object's own fields. A nested `"attributes"` object is ignored, so it cannot spoof a condition. `allowed_fields` then supplies the first matching rule's field allow-list. Fields not in the list are removed; the `"type"` field itself must be allow-listed to survive.
-- When no `read` rule matches the object (no grant, a condition miss, or a predicate rejection, including a predicate with no principal in scope), every field except `"type"` is removed. `allowed_fields` returns `None` both for "no rule" and for "a grant with no field list"; only the second case leaves the object intact. An empty `Ability` therefore does not return a typed object's fields.
+- When no `read` rule matches the object (no grant, a condition miss, or a predicate rejection, including a predicate with no principal in scope), scalar fields are removed and `"type"` is kept. Arrays stay only when they hold a nested subject, so a list wrapper can still field-mask the objects inside it. Scalar elements of those arrays are removed, and an object in the array with no `"type"` loses its scalar fields. A scalar array on the denied object is removed. `allowed_fields` returns `None` both for "no rule" and for "a grant with no field list"; only the second case leaves the object intact. An empty `Ability` therefore does not return a typed object's fields.
 - Recurses into nested objects and arrays of objects, so a nested `"type": "User"` is judged on its own.
 
 What passes through unchanged:

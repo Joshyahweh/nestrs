@@ -47,7 +47,7 @@ Authorization is opt-in (`authz`, `authz-row-level` features), but once enabled 
 - No `Ability` in request scope makes `PoliciesGuard` return **403**, and makes authorized repository / `CrudService` calls return an **error**, not a fallback to unfiltered queries.
 - A row-level predicate with no `Principal` in scope returns an **error** rather than leaking rows.
 - Unauthorized reads are invisible (`Ok(None)` / empty lists); unauthorized writes never silently succeed.
-- `PolicyMaskingInterceptor` passes a body through unchanged when there is no ability on the request, the body is non-JSON, or the JSON has no `"type"` marker. A body over the 1 MiB cap, or an `application/json` body `serde_json` cannot parse, is withheld (empty). An object the principal cannot `read` — no grant, a condition miss, or a predicate rejection — keeps `"type"`, drops its other scalar fields, and still walks arrays. A nested `attributes` object cannot satisfy the condition.
+- `PolicyMaskingInterceptor` passes a body through unchanged when there is no ability on the request, the body is non-JSON, or the JSON has no `"type"` marker. A body over the 1 MiB cap, or an `application/json` body `serde_json` cannot parse, is withheld (empty). An object the principal cannot `read` — no grant, a condition miss, or a predicate rejection — keeps `"type"` and drops its other scalar fields. Arrays on that object are walked only so a nested subject can still be field-masked: scalar elements, scalar arrays, and scalar fields of an untyped object in those arrays are removed. A nested `attributes` object cannot satisfy the condition.
 
 The full model — abilities, guards, row predicates, SQL pushdown, masking — is covered in [Authorization](authorization.md).
 
@@ -66,7 +66,7 @@ The full model — abilities, guards, row predicates, SQL pushdown, masking — 
 | Production error sanitization | **On by default when the runtime environment is production** (`NESTRS_ENV`/`APP_ENV`/`RUST_ENV` ∈ {`production`, `prod`}): 5xx `message` → generic string, `errors` dropped. `enable_production_errors()` forces on; `disable_production_errors()` opts out | On (default) — opt out only behind a trusted boundary |
 | Route policies (`authz`) | Off until feature + middleware; when enabled, an **empty `Ability` denies everything** and `PoliciesGuard` fails closed (403) | Enable for non-public routes |
 | Row-level authorization (`authz-row-level`) | **Deny-closed when enabled**: missing `Ability` / `Principal` errors rather than falling back; unauthorized reads invisible, writes denied | Enable for per-user / multi-tenant data |
-| Response masking (`PolicyMaskingInterceptor`) | Off until layered. No-ability, non-JSON, and untyped JSON pass through. Over-cap and unparseable JSON bodies are withheld. A typed object the principal cannot `read` (grant, condition, or predicate) keeps `type`, drops other scalar fields, and still walks arrays | Layer for field-level visibility |
+| Response masking (`PolicyMaskingInterceptor`) | Off until layered. No-ability, non-JSON, and untyped JSON pass through. Over-cap and unparseable JSON bodies are withheld. A typed object the principal cannot `read` keeps `type`, drops other scalars, and walks arrays only to mask nested subjects (scalar array elements are removed) | Layer for field-level visibility |
 | JSON unknown keys on `#[dto]` | **Denied by default** | Use `#[dto(allow_unknown_fields)]` only when needed |
 
 ## Further reading

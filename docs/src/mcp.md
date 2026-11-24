@@ -460,7 +460,7 @@ let ctx = McpDataContext::new()
 let server = nestrs_mcp::server::NestrsMcpServer::new().with_data_context(ctx);
 ```
 
-On every `tools/call` the override: opens a **`TransactionSlot`** on the configured pool (tool bodies read it via `current_mcp_transaction()`), installs the ability + principal (`current_mcp_ability()` / `current_mcp_principal()`), dispatches the tool, post-masks the response with **`nestrs::mask_value`** (the same masking walker HTTP/WS/GraphQL use), and commits or rolls back the transaction. Tool-error results are never masked (stripping fields would hide the diagnostic). **`authz-row-level`** additionally wires the row-level predicates. See [Authorization](authorization.md) for the model itself.
+On every `tools/call` the override: opens a **`TransactionSlot`** on the configured pool (tool bodies read it via `current_mcp_transaction()`), installs the ability + principal (`current_mcp_ability()` / `current_mcp_principal()`), dispatches the tool, post-masks the response with **`nestrs::mask_value`** (the same masking walker HTTP/WS/GraphQL use). A text block that looks like a JSON object or array but that `serde_json` cannot parse is withheld. Prose is left as written. The override then commits or rolls back the transaction. Tool-error results are never masked (stripping fields would hide the diagnostic). **`authz-row-level`** additionally wires the row-level predicates. See [Authorization](authorization.md) for the model itself.
 
 ## Tool error conventions
 

@@ -19,7 +19,7 @@ use nestrs_oauth2::authorization_server::service::{AuthorizationServer, Resource
 use nestrs_oauth2::authorization_server::{AuthorizationServerConfig, AuthorizationServerStores};
 use nestrs_oauth2::{JwtVerifier, ValidationConfig};
 use pkcs8::{EncodePrivateKey, LineEnding};
-use rand::RngCore as _;
+use rand::Rng as _;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
@@ -44,10 +44,11 @@ const BAD_VERIFIER: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 // ---------- helpers ----------
 
 fn signing_key_pem() -> String {
-    // ed25519-dalek 2 has no rand-based `generate` without the
-    // `rand_core` feature — pull 32 random bytes and build from bytes.
+    // ed25519-dalek 2's `SigningKey::generate` needs rand_core 0.6, which
+    // rand 0.10 does not implement. Pull 32 OS-random bytes (the same thing
+    // `generate` does) and build the key from them.
     let mut secret = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut secret);
+    rand::rand_core::UnwrapErr(rand::rngs::SysRng).fill_bytes(&mut secret);
     ed25519_dalek::SigningKey::from_bytes(&secret)
         .to_pkcs8_pem(LineEnding::LF)
         .unwrap()

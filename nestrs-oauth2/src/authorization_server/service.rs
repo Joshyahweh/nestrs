@@ -8,7 +8,7 @@ use axum::http::request::Parts;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use rand::RngCore;
+use rand::Rng;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -917,7 +917,10 @@ fn now_epoch() -> i64 {
 
 fn random_string(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
-    rand::rngs::OsRng.fill_bytes(&mut buf);
+    // rand 0.10 replaced `rngs::OsRng` with `rngs::SysRng`, which is fallible.
+    // `UnwrapErr` restores the old `OsRng::fill_bytes` behavior: fill from the
+    // OS CSPRNG and panic if the OS RNG fails.
+    rand::rand_core::UnwrapErr(rand::rngs::SysRng).fill_bytes(&mut buf);
     URL_SAFE_NO_PAD.encode(buf)
 }
 
